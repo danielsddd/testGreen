@@ -4,16 +4,20 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { TouchableOpacity } from 'react-native';
 
 // Import screens
-import MarketplaceScreen from './screens/MarketplaceScreen';
-import PlantDetailScreen from './screens/PlantDetailScreen';
-import AddPlantScreen from './screens/AddPlantScreen';
-import ProfileScreen from './screens/ProfileScreen';
-import EditProfileScreen from './screens/EditProfileScreen';
-import MessagesScreen from './screens/MessagesScreen';
-import SellerProfileScreen from './screens/SellerProfileScreen';
+import MarketplaceScreen from '../screens/MarketplaceScreen';
+import PlantDetailScreen from '../screens/PlantDetailScreen';
+import AddPlantScreen from '../screens/AddPlantScreen';
+import ProfileScreen from '../screens/ProfileScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
+import MessagesScreen from '../screens/MessagesScreen';
+import SellerProfileScreen from '../screens/SellerProfileScreen';
 
 const Stack = createNativeStackNavigator();
 
+/**
+ * MarketplaceNavigation - Stack navigator for the marketplace feature
+ * This manages navigation between marketplace-related screens
+ */
 const MarketplaceNavigation = () => {
   return (
     <Stack.Navigator
@@ -26,7 +30,7 @@ const MarketplaceNavigation = () => {
         headerTitleStyle: {
           fontWeight: 'bold',
         },
-        headerLeft: ({ canGoBack }) =>
+        headerLeft: ({ canGoBack }) => 
           canGoBack ? (
             <TouchableOpacity onPress={() => navigation.goBack()}>
               <MaterialIcons name="arrow-back" size={24} color="#fff" style={{ marginRight: 10 }} />
@@ -39,61 +43,62 @@ const MarketplaceNavigation = () => {
         ),
       })}
     >
-      <Stack.Screen
-        name="Marketplace"
+      <Stack.Screen 
+        name="Marketplace" 
         component={MarketplaceScreen}
-        options={{
+        options={{ 
           title: 'Plant Marketplace',
         }}
       />
-
-      <Stack.Screen
-        name="PlantDetail"
+      
+      <Stack.Screen 
+        name="PlantDetail" 
         component={PlantDetailScreen}
-        options={{
+        options={{ 
           title: 'Plant Details',
-          headerShown: false, // Hide header for detail screen for full-screen image
+          headerTransparent: true,
+          headerTitle: '', // Blank title for transparent header
         }}
       />
-
-      <Stack.Screen
-        name="AddPlant"
+      
+      <Stack.Screen 
+        name="AddPlant" 
         component={AddPlantScreen}
-        options={{
+        options={{ 
           title: 'Add New Plant',
         }}
       />
-
-      <Stack.Screen
-        name="Profile"
+      
+      <Stack.Screen 
+        name="Profile" 
         component={ProfileScreen}
-        options={{
+        options={{ 
           title: 'My Profile',
           headerRight: null, // Remove profile icon in profile screen
         }}
       />
-
-      <Stack.Screen
-        name="EditProfile"
+      
+      <Stack.Screen 
+        name="EditProfile" 
         component={EditProfileScreen}
-        options={{
+        options={{ 
           title: 'Edit Profile',
-          headerRight: null, // Remove profile icon in edit profile screen
+          headerRight: null,
         }}
       />
-
-      <Stack.Screen
-        name="Messages"
+      
+      <Stack.Screen 
+        name="Messages" 
         component={MessagesScreen}
-        options={{
+        options={{ 
           title: 'Messages',
         }}
       />
-
-      <Stack.Screen
-        name="SellerProfile"
+      
+      <Stack.Screen 
+        name="SellerProfile" 
         component={SellerProfileScreen}
-        options={({ route }) => ({
+        options={({ route }) => ({ 
           title: route.params?.sellerName || 'Seller Profile',
         })}
       />

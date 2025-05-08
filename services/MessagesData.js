@@ -3,6 +3,8 @@
  * Service for handling messaging functionality with Azure Functions
  */
 
+import { addAuthHeader } from '../../utils/authUtils';
+
 // Base URL for Azure Functions
 const baseUrl = 'https://usersfunctions.azurewebsites.net/api';
 
@@ -14,15 +16,13 @@ const baseUrl = 'https://usersfunctions.azurewebsites.net/api';
  */
 export async function createChatRoom(receiver, message) {
   try {
-    const res = await fetch(`${baseUrl}/messages/createChatRoom`, {
+    const options = await addAuthHeader({
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, receiver }),
     });
-
+    
+    const res = await fetch(`${baseUrl}/messages/createChatRoom`, options);
     return await res.json();
   } catch (error) {
     console.error('Error creating chat room:', error);
@@ -42,14 +42,12 @@ export async function createChatRoom(receiver, message) {
  */
 export async function getUserConversations() {
   try {
-    const res = await fetch(`${baseUrl}/messages/getUserConversations`, {
+    const options = await addAuthHeader({
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
     });
-
+    
+    const res = await fetch(`${baseUrl}/messages/getUserConversations`, options);
     return await res.json();
   } catch (error) {
     console.error('Error fetching user conversations:', error);
@@ -71,15 +69,13 @@ export async function getUserConversations() {
  */
 export async function sendMessage(chatId, message) {
   try {
-    const res = await fetch(`${baseUrl}/messages/sendMessage`, {
+    const options = await addAuthHeader({
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chatId, message }),
     });
-
+    
+    const res = await fetch(`${baseUrl}/messages/sendMessage`, options);
     return await res.json();
   } catch (error) {
     console.error('Error sending message:', error);

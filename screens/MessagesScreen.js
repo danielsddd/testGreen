@@ -14,13 +14,14 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
 
-// Import API service
 import {
   fetchConversations,
   fetchMessages,
   sendMessage,
   startConversation
-} from '../services/marketplaceApi';
+} from '../services/marketplaceApi';  // Correct relative path with capital M
+
+
 
 // Sample data for development
 const SAMPLE_CONVERSATIONS = [

@@ -35,26 +35,28 @@ const CategoriesNav = ({ onSelectCategory, searchQuery, onSearchChange }) => {
       </View>
 
       {/* Categories */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.categoriesContainer}
-      >
-        {plantCategories.map((category) => (
-          <TouchableOpacity
-            key={category.id}
-            style={styles.categoryButton}
-            onPress={() => onSelectCategory(category.id)}
-          >
-            <MaterialCommunityIcons
-              name={category.icon}
-              size={20}
-              color="#4CAF50"
-            />
-            <Text style={styles.categoryText}>{category.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={styles.categoriesWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesContainer}
+        >
+          {plantCategories.map((category) => (
+            <TouchableOpacity
+              key={category.id}
+              style={styles.categoryButton}
+              onPress={() => onSelectCategory(category.id)}
+            >
+              <MaterialCommunityIcons
+                name={category.icon}
+                size={20}
+                color="#4CAF50"
+              />
+              <Text style={styles.categoryText}>{category.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
     </View>
   );
 };
@@ -82,8 +84,12 @@ const styles = StyleSheet.create({
     left: 15,
     top: 12,
   },
+  categoriesWrapper: {
+    alignItems: 'center',  // Centers the categories horizontally
+  },
   categoriesContainer: {
     paddingHorizontal: 5,
+    alignItems: 'center',  // Ensure the categories are centered within the ScrollView
   },
   categoryButton: {
     flexDirection: 'row',

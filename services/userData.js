@@ -1,59 +1,15 @@
 /**
  * userData.js
  * Service for handling user-related operations with Azure Functions
+ * Uses Google Sign-In authentication
  */
 
 // Base URL for Azure Functions
 const baseUrl = 'https://usersfunctions.azurewebsites.net/api';
 
 /**
- * Register a new user
- * @param {Object} userData - User registration data
- * @returns {Promise<Object>} - Registration result
- */
-export async function registerUser(userData) {
-  try {
-    const res = await fetch(`${baseUrl}/auth/register`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(userData),
-    });
-
-    return await res.json();
-  } catch (error) {
-    console.error('Error registering user:', error);
-    throw error;
-  }
-}
-
-/**
- * Login a user
- * @param {Object} userData - User login credentials
- * @returns {Promise<Object>} - Login result with user data
- */
-export async function loginUser(userData) {
-  try {
-    const res = await fetch(`${baseUrl}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify(userData),
-    });
-
-    return await res.json();
-  } catch (error) {
-    console.error('Error logging in:', error);
-    throw error;
-  }
-}
-
-/**
- * Get the current authenticated user
+ * Get the current authenticated user from the backend
+ * The Google Auth token should be stored in global.googleAuthToken after signin
  * @returns {Promise<Object>} - User data
  */
 export async function getUser() {
@@ -62,8 +18,8 @@ export async function getUser() {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${global.googleAuthToken}`
       },
-      credentials: 'include',
     });
 
     return await res.json();
@@ -90,8 +46,8 @@ export async function getUserActiveSells(id) {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${global.googleAuthToken}`
       },
-      credentials: 'include',
     });
 
     return await res.json();
@@ -117,8 +73,8 @@ export async function getUserArchivedSells() {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${global.googleAuthToken}`
       },
-      credentials: 'include',
     });
 
     return await res.json();
@@ -144,8 +100,8 @@ export async function getUserWishlist() {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${global.googleAuthToken}`
       },
-      credentials: 'include',
     });
 
     return await res.json();
@@ -187,8 +143,8 @@ export async function editUserProfile(id, data) {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${global.googleAuthToken}`
       },
-      credentials: 'include',
       body: JSON.stringify(profileData),
     });
 
@@ -210,8 +166,8 @@ export async function getUserById(id) {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${global.googleAuthToken}`
       },
-      credentials: 'include',
     });
 
     return await res.json();

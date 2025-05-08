@@ -69,6 +69,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
+    // Center the search bar container on web
+    ...Platform.select({
+      web: {
+        display: 'flex',
+        alignItems: 'center',
+      },
+    }),
   },
   searchContainer: {
     flexDirection: 'row',
@@ -76,6 +83,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
     paddingHorizontal: 8,
+    width: '50%', // 50% of the screen width
     ...Platform.select({
       ios: {
         shadowColor: '#000',
