@@ -10,18 +10,18 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 
 /**
- * Sort options component for marketplace with improved styling
+ * Compact sort options component to match web design
  */
 const SortOptions = ({ selectedOption = 'recent', onSelectOption }) => {
   const [modalVisible, setModalVisible] = useState(false);
 
   // Sort options
   const options = [
-    { id: 'recent', label: 'Most Recent', icon: 'access-time' },
-    { id: 'priceAsc', label: 'Price: Low to High', icon: 'arrow-upward' },
-    { id: 'priceDesc', label: 'Price: High to Low', icon: 'arrow-downward' },
-    { id: 'popular', label: 'Most Popular', icon: 'trending-up' },
-    { id: 'rating', label: 'Highest Rated Seller', icon: 'star-rate' },
+    { id: 'recent', label: 'New To Old', icon: 'schedule' },
+    { id: 'popular', label: 'Old to New', icon: 'history' },
+    { id: 'priceAsc', label: 'Price: Low to High', icon: 'trending-up' },
+    { id: 'priceDesc', label: 'Price: High to Low', icon: 'trending-down' },
+    { id: 'rating', label: 'Highest Rated Seller', icon: 'star' },
   ];
 
   // Find the current selected option object
@@ -40,9 +40,9 @@ const SortOptions = ({ selectedOption = 'recent', onSelectOption }) => {
         style={styles.sortButton}
         onPress={() => setModalVisible(true)}
       >
-        <MaterialIcons name="sort" size={20} color="#4CAF50" />
-        <Text style={styles.sortButtonText}>Sort: {currentOption.label}</Text>
-        <MaterialIcons name="arrow-drop-down" size={20} color="#4CAF50" />
+        <MaterialIcons name="sort" size={18} color="#4CAF50" />
+        <Text style={styles.sortButtonText}>{currentOption.label}</Text>
+        <MaterialIcons name="arrow-drop-down" size={18} color="#4CAF50" />
       </TouchableOpacity>
 
       <Modal
@@ -64,28 +64,20 @@ const SortOptions = ({ selectedOption = 'recent', onSelectOption }) => {
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={[
-                    styles.optionItem,
-                    selectedOption === item.id && styles.selectedOption
-                  ]}
+                  style={[styles.optionItem, selectedOption === item.id && styles.selectedOption]}
                   onPress={() => handleSelectOption(item)}
                 >
                   <MaterialIcons
                     name={item.icon}
-                    size={20}
+                    size={18}
                     color={selectedOption === item.id ? '#4CAF50' : '#666'}
                   />
                   <Text
-                    style={[
-                      styles.optionText,
-                      selectedOption === item.id && styles.selectedOptionText
-                    ]}
+                    style={[styles.optionText, selectedOption === item.id && styles.selectedOptionText]}
                   >
                     {item.label}
                   </Text>
-                  {selectedOption === item.id && (
-                    <MaterialIcons name="check" size={18} color="#4CAF50" />
-                  )}
+                  {selectedOption === item.id && <MaterialIcons name="check" size={16} color="#4CAF50" />}
                 </TouchableOpacity>
               )}
               contentContainerStyle={styles.optionsList}
@@ -99,26 +91,25 @@ const SortOptions = ({ selectedOption = 'recent', onSelectOption }) => {
 
 const styles = StyleSheet.create({
   container: {
-    // Set width to match the designs in the screenshot
-    width: '70%', // Give more space for sort button text
+    width: '100%', // Full width to match the layout above product list
+    marginBottom: 16, // Add some margin to the bottom to space it from products
   },
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0f9f0',
+    backgroundColor: '#f5f5f5',
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 20,
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    marginLeft: 0, // Align to the left
   },
   sortButtonText: {
     fontSize: 14,
-    color: '#4CAF50',
-    fontWeight: '500',
+    color: '#333',
     marginHorizontal: 4,
-    // Ensure text doesn't get cut off
-    flexShrink: 1,
+    flex: 1,
   },
   modalOverlay: {
     flex: 1,
@@ -128,11 +119,10 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 8,
     width: '80%',
     maxWidth: 320,
     overflow: 'hidden',
-    // Add shadow for better visibility
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -140,7 +130,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
   },
   modalTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
     padding: 16,
@@ -162,7 +152,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f9f0',
   },
   optionText: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#333',
     marginLeft: 12,
     flex: 1,

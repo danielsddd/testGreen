@@ -1,3 +1,4 @@
+// components/SearchBar.js
 import React from 'react';
 import {
   View,
@@ -9,7 +10,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 
 /**
- * SearchBar component with 50% width as requested
+ * Improved SearchBar component with better centering and styling
  */
 const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
   const handleClear = () => {
@@ -49,6 +50,7 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
           <TouchableOpacity 
             onPress={handleClear} 
             style={styles.clearButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <MaterialIcons name="clear" size={20} color="#999" />
           </TouchableOpacity>
@@ -60,7 +62,7 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
 
 const styles = StyleSheet.create({
   container: {
-    padding: 10,
+    padding: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
@@ -71,8 +73,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
-    paddingHorizontal: 10,
-    width: '50%', // Specifically set to 50% as requested
+    paddingHorizontal: 12,
+    width: '50%', // Set to 50% of parent width
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -103,7 +105,7 @@ const styles = StyleSheet.create({
     }),
   },
   clearButton: {
-    padding: 8,
+    padding: 6,
   },
 });
 

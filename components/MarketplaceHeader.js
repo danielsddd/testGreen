@@ -1,3 +1,4 @@
+// components/MarketplaceHeader.js
 import React from 'react';
 import {
   View,
@@ -11,16 +12,19 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 /**
- * Improved header component for all Marketplace screens
- * Matches the design shown in screenshots with correct styling
+ * Marketplace header component that only shows back button on non-web platforms
+ * and matches the web design better
  */
 const MarketplaceHeader = ({
   title = 'PlantMarket',
-  showBackButton = true,
+  showBackButton = true, 
   showNotifications = true,
   onNotificationsPress,
 }) => {
   const navigation = useNavigation();
+  
+  // Only show back button on native platforms, not on web
+  const shouldShowBackButton = Platform.OS !== 'web' && showBackButton;
 
   return (
     <View style={styles.background}>
@@ -30,21 +34,25 @@ const MarketplaceHeader = ({
         translucent={true}
       />
       <View style={styles.headerContent}>
-        {showBackButton && (
+        {shouldShowBackButton && (
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <MaterialIcons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
         )}
 
-        <Text style={styles.title}>{title}</Text>
+        <Text style={[styles.title, !shouldShowBackButton && styles.centeredTitle]}>
+          {title}
+        </Text>
 
         {showNotifications && (
           <TouchableOpacity
             style={styles.notificationButton}
             onPress={onNotificationsPress || (() => navigation.navigate('Messages'))}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <MaterialIcons name="notifications" size={24} color="#fff" />
             {/* Notification badge - can be conditionally shown */}
@@ -60,29 +68,31 @@ const MarketplaceHeader = ({
 
 const styles = StyleSheet.create({
   background: {
-    height: 80, // Reduced height to match the screenshot
+    height: 60, // Reduced height to match web design
     width: '100%',
-    backgroundColor: '#4CAF50', // Matched color from screenshot
+    backgroundColor: '#4CAF50',
+    zIndex: 100,
+    justifyContent: 'center',
   },
   headerContent: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingBottom: 10,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 25,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   backButton: {
     padding: 8,
-    // Ensure the back button is visible
     opacity: 1,
   },
   title: {
-    fontSize: 22, // Adjusted size to match screenshot
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
-    // Removed text shadow to match flatter design in screenshot
+    flex: 1, 
+  },
+  centeredTitle: {
+    textAlign: 'center',
   },
   notificationButton: {
     padding: 8,
