@@ -1,3 +1,4 @@
+// File: components/FilterSection.js
 import React from 'react';
 import {
   View,

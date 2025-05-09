@@ -1,3 +1,4 @@
+// File: screens/MarketplaceScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -23,6 +24,7 @@ import AzureMapView from '../components/AzureMapView';
 
 // Import services
 import { getAll } from '../services/productData';
+import { getProductsWithLocation } from '../services/azureMapsService';
 
 const MarketplaceScreen = ({ navigation }) => {
   // State
@@ -38,6 +40,7 @@ const MarketplaceScreen = ({ navigation }) => {
   const [page, setPage] = useState(1);
   const [hasMorePages, setHasMorePages] = useState(true);
   const [error, setError] = useState(null);
+  const [mapProducts, setMapProducts] = useState([]);
 
   // Load plants when the screen comes into focus
   useFocusEffect(
@@ -50,6 +53,13 @@ const MarketplaceScreen = ({ navigation }) => {
   useEffect(() => {
     applyFilters();
   }, [searchQuery, selectedCategory, priceRange, plants, sortOption]);
+
+  // Load map products if map view is active
+  useEffect(() => {
+    if (viewMode === 'map') {
+      loadMapProducts();
+    }
+  }, [viewMode, filteredPlants]);
 
   // Function to load plants from API
   const loadPlants = async (pageNum = 1, resetData = false) => {
@@ -88,6 +98,26 @@ const MarketplaceScreen = ({ navigation }) => {
       setError('Failed to load plants. Please try again.');
       setIsLoading(false);
       setIsRefreshing(false);
+    }
+  };
+
+  // Load products with location data for map view
+  const loadMapProducts = async () => {
+    try {
+      // For development, we'll just add mock coordinates to filteredPlants
+      // In production, you'd call a separate API to get products with location data
+      // const mapData = await getProductsWithLocation({
+      //   category: selectedCategory === 'All' ? null : selectedCategory,
+      //   minPrice: priceRange.min,
+      //   maxPrice: priceRange.max
+      // });
+      // setMapProducts(mapData);
+
+      // For now, just use filtered plants
+      setMapProducts(filteredPlants);
+    } catch (err) {
+      console.error('Error loading map products:', err);
+      // If map products fail to load, still show the map with whatever we have
     }
   };
 
@@ -333,7 +363,7 @@ const MarketplaceScreen = ({ navigation }) => {
       {viewMode === 'map' ? (
         // Map View
         <AzureMapView 
-          products={filteredPlants}
+          products={mapProducts.length > 0 ? mapProducts : filteredPlants}
           onSelectProduct={(productId) => {
             navigation.navigate('PlantDetail', { plantId: productId });
           }}

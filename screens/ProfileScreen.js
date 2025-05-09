@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Image,
   TouchableOpacity,
+  ScrollView,
   ActivityIndicator,
   Alert,
   FlatList,
@@ -208,7 +209,7 @@ const ProfileScreen = () => {
             renderItem={({ item }) => (
               <PlantCard plant={item} showActions={false} />
             )}
-            keyExtractor={item => item.id || item._id}
+            keyExtractor={item => item.id}
             numColumns={2}
             contentContainerStyle={styles.plantGrid}
           />
@@ -236,7 +237,7 @@ const ProfileScreen = () => {
             renderItem={({ item }) => (
               <PlantCard plant={item} showActions={false} />
             )}
-            keyExtractor={item => item.id || item._id}
+            keyExtractor={item => item.id}
             numColumns={2}
             contentContainerStyle={styles.plantGrid}
           />
@@ -260,7 +261,7 @@ const ProfileScreen = () => {
             renderItem={({ item }) => (
               <PlantCard plant={item} showActions={false} />
             )}
-            keyExtractor={item => item.id || item._id}
+            keyExtractor={item => item.id}
             numColumns={2}
             contentContainerStyle={styles.plantGrid}
           />
@@ -288,6 +289,7 @@ const ProfileScreen = () => {
             style={styles.coverImage}
           />
           
+          {/* Keep only the Edit Profile button, remove Settings */}
           <TouchableOpacity 
             style={styles.editButton}
             onPress={() => navigation.navigate('EditProfile')}
@@ -404,13 +406,7 @@ const ProfileScreen = () => {
         <MaterialIcons name="add" size={24} color="#fff" />
       </TouchableOpacity>
       
-      {/* Settings Button */}
-      <TouchableOpacity
-        style={styles.settingsButton}
-        onPress={() => navigation.navigate('Settings')}
-      >
-        <MaterialIcons name="settings" size={24} color="#333" />
-      </TouchableOpacity>
+      {/* Removed the Settings button */}
     </SafeAreaView>
   );
 };
@@ -639,23 +635,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
-  settingsButton: {
-    position: 'absolute',
-    right: 16,
-    top: 96, // Positioned below the header
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    zIndex: 10,
-  },
+  // Removed settingsButton style
 });
 
 export default ProfileScreen;

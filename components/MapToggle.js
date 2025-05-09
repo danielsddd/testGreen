@@ -1,3 +1,4 @@
+// File: components/MapToggle.js
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
