@@ -13,11 +13,15 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
-// Import components
-import PlantCard from '../components/PlantCard';
-import SearchBar from '../components/SearchBar';
-import CategoryFilter from '../components/CategoryFilter';
-import PriceRange from '../components/PriceRange';
+// Import all components from the index file
+import {
+  PlantCard,
+  SearchBar,
+  CategoryFilter,
+  PriceRange,
+  SortOptions,
+  MarketplaceHeader // Add this line
+} from '../components';
 
 // Import services
 import { getAll } from '../services/productData';
@@ -33,6 +37,7 @@ const MarketplaceScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 });
+  const [sortOption, setSortOption] = useState('recent');
   const [page, setPage] = useState(1);
   const [hasMorePages, setHasMorePages] = useState(true);
   const [error, setError] = useState(null);
@@ -49,7 +54,7 @@ const MarketplaceScreen = () => {
   // Apply filters when any filter criteria changes
   useEffect(() => {
     applyFilters();
-  }, [searchQuery, selectedCategory, priceRange, plants]);
+  }, [searchQuery, selectedCategory, priceRange, plants, sortOption]);
 
   // Function to load plants from API
   const loadPlants = async (pageNum = 1, resetData = false) => {
@@ -129,8 +134,33 @@ const MarketplaceScreen = () => {
       );
     }
     
+    // Apply sorting
+    results = sortPlants(results, sortOption);
+    
     // Update filtered plants
     setFilteredPlants(results);
+  };
+
+  // Sort plants based on selected option
+  const sortPlants = (plantsToSort, option) => {
+    switch (option) {
+      case 'recent':
+        return [...plantsToSort].sort((a, b) => {
+          const dateA = new Date(a.addedAt || a.listedDate || 0);
+          const dateB = new Date(b.addedAt || b.listedDate || 0);
+          return dateB - dateA; // Most recent first
+        });
+      case 'priceAsc':
+        return [...plantsToSort].sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
+      case 'priceDesc':
+        return [...plantsToSort].sort((a, b) => parseFloat(b.price) - parseFloat(a.price));
+      case 'popular':
+        return [...plantsToSort].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+      case 'rating':
+        return [...plantsToSort].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      default:
+        return plantsToSort;
+    }
   };
 
   // Handle search
@@ -156,6 +186,11 @@ const MarketplaceScreen = () => {
     setPriceRange({ min: range[0], max: range[1] });
   };
 
+  // Handle sort option change
+  const handleSortChange = (option) => {
+    setSortOption(option);
+  };
+
   // Handle load more
   const handleLoadMore = () => {
     if (!isLoading && hasMorePages) {
@@ -166,36 +201,6 @@ const MarketplaceScreen = () => {
   // Toggle between list and map view
   const toggleMapView = () => {
     setIsMapView(!isMapView);
-  };
-
-  // Get locations for map view
-  const getMapLocations = () => {
-    // Simple geocoding for demonstration
-    // In a real app, you would use proper geocoding via Azure Maps API
-    return filteredPlants.map(plant => {
-      // Generate approximate coordinates based on city
-      const cityMap = {
-        'Seattle': { latitude: 47.6062, longitude: -122.3321 },
-        'Portland': { latitude: 45.5051, longitude: -122.6750 },
-        'San Francisco': { latitude: 37.7749, longitude: -122.4194 },
-        'Los Angeles': { latitude: 34.0522, longitude: -118.2437 },
-        'Chicago': { latitude: 41.8781, longitude: -87.6298 },
-        'Phoenix': { latitude: 33.4484, longitude: -112.0740 },
-      };
-      
-      let location = cityMap[plant.city] || { 
-        latitude: 37.78 + Math.random() * 0.1, 
-        longitude: -122.43 + Math.random() * 0.1
-      };
-      
-      return {
-        id: plant.id || plant._id,
-        title: plant.title || plant.name,
-        price: plant.price,
-        image: plant.image || plant.imageUrl,
-        coordinate: location
-      };
-    });
   };
 
   // Render list empty component
@@ -254,16 +259,18 @@ const MarketplaceScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerText}>Marketplace</Text>
-      </View>
+      {/* Custom Header */}
+      <MarketplaceHeader 
+        showBackButton={false}
+        onNotificationsPress={() => navigation.navigate('Messages')}
+      />
 
       {/* Search Bar */}
       <SearchBar 
         value={searchQuery} 
         onChangeText={handleSearch}
         onSubmit={() => loadPlants(1, true)}
+        style={styles.searchBarContainer}
       />
       
       {/* Filter Section */}
@@ -274,12 +281,20 @@ const MarketplaceScreen = () => {
           onSelect={handleCategorySelect}
         />
         
-        {/* Price Range Filter */}
-        <View style={styles.priceRangeContainer}>
+        {/* Filter options row */}
+        <View style={styles.filterOptions}>
+          {/* Sort Options */}
+          <SortOptions 
+            selectedOption={sortOption}
+            onSelectOption={handleSortChange}
+          />
+          
+          {/* Price Range Filter */}
           <PriceRange
             onPriceChange={handlePriceRangeChange}
             initialMin={priceRange.min}
             initialMax={priceRange.max}
+            style={styles.priceRangeContainer}
           />
         </View>
       </View>
@@ -329,24 +344,26 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  header: {
-    padding: 16,
-    backgroundColor: '#4CAF50',
+  searchBarContainer: {
     alignItems: 'center',
-  },
-  headerText: {
-    fontSize: 24,
-    color: '#fff',
-    fontWeight: 'bold',
+    paddingTop: 16,
   },
   filterContainer: {
-    padding: 16,
     backgroundColor: '#fff',
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
+  filterOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
   priceRangeContainer: {
-    marginTop: 16,
+    width: '60%',
+    marginBottom: 0,
   },
   listContainer: {
     paddingHorizontal: 8,
@@ -371,6 +388,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 16,
   },
+  noResultsText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 10,
+    backgroundColor: '#4CAF50',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+  },
+  retryText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  resetButton: {
+    marginTop: 16,
+    backgroundColor: '#4CAF50',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+  },
+  resetButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
   footerContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -391,6 +436,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
 });
 

@@ -1,15 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import Slider from '@react-native-community/slider';
+import { MaterialIcons } from '@expo/vector-icons';
 
 /**
- * Price range component for filtering plants based on price
- * @param {Object} props - Component props
- * @param {number} props.minValue - Minimum possible value for the price
- * @param {number} props.maxValue - Maximum possible value for the price
- * @param {number} props.initialMin - Initial minimum value for the price
- * @param {number} props.initialMax - Initial maximum value for the price
- * @param {Function} props.onPriceChange - Function to call when price values change
+ * Price range component with reduced width (20%) as requested
  */
 const PriceRange = ({ 
   minValue = 0, 
@@ -38,59 +33,95 @@ const PriceRange = ({
 
   return (
     <View style={[styles.container, style]}>
-      <Text style={styles.title}>Price Range</Text>
+      <View style={styles.headerRow}>
+        <MaterialIcons name="attach-money" size={18} color="#4CAF50" />
+        <Text style={styles.title}>Price</Text>
+      </View>
+      
       <View style={styles.rangeRow}>
         <Text style={styles.priceValue}>${minPrice.toFixed(0)}</Text>
+        <Text style={styles.priceDash}>-</Text>
         <Text style={styles.priceValue}>${maxPrice.toFixed(0)}</Text>
       </View>
-      <Slider
-        value={minPrice}
-        minimumValue={minValue}
-        maximumValue={maxValue}
-        onValueChange={handleMinChange}
-        style={styles.slider}
-      />
-      <Slider
-        value={maxPrice}
-        minimumValue={minValue}
-        maximumValue={maxValue}
-        onValueChange={handleMaxChange}
-        style={styles.slider}
-      />
+      
+      <View style={styles.slidersContainer}>
+        <Slider
+          value={minPrice}
+          minimumValue={minValue}
+          maximumValue={maxValue}
+          onValueChange={handleMinChange}
+          style={styles.slider}
+          minimumTrackTintColor="#cce7cc"
+          maximumTrackTintColor="#e0e0e0"
+          thumbTintColor="#4CAF50"
+        />
+        
+        <Slider
+          value={maxPrice}
+          minimumValue={minValue}
+          maximumValue={maxValue}
+          onValueChange={handleMaxChange}
+          style={styles.slider}
+          minimumTrackTintColor="#4CAF50"
+          maximumTrackTintColor="#e0e0e0"
+          thumbTintColor="#4CAF50"
+        />
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    width: '30%', // Set to 80% to occupy less space
-    marginBottom: 16,
     padding: 10,
-    borderWidth: 1,
-    borderRadius: 10,
     backgroundColor: '#fff',
-    alignSelf: 'center', // Center it horizontally
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    width: '20%', // Reduced to 20% as requested
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#4CAF50',
-    marginBottom: 12,
-  },
-  priceValue: {
     fontSize: 16,
     fontWeight: '600',
     color: '#4CAF50',
-  },
-  slider: {
-    width: '100%',
-    height: 40,
-    marginTop: 8,
+    marginLeft: 4,
   },
   rangeRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  priceValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  priceDash: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginHorizontal: 8,
+  },
+  slidersContainer: {
+    marginTop: 6,
+  },
+  slider: {
+    width: '100%',
+    height: 30,
+    ...Platform.select({
+      ios: {
+        marginBottom: 0,
+      },
+      android: {
+        marginVertical: -5,
+      },
+    }),
   },
 });
 

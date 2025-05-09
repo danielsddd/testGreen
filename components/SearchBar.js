@@ -9,12 +9,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 
 /**
- * SearchBar component for the marketplace
- * @param {Object} props - Component props
- * @param {string} props.value - Current search query
- * @param {Function} props.onChangeText - Function called when text changes
- * @param {Function} props.onSubmit - Function called when search is submitted (optional)
- * @param {Object} props.style - Additional style for the container (optional)
+ * SearchBar component with 50% width as requested
  */
 const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
   const handleClear = () => {
@@ -34,7 +29,7 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
       <View style={styles.searchContainer}>
         <MaterialIcons 
           name="search" 
-          size={24} 
+          size={20} 
           color="#999" 
           style={styles.searchIcon} 
         />
@@ -69,21 +64,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
-    // Center the search bar container on web
-    ...Platform.select({
-      web: {
-        display: 'flex',
-        alignItems: 'center',
-      },
-    }),
+    alignItems: 'center', // Center the search bar
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
     borderRadius: 8,
-    paddingHorizontal: 8,
-    width: '50%', // 50% of the screen width
+    paddingHorizontal: 10,
+    width: '50%', // Specifically set to 50% as requested
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -101,7 +90,6 @@ const styles = StyleSheet.create({
   },
   searchIcon: {
     marginRight: 8,
-    marginLeft: 4,
   },
   input: {
     flex: 1,

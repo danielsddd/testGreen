@@ -16,6 +16,9 @@ import {
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
 
+// Import components
+import { MarketplaceHeader } from '../components';
+
 // Import services
 import { getSpecific, wishProduct } from '../services/productData';
 
@@ -119,23 +122,29 @@ const PlantDetailScreen = () => {
   // Loading state
   if (isLoading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Loading plant details...</Text>
-      </View>
+      <SafeAreaView style={styles.container}>
+        <MarketplaceHeader title="Plant Details" onNotificationsPress={() => navigation.navigate('Messages')} />
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.loadingText}>Loading plant details...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   // Error state
   if (error || !plant) {
     return (
-      <View style={styles.centerContainer}>
-        <MaterialIcons name="error-outline" size={48} color="#f44336" />
-        <Text style={styles.errorText}>{error || 'Plant not found'}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadPlantDetail}>
-          <Text style={styles.retryText}>Retry</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={styles.container}>
+        <MarketplaceHeader title="Plant Details" onNotificationsPress={() => navigation.navigate('Messages')} />
+        <View style={styles.centerContainer}>
+          <MaterialIcons name="error-outline" size={48} color="#f44336" />
+          <Text style={styles.errorText}>{error || 'Plant not found'}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={loadPlantDetail}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -146,6 +155,8 @@ const PlantDetailScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <MarketplaceHeader title={plant.title || plant.name} onNotificationsPress={() => navigation.navigate('Messages')} />
+      
       <ScrollView>
         {/* Plant Image Gallery */}
         <View style={styles.imageContainer}>
@@ -190,11 +201,6 @@ const PlantDetailScreen = () => {
               size={28} 
               color={isFavorite ? "#f44336" : "#fff"} 
             />
-          </TouchableOpacity>
-
-          {/* Back Button */}
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
 
           {/* Share Button */}
@@ -380,14 +386,6 @@ const styles = StyleSheet.create({
     position: 'absolute', 
     top: 20, 
     right: 20, 
-    backgroundColor: 'rgba(0, 0, 0, 0.5)', 
-    borderRadius: 50, 
-    padding: 10 
-  },
-  backButton: { 
-    position: 'absolute', 
-    top: 20, 
-    left: 20, 
     backgroundColor: 'rgba(0, 0, 0, 0.5)', 
     borderRadius: 50, 
     padding: 10 
