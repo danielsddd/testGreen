@@ -300,10 +300,13 @@ const ProfileScreen = () => {
             style={styles.coverImage}
           />
           
-          {/* Keep only the Edit Profile button, remove Settings */}
+          {/* Edit Profile button - Fixed Navigation */}
           <TouchableOpacity 
             style={styles.editButton}
-            onPress={() => navigation.navigate('EditProfile')}
+            onPress={() => {
+              console.log('Navigating to EditProfile screen');
+              navigation.navigate('EditProfile');
+            }}
           >
             <Feather name="edit-2" size={16} color="#fff" />
             <Text style={styles.editButtonText}>Edit Profile</Text>

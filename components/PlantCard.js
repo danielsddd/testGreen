@@ -22,6 +22,7 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
   const navigation = useNavigation();
   const [isFavorite, setIsFavorite] = useState(plant.isFavorite || false);
   const [isLoading, setIsLoading] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   const isListLayout = layout === 'list';
 
@@ -73,16 +74,21 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
 
   // Prepare image URL with error handling
   const getImageSource = () => {
-    let imageUrl = plant.imageUrl || plant.image || 'https://via.placeholder.com/150?text=Plant';
+    if (!imageError) {
+      let imageUrl = plant.imageUrl || plant.image || null;
+      
+      // Check if URL is valid
+      if (typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
+        return { uri: imageUrl };
+      }
+    }
     
-    // Check if URL is valid
-    if (typeof imageUrl === 'string' && imageUrl.startsWith('http')) {
-      return { uri: imageUrl };
-    } else if (typeof imageUrl === 'string' && imageUrl.startsWith('/')) {
-      // Handle relative paths
-      return { uri: `https://yourbaseurl.com${imageUrl}` };
-    } else {
-      // Fallback to default placeholder
+    // Return a local placeholder image
+    // Make sure to create this asset in your project
+    try {
+      return require('../../assets/images/plant-placeholder.png');
+    } catch(err) {
+      // Fallback to a hardcoded URL as last resort
       return { uri: 'https://via.placeholder.com/150?text=Plant' };
     }
   };
@@ -149,8 +155,10 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
           source={getImageSource()}
           style={[styles.image, isListLayout && styles.listImage]}
           resizeMode="cover"
-          defaultSource={{ uri: 'https://via.placeholder.com/50?text=Loading' }}
-          onError={() => console.log('Image failed to load for plant', plant.id || plant._id)}
+          onError={() => {
+            console.log('Image failed to load for plant', plant.id || plant._id);
+            setImageError(true);
+          }}
         />
         
         {/* Location pill */}

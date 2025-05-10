@@ -1,7 +1,9 @@
+// MarketplaceNavigation.js
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-// Fix the import paths - use './screens/' instead of '../screens/'
+// Fix import paths - use absolute or correct relative paths
+// If your screens are in a 'screens' folder at the same level as this file:
 import MarketplaceScreen from './screens/MarketplaceScreen';
 import PlantDetailScreen from './screens/PlantDetailScreen';
 import AddPlantScreen from './screens/AddPlantScreen';
@@ -16,11 +18,11 @@ const MarketplaceNavigation = () => {
   return (
     <Stack.Navigator
       initialRouteName="Marketplace"
-      screenOptions={() => ({
+      screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: '#fff' },
         animation: 'slide_from_right',
-      })}
+      }}
     >
       <Stack.Screen 
         name="Marketplace" 
