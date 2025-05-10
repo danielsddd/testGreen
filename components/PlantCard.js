@@ -5,7 +5,9 @@ import {
   Image, 
   StyleSheet, 
   TouchableOpacity,
-  Platform 
+  Platform,
+  Share,
+  Alert
 } from 'react-native';
 import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -60,6 +62,57 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
     });
   };
 
+  // Enhanced share functionality
+  const handleShare = async () => {
+    try {
+      const plantName = plant.name || plant.title || 'Amazing plant';
+      const price = formatPrice();
+      const seller = plant.sellerName || plant.seller?.name || 'a seller';
+      const category = plant.category || 'Plants';
+      const appURL = Platform.OS === 'ios' 
+        ? `greenerapp://plants/${plant.id || plant._id}` 
+        : `https://greenerapp.com/plants/${plant.id || plant._id}`;
+        
+      // Create a rich message with emojis and details
+      const message = `🌱 Check out this ${plantName} for $${price} on Greener!\n\n` +
+                     `🏷️ Category: ${category}\n` +
+                     `👤 Sold by: ${seller}\n` +
+                     `📍 Location: ${getLocationText()}\n\n` +
+                     `Download Greener to view more amazing plants!`;
+      
+      const result = await Share.share(
+        {
+          title: `Greener: ${plantName}`,
+          message: message,
+          url: appURL,
+        },
+        {
+          // Only iOS supports dialogTitle
+          dialogTitle: 'Share this plant with friends',
+          // Only Android supports these options
+          subject: `Check out this ${plantName} on Greener!`,
+          tintColor: '#4CAF50'
+        }
+      );
+      
+      if (result.action === Share.sharedAction) {
+        if (result.activityType) {
+          // Shared with activity type of result.activityType
+          console.log(`Shared via ${result.activityType}`);
+        } else {
+          // Shared
+          console.log('Shared successfully');
+        }
+      } else if (result.action === Share.dismissedAction) {
+        // Dismissed
+        console.log('Share dismissed');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not share this plant');
+      console.error('Error sharing plant:', error);
+    }
+  };
+
   // Format location display
   const getLocationText = () => {
     if (typeof plant.location === 'string') {
@@ -84,12 +137,11 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
     }
     
     // Return a local placeholder image
-    // Make sure to create this asset in your project
     try {
       return require('../../assets/images/plant-placeholder.png');
     } catch(err) {
       // Fallback to a hardcoded URL as last resort
-      return { uri: 'https://via.placeholder.com/150?text=Plant' };
+      return { uri: 'https://placehold.co/150x150/4CAF50/FFFFFF?text=Plant' };
     }
   };
 
@@ -219,13 +271,25 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
           </Text>
           
           {showActions && (
-            <TouchableOpacity 
-              style={styles.chatButton}
-              onPress={handleStartChat}
-            >
-              <MaterialIcons name="chat" size={16} color="#4CAF50" />
-              <Text style={styles.chatText}>Contact</Text>
-            </TouchableOpacity>
+            <View style={styles.actionButtons}>
+              {/* Share Button */}
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={handleShare}
+              >
+                <MaterialIcons name="share" size={16} color="#4CAF50" />
+                <Text style={styles.actionText}>Share</Text>
+              </TouchableOpacity>
+
+              {/* Contact Button */}
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={handleStartChat}
+              >
+                <MaterialIcons name="chat" size={16} color="#4CAF50" />
+                <Text style={styles.actionText}>Contact</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
       </View>
@@ -368,15 +432,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
   },
-  chatButton: {
+  actionButtons: {
+    flexDirection: 'row',
+  },
+  actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f0f9f0',
     paddingVertical: 4,
     paddingHorizontal: 8,
     borderRadius: 4,
+    marginLeft: 8,
   },
-  chatText: {
+  actionText: {
     fontSize: 12,
     color: '#4CAF50',
     marginLeft: 4,
