@@ -1,32 +1,87 @@
-import React from 'react';
+// Improved CategoryFilter component with better data handling
+// Replace relevant parts of components/CategoryFilter.js
+
+import React, { useMemo } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getCategoryFilterOptions } from '../services/categories';
 
 const { width } = Dimensions.get('window');
 
 /**
+ * Default categories with icons that will be used if none are provided
+ */
+const DEFAULT_CATEGORIES = [
+  { id: 'All', label: 'All Plants', icon: 'flower-outline' },
+  { id: 'indoor', label: 'Indoor', icon: 'home' },
+  { id: 'outdoor', label: 'Outdoor', icon: 'tree' },
+  { id: 'succulent', label: 'Succulents', icon: 'cactus' },
+  { id: 'herb', label: 'Herbs', icon: 'leaf' },
+  { id: 'tropical', label: 'Tropical', icon: 'palm-tree' },
+  { id: 'flowering', label: 'Flowering', icon: 'flower' },
+  { id: 'seeds', label: 'Seeds', icon: 'seed-outline' },
+  { id: 'accessories', label: 'Accessories', icon: 'pot-mix-outline' },
+];
+
+/**
  * Responsive plant categories filter component
- * Using unified category definitions
+ * @param {Object} props Component props
+ * @param {Array} props.categories Categories array (optional)
+ * @param {string} props.selectedCategory Currently selected category ID
+ * @param {Function} props.onSelect Callback when category is selected
+ * @param {string} props.heading Section heading (optional)
  */
 const CategoryFilter = ({
-  categories = getCategoryFilterOptions(),
-  selectedCategory = 'all',
-  onSelect
+  categories,
+  selectedCategory = 'All',
+  onSelect,
+  heading = 'Categories'
 }) => {
+  // Use provided categories or fall back to defaults
+  const categoryList = useMemo(() => {
+    // Handle cases where categories is null, undefined or not an array
+    if (!categories || !Array.isArray(categories) || categories.length === 0) {
+      return DEFAULT_CATEGORIES;
+    }
+    
+    // Ensure all categories have required properties
+    return categories.map(category => {
+      // Handle if category is just a string
+      if (typeof category === 'string') {
+        return {
+          id: category,
+          label: category,
+          icon: 'tag'
+        };
+      }
+      
+      // Ensure ID is available and unique
+      const id = category.id || category.value || category.name || category;
+      
+      // Return normalized category object
+      return {
+        id,
+        label: category.label || category.name || id,
+        icon: category.icon || 'tag'
+      };
+    });
+  }, [categories]);
+
   // Determine if button text should be shown based on screen size
   const showText = width > 500;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Categories</Text>
+      {heading ? <Text style={styles.heading}>{heading}</Text> : null}
       <View style={styles.scrollViewWrapper}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            categoryList.length < 5 && styles.centeredContent
+          ]}
         >
-          {categories.map((category) => (
+          {categoryList.map((category) => (
             <TouchableOpacity
               key={category.id}
               style={[
@@ -35,6 +90,10 @@ const CategoryFilter = ({
               ]}
               onPress={() => onSelect(category.id)}
               activeOpacity={0.7}
+              accessible={true}
+              accessibilityLabel={category.label}
+              accessibilityRole="button"
+              accessibilityState={{ selected: selectedCategory === category.id }}
             >
               <MaterialCommunityIcons
                 name={category.icon}
@@ -47,6 +106,7 @@ const CategoryFilter = ({
                     styles.categoryText,
                     selectedCategory === category.id && styles.selectedText
                   ]}
+                  numberOfLines={1}
                 >
                   {category.label}
                 </Text>
@@ -82,9 +142,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 4,
     paddingVertical: 4,
-    // Center categories if they all fit on screen
-    // This ensures they're evenly distributed
-    ...(width > 800 ? { justifyContent: 'center' } : {}),
+  },
+  centeredContent: {
+    justifyContent: 'center', // Center items if few categories
   },
   categoryButton: {
     flexDirection: 'row',

@@ -8,41 +8,37 @@ const AzureMapView = ({ products, onSelectProduct }) => {
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Function to send products data to the WebView
+
   useEffect(() => {
     if (webViewRef.current && products && products.length > 0) {
       const message = JSON.stringify({
         type: 'UPDATE_PRODUCTS',
         products,
       });
-      
-      // Add a delay to ensure the WebView is fully loaded
+
       const timer = setTimeout(() => {
         if (webViewRef.current) {
           webViewRef.current.postMessage(message);
         }
-      }, 1500); // Longer delay for more reliability
-      
+      }, 1500);
+
       return () => clearTimeout(timer);
     }
   }, [products]);
 
-  // For platforms where WebView might not be available or is problematic
   if (Platform.OS === 'web' || !products || products.length === 0) {
     return (
       <View style={styles.fallbackContainer}>
         <MaterialIcons name="map" size={48} color="#aaa" />
         <Text style={styles.fallbackText}>
-          {!products || products.length === 0 
-            ? "No plant locations available to display on map." 
+          {!products || products.length === 0
+            ? "No plant locations available to display on map."
             : "Map view is not available on this platform."}
         </Text>
       </View>
     );
   }
 
-  // Show error state
   if (isError) {
     return (
       <View style={styles.fallbackContainer}>
@@ -57,22 +53,22 @@ const AzureMapView = ({ products, onSelectProduct }) => {
     <View style={styles.container}>
       <WebView
         ref={webViewRef}
-        source={{ 
+        source={{
           html: `<!DOCTYPE html>
             <html>
             <head>
               <meta charset="utf-8" />
               <meta name="viewport" content="width=device-width, initial-scale=1.0" />
               <style>
-                body { 
-                  margin: 0; 
-                  padding: 0; 
+                body {
+                  margin: 0;
+                  padding: 0;
                   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
                 }
-                #map { 
-                  width: 100%; 
-                  height: 100%; 
-                  background-color: #f0f0f0; 
+                #map {
+                  width: 100%;
+                  height: 100%;
+                  background-color: #f0f0f0;
                   display: flex;
                   align-items: center;
                   justify-content: center;
@@ -137,38 +133,57 @@ const AzureMapView = ({ products, onSelectProduct }) => {
                 </div>
               </div>
               <script>
-                // Basic message handler
+                // Create popup content for future use
+                function createPopupContent(product) {
+                  const container = document.createElement('div');
+                  container.style.padding = '10px';
+                  container.style.maxWidth = '200px';
+
+                  const flexContainer = document.createElement('div');
+                  flexContainer.style.display = 'flex';
+                  flexContainer.style.flexDirection = 'column';
+
+                  const details = document.createElement('div');
+                  details.innerHTML = \`
+                    <div><strong>\${product.title || product.name}</strong></div>
+                    <div>Price: $\${typeof product.price === 'number' ? product.price.toFixed(2) : product.price}</div>
+                    <div>Location: \${product.location?.city || product.city || 'Unknown'}</div>
+                  \`;
+
+                  flexContainer.appendChild(details);
+                  container.appendChild(flexContainer);
+
+                  return container;
+                }
+
                 document.addEventListener('message', function(event) {
                   try {
                     const message = JSON.parse(event.data);
-                    
+
                     if (message.type === 'UPDATE_PRODUCTS') {
                       const products = message.products;
                       const plantListEl = document.getElementById('plantList');
-                      
+
                       if (products && products.length > 0) {
-                        // Update with product list
                         let html = '';
-                        
                         products.forEach(product => {
                           const title = product.title || product.name || 'Unnamed Plant';
                           const price = typeof product.price === 'number' ? product.price.toFixed(2) : product.price || '0.00';
                           const location = (product.location && product.location.city) || product.city || 'Unknown location';
                           const id = product.id || product._id || '';
-                          
+
                           html += \`<div class="plant-item" onclick="selectPlant('\${id}')">\`;
                           html += \`<div class="plant-title">\${title}</div>\`;
                           html += \`<div class="plant-price">$\${price}</div>\`;
                           html += \`<div class="plant-location">\${location}</div>\`;
                           html += \`</div>\`;
                         });
-                        
+
                         plantListEl.innerHTML = html;
                       } else {
                         plantListEl.innerHTML = '<div>No plants with location data found</div>';
                       }
-                      
-                      // Send confirmation back to React Native
+
                       window.ReactNativeWebView.postMessage(JSON.stringify({
                         type: 'PRODUCTS_RECEIVED',
                         count: products ? products.length : 0
@@ -182,16 +197,14 @@ const AzureMapView = ({ products, onSelectProduct }) => {
                     }));
                   }
                 });
-                
-                // Function to handle plant selection
+
                 function selectPlant(id) {
                   window.ReactNativeWebView.postMessage(JSON.stringify({
                     type: 'PIN_CLICKED',
                     productId: id
                   }));
                 }
-                
-                // Let React Native know the page is loaded
+
                 window.ReactNativeWebView.postMessage(JSON.stringify({
                   type: 'MAP_READY'
                 }));
@@ -203,14 +216,12 @@ const AzureMapView = ({ products, onSelectProduct }) => {
         onMessage={(event) => {
           try {
             const message = JSON.parse(event.nativeEvent.data);
-            
+
             if (message.type === 'MAP_READY') {
               setIsLoading(false);
-            }
-            else if (message.type === 'PIN_CLICKED' && onSelectProduct) {
+            } else if (message.type === 'PIN_CLICKED' && onSelectProduct) {
               onSelectProduct(message.productId);
-            }
-            else if (message.type === 'ERROR') {
+            } else if (message.type === 'ERROR') {
               console.error('Error in WebView:', message.message);
             }
           } catch (e) {
@@ -228,7 +239,7 @@ const AzureMapView = ({ products, onSelectProduct }) => {
         startInLoadingState={true}
         scalesPageToFit={true}
       />
-      
+
       {isLoading && (
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />

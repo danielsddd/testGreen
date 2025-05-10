@@ -1,3 +1,4 @@
+// screens/MessagesScreen.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -10,6 +11,7 @@ import {
   Platform,
   Image,
   ActivityIndicator,
+  Alert,
   SafeAreaView,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -24,71 +26,8 @@ import {
   fetchMessages,
   sendMessage,
   startConversation
-} from '../services/marketplaceApi';  // Correct relative path with capital M
+} from '../services/marketplaceApi';
 
-// Sample data for development
-const SAMPLE_CONVERSATIONS = [
-  {
-    id: 'conv1',
-    otherUserName: 'PlantLover123',
-    otherUserAvatar: 'https://via.placeholder.com/50?text=User1',
-    lastMessage: "Hi, is the Monstera still available?",
-    lastMessageTimestamp: new Date().toISOString(),
-    plantName: "Monstera Deliciosa",
-    plantId: "1",
-    sellerId: "seller1",
-    unreadCount: 2
-  },
-  {
-    id: 'conv2',
-    otherUserName: 'GreenThumb',
-    otherUserAvatar: 'https://via.placeholder.com/50?text=User2',
-    lastMessage: "Thanks for the quick response!",
-    lastMessageTimestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
-    plantName: "Snake Plant",
-    plantId: "2",
-    sellerId: "seller2",
-    unreadCount: 0
-  }
-];
-
-const SAMPLE_MESSAGES = {
-  'conv1': {
-    messages: [
-      {
-        id: 'msg1',
-        text: "Hi, is the Monstera still available?",
-        senderId: 'otherUser',
-        timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString() // 30 minutes ago
-      },
-      {
-        id: 'msg2',
-        text: "Yes, it's still available!",
-        senderId: 'currentUser',
-        timestamp: new Date(Date.now() - 25 * 60 * 1000).toISOString() // 25 minutes ago
-      },
-      {
-        id: 'msg3',
-        text: "Great! What's the best time to come see it?",
-        senderId: 'otherUser',
-        timestamp: new Date(Date.now() - 20 * 60 * 1000).toISOString() // 20 minutes ago
-      },
-      {
-        id: 'msg4',
-        text: "I'm available this weekend, would that work for you?",
-        senderId: 'otherUser',
-        timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString() // 15 minutes ago
-      }
-    ],
-    otherUser: {
-      id: 'seller1',
-      name: 'PlantLover123',
-      avatar: 'https://via.placeholder.com/50?text=User1'
-    }
-  }
-};
-
-// MessagesScreen component
 const MessagesScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
@@ -107,6 +46,7 @@ const MessagesScreen = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   
   // Ref for scrolling to bottom of messages
   const flatListRef = useRef(null);
@@ -122,6 +62,15 @@ const MessagesScreen = () => {
       loadMessages(selectedConversation.id);
     }
   }, [selectedConversation]);
+
+  // Effect to handle direct deep links to a seller conversation
+  useEffect(() => {
+    if (sellerId && plantId && !selectedConversation) {
+      // If this screen was opened with seller and plant info but no conversation is selected
+      // We're likely starting a new conversation or need to find an existing one
+      findExistingConversation();
+    }
+  }, [sellerId, plantId]);
   
   // Helper functions to load data
   const loadConversations = async () => {
@@ -129,18 +78,52 @@ const MessagesScreen = () => {
       setIsLoading(true);
       setError(null);
       
-      // For real app, use API:
-      // const data = await fetchConversations();
+      const data = await fetchConversations();
       
-      // For development, use sample data:
-      const data = SAMPLE_CONVERSATIONS;
-      setConversations(data);
+      if (Array.isArray(data)) {
+        setConversations(data);
+      } else if (data && Array.isArray(data.conversations)) {
+        // Handle case where API returns { conversations: [...] }
+        setConversations(data.conversations);
+      } else {
+        // Handle unexpected response format
+        console.warn('Unexpected conversation data format:', data);
+        setConversations([]);
+      }
       
       setIsLoading(false);
+      setRefreshing(false);
     } catch (err) {
+      console.error('Error fetching conversations:', err);
       setError('Failed to load conversations. Please try again later.');
       setIsLoading(false);
-      console.error('Error fetching conversations:', err);
+      setRefreshing(false);
+    }
+  };
+
+  // Find an existing conversation with this seller about this plant
+  const findExistingConversation = async () => {
+    try {
+      // First load all conversations if not already loaded
+      if (conversations.length === 0) {
+        await loadConversations();
+      }
+
+      // Try to find an existing conversation with this seller about this plant
+      const existingConversation = conversations.find(
+        conv => conv.sellerId === sellerId && conv.plantId === plantId
+      );
+
+      if (existingConversation) {
+        // If found, select it
+        setSelectedConversation(existingConversation);
+        setActiveTab('chat');
+      } else {
+        // No existing conversation found, we'll start a new one when user sends a message
+        setActiveTab('chat');
+      }
+    } catch (error) {
+      console.error('Error finding existing conversation:', error);
     }
   };
   
@@ -149,27 +132,20 @@ const MessagesScreen = () => {
       setIsLoading(true);
       setError(null);
       
-      // For real app, use API:
-      let data;
-      try {
-        // data = await fetchMessages(conversationId);
-        throw new Error('API not implemented yet'); // Remove this when API is ready
-      } catch (apiError) {
-        console.log('Using sample data for messages due to:', apiError.message);
-        // For development, use sample data:
-        data = SAMPLE_MESSAGES[conversationId] || { messages: [] };
+      const data = await fetchMessages(conversationId);
+      
+      // Handle different API response formats
+      if (data && Array.isArray(data.messages)) {
+        setMessages(data.messages);
+      } else if (Array.isArray(data)) {
+        // API returns messages array directly
+        setMessages(data);
+      } else {
+        // Unexpected format
+        console.warn('Unexpected messages data format:', data);
+        setMessages([]);
       }
       
-      // Sort messages by timestamp
-      if (data.messages && Array.isArray(data.messages)) {
-        data.messages.sort((a, b) => {
-          const timeA = new Date(a.timestamp || 0).getTime();
-          const timeB = new Date(b.timestamp || 0).getTime();
-          return timeA - timeB;
-        });
-      }
-      
-      setMessages(data.messages || []);
       setIsLoading(false);
       
       // Scroll to bottom of messages
@@ -179,9 +155,9 @@ const MessagesScreen = () => {
         }
       }, 100);
     } catch (err) {
+      console.error('Error fetching messages:', err);
       setError('Failed to load messages. Please try again later.');
       setIsLoading(false);
-      console.error('Error fetching messages:', err);
     }
   };
   
@@ -197,10 +173,10 @@ const MessagesScreen = () => {
       // Add message to state optimistically
       const tempMessage = {
         id: tempId,
-        text: newMessage,
         senderId: 'currentUser',
+        message: newMessage, // Use 'message' instead of 'text' for consistency
         timestamp: new Date().toISOString(),
-        pending: true // Mark as pending for UI indication
+        pending: true
       };
       
       // Save the message text before clearing input
@@ -217,61 +193,71 @@ const MessagesScreen = () => {
         }
       }, 100);
       
-      // For real app, use API:
-      try {
-        if (selectedConversation) {
-          // Existing conversation
-          // await sendMessage(selectedConversation.id, messageText);
-          throw new Error('API not implemented yet');
-        } else if (sellerId && plantId) {
-          // New conversation
-          // const result = await startConversation(sellerId, plantId, messageText);
-          // setSelectedConversation({
-          //   id: result.conversationId,
-          //   otherUserName: result.sellerName,
-          //   plantName: plantName
-          // });
-          // await loadConversations(); // Refresh conversations list
-          throw new Error('API not implemented yet');
-        }
-      } catch (apiError) {
-        console.log('API error (Dev mode):', apiError.message);
+      // API call
+      if (selectedConversation) {
+        // Existing conversation
+        await sendMessage(selectedConversation.id, messageText);
+      } else if (sellerId && plantId) {
+        // New conversation
+        const result = await startConversation(sellerId, plantId, messageText);
         
-        // For development, just simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // In dev mode, mark message as successful after delay
-        if (__DEV__) {
-          // Update the message to remove pending status
-          setMessages(prevMessages => 
-            prevMessages.map(msg => 
-              msg.id === tempId 
-                ? { ...msg, pending: false } 
-                : msg
-            )
-          );
+        if (result?.messageId) {
+          setSelectedConversation({
+            id: result.messageId,
+            otherUserName: result.sellerName || 'Seller',
+            plantName: plantName || 'Plant',
+            plantId: plantId,
+            sellerId: sellerId
+          });
+          
+          // Refresh conversations list after short delay
+          setTimeout(() => loadConversations(), 500);
         } else {
-          // In production, throw error to be caught by outer catch
-          throw apiError;
+          throw new Error('Failed to create conversation');
         }
+      } else {
+        throw new Error('Missing required information to send message');
       }
+      
+      // Successfully sent - update the temp message to remove pending status
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg.id === tempId 
+            ? { ...msg, pending: false } 
+            : msg
+        )
+      );
       
       setIsSending(false);
     } catch (err) {
       console.error('Error sending message:', err);
       setIsSending(false);
       
-      // Remove optimistic message on error
+      // Show error to user and keep the message in the input field
+      // so they can try sending again
+      setNewMessage(messageText);
+      
+      // Remove optimistic message
       setMessages(prevMessages => 
         prevMessages.filter(m => m.id !== tempId)
       );
       
-      // Show error to user
       Alert.alert(
         'Error',
         'Failed to send message. Please try again.',
         [{ text: 'OK' }]
       );
+    }
+  };
+  
+  const handleRefresh = () => {
+    setRefreshing(true);
+    if (activeTab === 'conversations') {
+      loadConversations();
+    } else if (selectedConversation) {
+      loadMessages(selectedConversation.id);
+    } else {
+      setRefreshing(false);
     }
   };
   
@@ -284,25 +270,35 @@ const MessagesScreen = () => {
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
     
-    const date = new Date(timestamp);
-    const now = new Date();
-    
-    // If it's today, just show the time
-    if (date.toDateString() === now.toDateString()) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      
+      // Check for invalid date
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      
+      // If it's today, just show the time
+      if (date.toDateString() === now.toDateString()) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+      
+      // If it's this year, show month and day
+      if (date.getFullYear() === now.getFullYear()) {
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      }
+      
+      // Otherwise show the full date
+      return date.toLocaleDateString([], { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch (e) {
+      console.error('Error formatting timestamp:', e);
+      return '';
     }
-    
-    // If it's this year, show month and day
-    if (date.getFullYear() === now.getFullYear()) {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    }
-    
-    // Otherwise show the full date
-    return date.toLocaleDateString([], { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
-    });
   };
   
   // Render the conversations list
@@ -341,6 +337,12 @@ const MessagesScreen = () => {
           <Text style={styles.startConversationText}>
             Start a conversation by contacting a seller from a plant listing
           </Text>
+          <TouchableOpacity 
+            style={styles.browseButton}
+            onPress={() => navigation.navigate('MarketplaceHome')}
+          >
+            <Text style={styles.browseButtonText}>Browse Plants</Text>
+          </TouchableOpacity>
         </View>
       );
     }
@@ -354,14 +356,18 @@ const MessagesScreen = () => {
             onPress={() => handleSelectConversation(item)}
           >
             <Image 
-              source={{ uri: item.otherUserAvatar }} 
+              source={{ uri: item.otherUserAvatar || 'https://via.placeholder.com/50?text=User' }} 
               style={styles.avatar}
+              onError={(e) => {
+                console.log('Error loading avatar:', e.nativeEvent.error);
+                // You could set a fallback image here if needed
+              }}
             />
             
             <View style={styles.conversationInfo}>
               <View style={styles.conversationHeader}>
                 <Text style={styles.userName} numberOfLines={1}>
-                  {item.otherUserName}
+                  {item.otherUserName || 'User'}
                 </Text>
                 <Text style={styles.timeStamp}>
                   {formatTimestamp(item.lastMessageTimestamp)}
@@ -370,7 +376,7 @@ const MessagesScreen = () => {
               
               <View style={styles.messagePreviewContainer}>
                 <Text style={styles.messagePreview} numberOfLines={1}>
-                  {item.lastMessage}
+                  {item.lastMessage || 'No messages yet'}
                 </Text>
                 {item.unreadCount > 0 && (
                   <View style={styles.unreadBadge}>
@@ -380,13 +386,18 @@ const MessagesScreen = () => {
               </View>
               
               <Text style={styles.plantName} numberOfLines={1}>
-                About: {item.plantName}
+                About: {item.plantName || 'Plant discussion'}
               </Text>
             </View>
           </TouchableOpacity>
         )}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.conversationsList}
+        keyExtractor={item => item.id || `conv-${item.otherUserName}-${item.plantId}`}
+        contentContainerStyle={[
+          styles.conversationsList,
+          conversations.length === 0 && styles.emptyList
+        ]}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
       />
     );
   };
@@ -418,13 +429,14 @@ const MessagesScreen = () => {
             style={[
               styles.messageBubble,
               isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
+              item.pending && styles.pendingMessageBubble
             ]}
           >
             <Text style={[
               styles.messageText,
               isOwnMessage ? styles.ownMessageText : styles.otherMessageText
             ]}>
-              {item.text}
+              {item.message || item.text /* Handle both formats */}
             </Text>
             <Text
               style={[
@@ -432,7 +444,7 @@ const MessagesScreen = () => {
                 isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime,
               ]}
             >
-              {formatTimestamp(item.timestamp)}
+              {item.pending ? 'Sending...' : formatTimestamp(item.timestamp)}
             </Text>
           </View>
         </View>
@@ -458,7 +470,7 @@ const MessagesScreen = () => {
               {selectedConversation?.otherUserName || 'New Message'}
             </Text>
             <Text style={styles.chatHeaderPlant} numberOfLines={1}>
-              {selectedConversation?.plantName || plantName || ''}
+              {selectedConversation?.plantName || plantName || 'Plant Discussion'}
             </Text>
           </View>
         </View>
@@ -484,8 +496,10 @@ const MessagesScreen = () => {
             ref={flatListRef}
             data={messages}
             renderItem={renderMessageItem}
-            keyExtractor={item => item.id}
+            keyExtractor={item => item.id || `msg-${item.timestamp}`}
             contentContainerStyle={styles.messagesList}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
             ListEmptyComponent={() => (
               <View style={styles.emptyChatContainer}>
                 {isNewConversation ? (
@@ -517,6 +531,7 @@ const MessagesScreen = () => {
             value={newMessage}
             onChangeText={setNewMessage}
             multiline
+            maxLength={500} // Reasonable limit
           />
           <TouchableOpacity
             style={[
@@ -539,7 +554,7 @@ const MessagesScreen = () => {
   
   return (
     <SafeAreaView style={styles.container}>
-      {/* Use MarketplaceHeader instead of custom header */}
+      {/* Use MarketplaceHeader */}
       <MarketplaceHeader
         title="Messages"
         showBackButton={true}
@@ -658,6 +673,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 32,
   },
+  browseButton: {
+    marginTop: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#4CAF50',
+    borderRadius: 4,
+  },
+  browseButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  emptyList: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   conversationsList: {
     flexGrow: 1,
   },
@@ -672,6 +703,7 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
     marginRight: 12,
+    backgroundColor: '#f0f0f0', // Placeholder color
   },
   conversationInfo: {
     flex: 1,
@@ -783,6 +815,9 @@ const styles = StyleSheet.create({
   otherMessageBubble: {
     backgroundColor: '#fff',
     borderBottomLeftRadius: 4,
+  },
+  pendingMessageBubble: {
+    opacity: 0.7,
   },
   messageText: {
     fontSize: 16,

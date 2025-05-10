@@ -4,14 +4,39 @@
  */
 
 import config from './config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MOCK_USER, MOCK_PLANTS, getMockProducts, getMockProductById } from './mockData';
 
 // AUTH TOKEN HANDLING
 let authToken = null;
 
-export const setAuthToken = (token) => {
-  authToken = token;
-  global.googleAuthToken = token; // Store it globally too
+export const setAuthToken = async (token) => {
+  try {
+    authToken = token;
+    global.googleAuthToken = token;
+    await AsyncStorage.setItem('googleAuthToken', token);
+    console.log('Auth token set successfully');
+    return true;
+  } catch (error) {
+    console.error('Error setting auth token:', error);
+    return false;
+  }
+};
+
+export const initializeAuthToken = async () => {
+  try {
+    const token = await AsyncStorage.getItem('googleAuthToken');
+    if (token) {
+      authToken = token;
+      global.googleAuthToken = token;
+      console.log('Auth token initialized from storage');
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error initializing auth token:', error);
+    return false;
+  }
 };
 
 // HELPER FUNCTIONS
@@ -34,18 +59,13 @@ const apiRequest = async (endpoint, method = 'GET', body = null) => {
       options.body = JSON.stringify(body);
     }
 
-    // Set a timeout for the request
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('Request timeout')), config.api.timeout);
     });
 
-    // Create the fetch promise
     const fetchPromise = fetch(`${config.api.baseUrl}/${endpoint}`, options);
-    
-    // Race between fetch and timeout
     const response = await Promise.race([fetchPromise, timeoutPromise]);
 
-    // Check if the request was successful
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.message || `API error: ${response.status}`);
@@ -54,11 +74,9 @@ const apiRequest = async (endpoint, method = 'GET', body = null) => {
     return await response.json();
   } catch (error) {
     console.error(`API Error (${endpoint}):`, error);
-    
-    // Check if we're in development mode
+
     if (config.isDevelopment && !config.features.useRealApi) {
       console.log('Development mode: Using mock data');
-      // Return appropriate mock data based on the endpoint
       if (endpoint.includes('products')) {
         return getMockProductData(endpoint);
       } else if (endpoint.includes('user')) {
@@ -67,12 +85,11 @@ const apiRequest = async (endpoint, method = 'GET', body = null) => {
         return { success: true, mockData: true };
       }
     }
-    
+
     throw error;
   }
 };
 
-// Get mock data based on endpoint
 const getMockProductData = (endpoint) => {
   if (endpoint.includes('specific')) {
     const id = endpoint.split('/').pop();
@@ -88,11 +105,11 @@ export const getAll = async (page = 1, category = null, search = '') => {
     if (config.isDevelopment && !config.features.useRealApi) {
       return getMockProducts(category, search);
     }
-    
+
     let endpoint = `products?page=${page}`;
     if (search) endpoint += `&search=${encodeURIComponent(search)}`;
     if (category) endpoint = `products/${encodeURIComponent(category)}?page=${page}`;
-    
+
     return await apiRequest(endpoint);
   } catch (error) {
     console.error('Error fetching products:', error);
@@ -105,7 +122,7 @@ export const getSpecific = async (id) => {
     if (config.isDevelopment && !config.features.useRealApi) {
       return getMockProductById(id);
     }
-    
+
     return await apiRequest(`products/specific/${id}`);
   } catch (error) {
     console.error(`Error fetching product ${id}:`, error);
@@ -127,7 +144,6 @@ export const wishProduct = async (id) => {
     return await apiRequest(`products/wish/${id}`);
   } catch (error) {
     console.error(`Error toggling wishlist for product ${id}:`, error);
-    // In development, simulate success
     if (config.isDevelopment) {
       return { success: true, message: 'Wishlist toggled (mock)' };
     }
@@ -160,7 +176,6 @@ export const fetchConversations = async () => {
     return await apiRequest('messages/getUserConversations');
   } catch (error) {
     console.error('Error fetching conversations:', error);
-    // Return mock conversations in development
     if (config.isDevelopment) {
       return [
         {
@@ -196,7 +211,6 @@ export const sendMessage = async (chatId, message) => {
     return await apiRequest('messages/sendMessage', 'POST', { chatId, message });
   } catch (error) {
     console.error('Error sending message:', error);
-    // In development, simulate success
     if (config.isDevelopment) {
       return { sender: 'currentUser' };
     }
@@ -209,7 +223,6 @@ export const startConversation = async (receiver, message) => {
     return await apiRequest('messages/createChatRoom', 'POST', { receiver, message });
   } catch (error) {
     console.error('Error starting conversation:', error);
-    // In development, simulate success
     if (config.isDevelopment) {
       return { messageId: 'mock-conversation-id' };
     }
@@ -219,6 +232,7 @@ export const startConversation = async (receiver, message) => {
 
 export default {
   setAuthToken,
+  initializeAuthToken,
   getAll,
   getSpecific,
   createPlant,
