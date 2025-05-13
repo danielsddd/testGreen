@@ -3,7 +3,6 @@ import logging
 from azure.cosmos import PartitionKey, exceptions
 from .db_client import get_marketplace_db_client
 
-# SEARCH_KEY: DB_INIT_CONFIG
 def ensure_marketplace_containers():
     """Ensure all required containers exist in the marketplace database."""
     database = get_marketplace_db_client()
@@ -40,3 +39,13 @@ def ensure_marketplace_containers():
             logging.info(f"Container {container_def['id']} is ready")
         except exceptions.CosmosHttpResponseError as e:
             logging.error(f"Failed to create container {container_def['id']}: {str(e)}")
+            
+def initialize_database():
+    """Initialize the marketplace database structure."""
+    try:
+        # Ensure all required containers exist
+        ensure_marketplace_containers()
+        logging.info("Marketplace database initialization complete")
+    except Exception as e:
+        logging.error(f"Failed to initialize marketplace database: {str(e)}")
+        raise

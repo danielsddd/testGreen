@@ -2,9 +2,8 @@
 import logging
 import json
 import azure.functions as func
-from ..db_client import get_container
+from ..db_client import get_container, get_main_container
 
-# SEARCH_KEY: MARKETPLACE_USER_PROFILE_CONFIG
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for marketplace user profile processed a request.')
     
@@ -20,7 +19,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             )
         
         # Access the marketplace_users container
-        container = get_container('marketplace_users')
+        container = get_container("marketplace_users")
         
         # Query for the user
         query = "SELECT * FROM c WHERE c.id = @id"
@@ -35,7 +34,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         if not users:
             # Check if the user exists in the main Users container
             try:
-                main_users_container = get_container('Users')
+                main_users_container = get_main_container("Users")
                 
                 main_query = "SELECT * FROM c WHERE c.email = @email"
                 main_params = [{"name": "@email", "value": user_id}]
@@ -103,7 +102,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         # Get the user's plant listings count
         try:
-            plants_container = get_container('marketplace_plants')
+            plants_container = get_container("marketplace_plants")
             
             count_query = "SELECT VALUE COUNT(1) FROM c WHERE c.sellerId = @sellerId"
             count_params = [{"name": "@sellerId", "value": user_id}]

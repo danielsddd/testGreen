@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// marketplace/screens/AddPlantScreen.js
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,11 +13,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
+  Picker,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import MarketplaceHeader from '../components/MarketplaceHeader';
 import { createPlant } from '../services/marketplaceApi';
@@ -24,6 +27,7 @@ import { getAddPlantCategories } from '../services/categories';
 
 const AddPlantScreen = () => {
   const navigation = useNavigation();
+  
   const [isLoading, setIsLoading] = useState(false);
   const [images, setImages] = useState([]);
   const [formData, setFormData] = useState({
@@ -33,6 +37,7 @@ const AddPlantScreen = () => {
     description: '',
     careInstructions: '',
     city: '',
+    scientificName: '', // Added scientific name field to match with Plants container
   });
 
   const [formErrors, setFormErrors] = useState({
@@ -42,6 +47,34 @@ const AddPlantScreen = () => {
     city: '',
     images: '',
   });
+
+  const [scientificNames, setScientificNames] = useState([]);
+  
+  // Load scientific names from Plants container
+  useEffect(() => {
+    loadScientificNames();
+  }, []);
+  
+  const loadScientificNames = async () => {
+    try {
+      // In a real implementation, you'd fetch this from your backend
+      // For now, we'll use a hardcoded list
+      setScientificNames([
+        '',
+        'Monstera Deliciosa',
+        'Dracaena Marginata',
+        'Ficus Lyrata',
+        'Sansevieria Trifasciata',
+        'Calathea Orbifolia',
+        'Philodendron Scandens',
+        'Aloe Vera',
+        'Echeveria Elegans',
+        'Zamioculcas Zamiifolia'
+      ]);
+    } catch (error) {
+      console.error('Error loading scientific names:', error);
+    }
+  };
 
   const categories = getAddPlantCategories();
 
@@ -142,51 +175,55 @@ const AddPlantScreen = () => {
     return isValid;
   };
 
-  // frontend/marketplace/screens/AddPlantScreen.js
+  const handleSubmit = async () => {
+    if (!validateForm()) return;
 
-// Find the handleSubmit function and update it:
+    setIsLoading(true);
 
-// SEARCH_KEY: MARKETPLACE_ADD_PLANT_API_CALL
-const handleSubmit = async () => {
-  if (!validateForm()) return;
+    try {
+      // Get the user's email from AsyncStorage
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      
+      if (!userEmail) {
+        throw new Error('User is not authenticated');
+      }
 
-  setIsLoading(true);
+      const plantData = {
+        title: formData.title,
+        price: parseFloat(formData.price),
+        category: formData.category,
+        description: formData.description,
+        city: formData.city,
+        careInstructions: formData.careInstructions,
+        scientificName: formData.scientificName, // Include scientific name for plant care info
+        image: images[0],  // Main image
+        images: images.length > 1 ? images.slice(1) : [],  // Additional images
+        sellerId: userEmail, // Use the authenticated user's email as sellerId
+      };
 
-  try {
-    const plantData = {
-      title: formData.title,
-      price: parseFloat(formData.price),
-      category: formData.category,
-      description: formData.description,
-      city: formData.city,
-      careInstructions: formData.careInstructions,
-      image: images[0],  // Main image
-      images: images.length > 1 ? images.slice(1) : [],  // Additional images
-    };
+      const result = await createPlant(plantData);
 
-    const result = await createPlant(plantData);
-
-    if (result?.productId) {
-      Alert.alert('Success', 'Your plant has been listed!', [
-        {
-          text: 'View Listing',
-          onPress: () => navigation.navigate('PlantDetail', { plantId: result.productId }),
-        },
-        {
-          text: 'Go to Marketplace',
-          onPress: () => navigation.navigate('MarketplaceHome'),
-        },
-      ]);
-    } else {
-      throw new Error('Failed to create listing');
+      if (result?.productId) {
+        Alert.alert('Success', 'Your plant has been listed!', [
+          {
+            text: 'View Listing',
+            onPress: () => navigation.navigate('PlantDetail', { plantId: result.productId }),
+          },
+          {
+            text: 'Go to Marketplace',
+            onPress: () => navigation.navigate('MarketplaceHome'),
+          },
+        ]);
+      } else {
+        throw new Error('Failed to create listing');
+      }
+    } catch (error) {
+      console.error('Error creating plant:', error);
+      Alert.alert('Error', 'Failed to create listing. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
-  } catch (error) {
-    console.error('Error creating plant:', error);
-    Alert.alert('Error', 'Failed to create listing. Please try again.');
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -237,6 +274,35 @@ const handleSubmit = async () => {
                 placeholder="What kind of plant is it?"
               />
               {formErrors.title ? <Text style={styles.errorText}>{formErrors.title}</Text> : null}
+
+              <Text style={styles.label}>Scientific Name (Optional)</Text>
+              {Platform.OS === 'ios' ? (
+                <View style={[styles.input, styles.pickerContainer]}>
+                  <Picker
+                    selectedValue={formData.scientificName}
+                    onValueChange={(value) => handleChange('scientificName', value)}
+                    style={styles.picker}
+                  >
+                    <Picker.Item label="Select scientific name (optional)" value="" />
+                    {scientificNames.map((name, index) => (
+                      name && <Picker.Item key={index} label={name} value={name} />
+                    ))}
+                  </Picker>
+                </View>
+              ) : (
+                <View style={[styles.input, styles.pickerContainer]}>
+                  <Picker
+                    selectedValue={formData.scientificName}
+                    onValueChange={(value) => handleChange('scientificName', value)}
+                    style={styles.picker}
+                  >
+                    <Picker.Item label="Select scientific name (optional)" value="" />
+                    {scientificNames.map((name, index) => (
+                      name && <Picker.Item key={index} label={name} value={name} />
+                    ))}
+                  </Picker>
+                </View>
+              )}
 
               <Text style={styles.label}>Price</Text>
               <TextInput
@@ -409,6 +475,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: '#f9f9f9',
   },
+  pickerContainer: {
+    padding: 0,
+    height: 50,
+    justifyContent: 'center',
+  },
+  picker: {
+    width: '100%',
+    height: '100%',
+  },
   inputError: {
     borderColor: '#f44336',
   },
@@ -460,4 +535,3 @@ const styles = StyleSheet.create({
 });
 
 export default AddPlantScreen;
-// This code is a React Native component for an "Add Plant" screen in a marketplace app.

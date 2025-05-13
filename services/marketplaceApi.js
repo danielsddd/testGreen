@@ -1,17 +1,25 @@
-// frontend/marketplace/services/marketplaceApi.js
+// services/marketplaceApi.js
 import config from './config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MOCK_USER, MOCK_PLANTS, getMockProducts, getMockProductById } from './mockData';
 
-// SEARCH_KEY: MARKETPLACE_API_CONFIG
+// API Base URL points to Azure Functions
 const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
 
 // HELPER FUNCTIONS
 const apiRequest = async (endpoint, method = 'GET', body = null) => {
   try {
+    // Get the auth token from AsyncStorage
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    
     const headers = {
       'Content-Type': 'application/json',
     };
+
+    // Add email to all requests for user identification
+    if (userEmail) {
+      headers['X-User-Email'] = userEmail;
+    }
 
     const options = {
       method,
@@ -40,7 +48,7 @@ const apiRequest = async (endpoint, method = 'GET', body = null) => {
 
     if (config.isDevelopment && !config.features.useRealApi) {
       console.log('Development mode: Using mock data');
-      if (endpoint.includes('marketplace/products')) {
+      if (endpoint.includes('products')) {
         return getMockProductData(endpoint);
       } else if (endpoint.includes('user')) {
         return { user: MOCK_USER };
@@ -80,7 +88,6 @@ export const getAll = async (page = 1, category = null, search = '') => {
   }
 };
 
-// SEARCH_KEY: MARKETPLACE_GET_SPECIFIC_PRODUCT
 export const getSpecific = async (id) => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
@@ -93,7 +100,7 @@ export const getSpecific = async (id) => {
     return getMockProductById(id);
   }
 };
-// SEARCH_KEY: MARKETPLACE_CREATE_PRODUCT
+
 export const createPlant = async (plantData) => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
@@ -105,14 +112,20 @@ export const createPlant = async (plantData) => {
       };
     }
 
+    // Get user email for seller attribution
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    if (userEmail) {
+      plantData.sellerId = userEmail;
+    }
+
     return await apiRequest('marketplace/products/create', 'POST', plantData);
   } catch (error) {
     console.error('Error creating plant:', error);
     throw error;
   }
 };
-// SEARCH_KEY: MARKETPLACE_WISH_PRODUCT
-export const wishProduct = async (id, userId = null) => {
+
+export const wishProduct = async (id) => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
       // Return mock response
@@ -122,6 +135,11 @@ export const wishProduct = async (id, userId = null) => {
         message: 'Wishlist toggled (mock)' 
       };
     }
+    
+    // Get user email for identification
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    const body = { userId: userEmail };
+    
     return await apiRequest(`marketplace/products/wish/${id}`, 'POST', body);
   } catch (error) {
     console.error(`Error toggling wishlist for product ${id}:`, error);
@@ -132,8 +150,7 @@ export const wishProduct = async (id, userId = null) => {
   }
 };
 
-// SEARCH_KEY: MARKETPLACE_CONVERSATIONS_API
-export const fetchConversations = async (email) => {
+export const fetchConversations = async () => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
       return [
@@ -162,7 +179,10 @@ export const fetchConversations = async (email) => {
       ];
     }
 
-    return await apiRequest(`marketplace/messages/getUserConversations?userId=${encodeURIComponent(email)}`);
+    // Get user email for identification
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    
+    return await apiRequest(`marketplace/messages/getUserConversations?userId=${encodeURIComponent(userEmail)}`);
   } catch (error) {
     console.error('Error fetching conversations:', error);
     if (config.isDevelopment) {
@@ -195,39 +215,43 @@ export const fetchConversations = async (email) => {
   }
 };
 
-// SEARCH_KEY: MARKETPLACE_SEND_MESSAGE_API
-export const sendMessage = async (chatId, message, senderEmail) => {
+export const sendMessage = async (chatId, message) => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
-      return { sender: senderEmail };
+      return { success: true };
     }
 
+    // Get user email for identification
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    
     return await apiRequest('marketplace/messages/sendMessage', 'POST', { 
       chatId, 
       message, 
-      senderId: senderEmail 
+      senderId: userEmail 
     });
   } catch (error) {
     console.error('Error sending message:', error);
     if (config.isDevelopment) {
-      return { sender: senderEmail };
+      return { success: true };
     }
     throw error;
   }
 };
 
-// SEARCH_KEY: MARKETPLACE_START_CONVERSATION_API
-export const startConversation = async (receiver, plantId, message, senderEmail) => {
+export const startConversation = async (receiver, plantId, message) => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
       return { messageId: 'mock-conversation-id' };
     }
 
+    // Get user email for identification
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    
     return await apiRequest('marketplace/messages/createChatRoom', 'POST', { 
       receiver, 
       plantId, 
       message,
-      sender: senderEmail
+      sender: userEmail
     });
   } catch (error) {
     console.error('Error starting conversation:', error);
@@ -238,10 +262,11 @@ export const startConversation = async (receiver, plantId, message, senderEmail)
   }
 };
 
-// SEARCH_KEY: MARKETPLACE_GET_MESSAGES_API
-export const fetchMessages = async (conversationId, userEmail) => {
+export const fetchMessages = async (conversationId) => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
+      // Return mock messages
+      const userEmail = await AsyncStorage.getItem('userEmail') || 'default@example.com';
       return {
         messages: [
           {
@@ -272,21 +297,28 @@ export const fetchMessages = async (conversationId, userEmail) => {
       };
     }
 
+    // Get user email for identification
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    
     return await apiRequest(`marketplace/messages/getMessages/${conversationId}?userId=${encodeURIComponent(userEmail)}`);
   } catch (error) {
     console.error('Error fetching messages:', error);
     return { messages: [] };
   }
 };
-// SEARCH_KEY: MARKETPLACE_USER_PROFILE_API
-export const fetchUserProfile = async (userId) => {
+
+export const fetchUserProfile = async (userId = null) => {
   try {
     if (config.isDevelopment && !config.features.useRealApi) {
       return { user: MOCK_USER };
     }
 
-    const user = await apiRequest(`marketplace/users/${encodeURIComponent(userId)}`);
-    return { user };
+    // If no userId provided, use current user
+    if (!userId) {
+      userId = await AsyncStorage.getItem('userEmail');
+    }
+
+    return await apiRequest(`marketplace/users/${encodeURIComponent(userId)}`);
   } catch (error) {
     console.error('Error fetching user profile:', error);
     return { user: MOCK_USER };
@@ -303,6 +335,5 @@ export default {
   sendMessage,
   startConversation,
   fetchMessages,
-  fetchUserProfile,
-  // Other API methods will be added in later steps
-}
+  fetchUserProfile
+};

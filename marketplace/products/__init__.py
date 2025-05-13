@@ -5,7 +5,6 @@ import azure.functions as func
 from ..db_client import get_container
 from datetime import datetime
 
-# SEARCH_KEY: MARKETPLACE_PRODUCTS_CONFIG
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for marketplace products processed a request.')
     
@@ -19,7 +18,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         page_size = int(req.params.get('pageSize', 20))
         
         # Access the marketplace_plants container
-        container = get_container('marketplace_plants')
+        container = get_container("marketplace_plants")
         
         # Build the query
         query_parts = ["SELECT * FROM c WHERE 1=1"]

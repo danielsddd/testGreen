@@ -1,4 +1,4 @@
-// frontend/marketplace/services/config.js
+// marketplace/services/config.js
 import { Platform } from 'react-native';
 
 // SEARCH_KEY: MARKETPLACE_CONFIG

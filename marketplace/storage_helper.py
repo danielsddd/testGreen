@@ -5,7 +5,6 @@ import base64
 import uuid
 from azure.storage.blob import BlobServiceClient, ContentSettings
 
-# SEARCH_KEY: STORAGE_HELPER_CONFIG
 def get_storage_client():
     """Get the Azure Blob Storage client for marketplace images."""
     try:
@@ -23,7 +22,7 @@ def upload_image(image_data, content_type="image/jpeg"):
         client = get_storage_client()
         
         # Get or create container
-        container_name = "marketplace-images"
+        container_name = os.environ.get("STORAGE_CONTAINER_PLANTS", "marketplace-plants")
         try:
             container_client = client.get_container_client(container_name)
             if not container_client.exists():
