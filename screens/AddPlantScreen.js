@@ -142,47 +142,51 @@ const AddPlantScreen = () => {
     return isValid;
   };
 
-  const handleSubmit = async () => {
-    if (!validateForm()) return;
+  // frontend/marketplace/screens/AddPlantScreen.js
 
-    setIsLoading(true);
+// Find the handleSubmit function and update it:
 
-    try {
-      const plantData = {
-        title: formData.title,
-        price: parseFloat(formData.price),
-        category: formData.category,
-        description: formData.description,
-        city: formData.city,
-        careInstructions: formData.careInstructions,
-        image: images[0],
-        images: images.length > 1 ? images.slice(1) : [],
-        addedAt: new Date().toISOString(),
-      };
+// SEARCH_KEY: MARKETPLACE_ADD_PLANT_API_CALL
+const handleSubmit = async () => {
+  if (!validateForm()) return;
 
-      const result = await createPlant(plantData);
+  setIsLoading(true);
 
-      if (result?.productId) {
-        Alert.alert('Success', 'Your plant has been listed!', [
-          {
-            text: 'View Listing',
-            onPress: () => navigation.navigate('PlantDetail', { plantId: result.productId }),
-          },
-          {
-            text: 'Go to Marketplace',
-            onPress: () => navigation.navigate('Marketplace'),
-          },
-        ]);
-      } else {
-        throw new Error('Failed to create listing');
-      }
-    } catch (error) {
-      console.error('Error creating plant:', error);
-      Alert.alert('Error', 'Failed to create listing. Please try again.');
-    } finally {
-      setIsLoading(false);
+  try {
+    const plantData = {
+      title: formData.title,
+      price: parseFloat(formData.price),
+      category: formData.category,
+      description: formData.description,
+      city: formData.city,
+      careInstructions: formData.careInstructions,
+      image: images[0],  // Main image
+      images: images.length > 1 ? images.slice(1) : [],  // Additional images
+    };
+
+    const result = await createPlant(plantData);
+
+    if (result?.productId) {
+      Alert.alert('Success', 'Your plant has been listed!', [
+        {
+          text: 'View Listing',
+          onPress: () => navigation.navigate('PlantDetail', { plantId: result.productId }),
+        },
+        {
+          text: 'Go to Marketplace',
+          onPress: () => navigation.navigate('MarketplaceHome'),
+        },
+      ]);
+    } else {
+      throw new Error('Failed to create listing');
     }
-  };
+  } catch (error) {
+    console.error('Error creating plant:', error);
+    Alert.alert('Error', 'Failed to create listing. Please try again.');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   return (
     <SafeAreaView style={styles.container}>
