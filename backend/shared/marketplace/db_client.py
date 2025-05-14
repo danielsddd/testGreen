@@ -82,21 +82,24 @@ def get_main_db_client():
         logging.error(f"Failed to initialize main database: {str(e)}")
         raise
 
+# shared/marketplace/db_client.py
 def get_container(container_name):
-    """Get a specific container with dynamic name resolution from the marketplace database."""
+    """
+    Get container with proper environment variable mapping.
+    Keys from any database (marketplace or main)
+    """
     try:
-        # Get container name from environment variables or use default
-        env_var_name = f"COSMOS_CONTAINER_{container_name.upper()}"
+        # Convert container names with dashes to env var format
+        env_var_name = f"COSMOS_CONTAINER_{container_name.upper().replace('-', '_')}"
         actual_container_name = os.environ.get(env_var_name, container_name)
         
-        # Check if it's a marketplace container first
-        if container_name.startswith('marketplace_') or container_name in [
+        # Select right database based on container prefix
+        if container_name.startswith('marketplace-') or container_name in [
             'marketplace-plants', 'marketplace-conversations', 
             'marketplace-messages', 'marketplace-wishlists', 'users'
         ]:
             database = get_marketplace_db_client()
         else:
-            # For main database containers
             database = get_main_db_client()
             
         return database.get_container_client(actual_container_name)

@@ -139,6 +139,7 @@ export const getAll = async (page = 1, category = null, search = '', filters = {
       return getMockProducts(category, search);
     }
 
+    // Updated to match backend route: marketplace/products
     let endpoint = `marketplace/products?page=${page}`;
     if (search) endpoint += `&search=${encodeURIComponent(search)}`;
     if (category && category !== 'All') endpoint += `&category=${encodeURIComponent(category)}`;
@@ -164,6 +165,7 @@ export const getSpecific = async (id) => {
       return getMockProductById(id);
     }
 
+    // Updated to match backend route: marketplace/products/specific/{id}
     return await apiRequest(`marketplace/products/specific/${id}`);
   } catch (error) {
     console.error(`Error fetching product ${id}:`, error);
@@ -188,6 +190,7 @@ export const createPlant = async (plantData) => {
       plantData.sellerId = userEmail;
     }
 
+    // Updated to match backend route: marketplace/products/create
     return await apiRequest('marketplace/products/create', 'POST', plantData);
   } catch (error) {
     console.error('Error creating plant:', error);
@@ -210,6 +213,7 @@ export const wishProduct = async (id) => {
     const userEmail = await AsyncStorage.getItem('userEmail');
     const body = { userId: userEmail };
     
+    // Updated to match backend route: marketplace/products/wish/{id}
     return await apiRequest(`marketplace/products/wish/${id}`, 'POST', body);
   } catch (error) {
     console.error(`Error toggling wishlist for product ${id}:`, error);
@@ -227,7 +231,7 @@ export const fetchConversations = async () => {
       return getMockMessageData('getUserConversations');
     }
 
-    // User email is added automatically by apiRequest function
+    // Updated to match backend route: marketplace/messages/getUserConversations
     return await apiRequest(`marketplace/messages/getUserConversations`);
   } catch (error) {
     console.error('Error fetching conversations:', error);
@@ -241,7 +245,7 @@ export const fetchMessages = async (conversationId) => {
       return getMockMessageData(`messages/${conversationId}`);
     }
 
-    // User email is added automatically by apiRequest function
+    // Updated to match backend route: marketplace/messages/getMessages/{chatId}
     return await apiRequest(`marketplace/messages/getMessages/${conversationId}`);
   } catch (error) {
     console.error('Error fetching messages:', error);
@@ -258,6 +262,7 @@ export const sendMessage = async (chatId, message) => {
     // Get user email for identification
     const userEmail = await AsyncStorage.getItem('userEmail');
     
+    // Updated to match backend route: marketplace/messages/sendMessage
     return await apiRequest('marketplace/messages/sendMessage', 'POST', { 
       chatId, 
       message, 
@@ -278,6 +283,7 @@ export const startConversation = async (receiver, plantId, message) => {
     // Get user email for identification
     const userEmail = await AsyncStorage.getItem('userEmail');
     
+    // Updated to match backend route: marketplace/messages/createChatRoom
     return await apiRequest('marketplace/messages/createChatRoom', 'POST', { 
       receiver, 
       plantId, 
@@ -302,6 +308,7 @@ export const fetchUserProfile = async (userId = null) => {
       userId = await AsyncStorage.getItem('userEmail');
     }
 
+    // Updated to match backend route: marketplace/users/{id}
     return await apiRequest(`marketplace/users/${encodeURIComponent(userId)}`);
   } catch (error) {
     console.error('Error fetching user profile:', error);
@@ -319,9 +326,109 @@ export const updateUserProfile = async (id, userData) => {
       };
     }
 
+    // Updated to match backend route: marketplace/users/{id}
     return await apiRequest(`marketplace/users/${encodeURIComponent(id)}`, 'PATCH', userData);
   } catch (error) {
     console.error('Error updating user profile:', error);
+    throw error;
+  }
+};
+
+// SignalR API
+export const getNegotiateToken = async () => {
+  try {
+    // Get user email for identification
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    if (!userEmail) {
+      throw new Error('User not authenticated');
+    }
+
+    // Updated to match backend route: marketplace/signalr-negotiate
+    return await apiRequest(`marketplace/signalr-negotiate?userId=${encodeURIComponent(userEmail)}`, 'POST');
+  } catch (error) {
+    console.error('Error getting SignalR negotiate token:', error);
+    throw error;
+  }
+};
+
+// Location and Maps API
+export const geocodeAddress = async (address) => {
+  try {
+    if (config.isDevelopment && !config.features.useRealApi) {
+      // Mock geocoding result
+      return {
+        latitude: 32.0853 + (Math.random() * 0.02 - 0.01),
+        longitude: 34.7818 + (Math.random() * 0.02 - 0.01),
+      };
+    }
+
+    // Updated to match backend route: marketplace/geocode
+    return await apiRequest(`marketplace/geocode?address=${encodeURIComponent(address)}`);
+  } catch (error) {
+    console.error('Error geocoding address:', error);
+    throw error;
+  }
+};
+
+export const getNearbyProducts = async (latitude, longitude, radius = 10) => {
+  try {
+    if (config.isDevelopment && !config.features.useRealApi) {
+      return getMockProducts();
+    }
+
+    // Updated to match backend route: marketplace/nearbyProducts
+    return await apiRequest(`marketplace/nearbyProducts?lat=${latitude}&lon=${longitude}&radius=${radius}`);
+  } catch (error) {
+    console.error('Error getting nearby products:', error);
+    return getMockProducts();
+  }
+};
+
+// User Plant API (main app integration)
+export const getUserPlantsByLocation = async (location) => {
+  try {
+    // Get user email
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    
+    // Updated to match backend route: getUserPlantsByLocation
+    return await apiRequest(`getUserPlantsByLocation?email=${encodeURIComponent(userEmail)}&location=${encodeURIComponent(location)}`);
+  } catch (error) {
+    console.error('Error getting user plants by location:', error);
+    throw error;
+  }
+};
+
+export const getUserLocations = async () => {
+  try {
+    // Get user email
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    
+    // Updated to match backend route: getUserLocations
+    return await apiRequest(`getUserLocations?email=${encodeURIComponent(userEmail)}`);
+  } catch (error) {
+    console.error('Error getting user locations:', error);
+    throw error;
+  }
+};
+
+export const identifyPlantPhoto = async (photoFormData) => {
+  try {
+    // This needs a custom request function since it's multipart/form-data
+    const response = await fetch(`${API_BASE_URL}/identifyPlantPhoto`, {
+      method: 'POST',
+      body: photoFormData,
+      headers: {
+        'Authorization': authToken ? `Bearer ${authToken}` : '',
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Plant identification failed: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error identifying plant photo:', error);
     throw error;
   }
 };
@@ -339,5 +446,11 @@ export default {
   startConversation,
   fetchMessages,
   fetchUserProfile,
-  updateUserProfile
+  updateUserProfile,
+  getNegotiateToken,
+  geocodeAddress,
+  getNearbyProducts,
+  getUserPlantsByLocation,
+  getUserLocations,
+  identifyPlantPhoto
 };

@@ -59,15 +59,17 @@ const envSpecificConfigs = {
 
 // Merge configs
 // Merge configs
+// services/config.js
 const config = {
   ...baseConfig,
   ...envSpecificConfigs[currentEnv],
   api: {
-    baseUrl: 'https://usersfunctions.azurewebsites.net/api', // Your deployed Azure URL
-    timeout: 15000, // Longer timeout for remote calls
+    baseUrl: 'https://usersfunctions.azurewebsites.net/api',
+    timeout: 15000, // 15 seconds
   },
   features: {
     useRealApi: true, // Set to true to use real Azure backend
+    useMockOnError: true, // Fall back to mock data on API error
   },
 
   // Environment helpers

@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 // Import consistent header
 import MarketplaceHeader from '../components/MarketplaceHeader';

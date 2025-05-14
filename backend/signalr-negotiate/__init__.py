@@ -5,6 +5,12 @@ import azure.functions as func
 import os
 from azure.functions import SignalRConnectionInfo
 
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS, PUT, PATCH, DELETE'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-User-Email'
+    return response
+
 def main(req: func.HttpRequest, connectionInfo: SignalRConnectionInfo) -> func.HttpResponse:
     logging.info('SignalR negotiate function processed a request.')
     

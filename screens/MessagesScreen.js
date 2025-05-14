@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Added missing import
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Import MarketplaceHeader
 import MarketplaceHeader from '../components/MarketplaceHeader';

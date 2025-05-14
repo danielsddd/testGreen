@@ -1,15 +1,23 @@
-
-# This file should be placed at /marketplace-products/__init__.py
-# Example of a restructured function with updated imports
-
+# backend/marketplace-products/__init__.py
 import logging
 import json
 import azure.functions as func
 from shared.marketplace.db_client import get_container
 from datetime import datetime
 
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS, PUT, PATCH, DELETE'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-User-Email'
+    return response
+
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for marketplace products processed a request.')
+    
+    # Handle OPTIONS method for CORS preflight
+    if req.method == 'OPTIONS':
+        response = func.HttpResponse()
+        return add_cors_headers(response)
     
     try:
         # Get query parameters
@@ -104,7 +112,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         enriched_items = enrich_plant_items(page_items, user_id)
         
         # Format response
-        response = {
+        response_data = {
             "products": enriched_items,
             "page": page,
             "pages": total_pages,
@@ -112,132 +120,21 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             "currentPage": page
         }
         
-        return func.HttpResponse(
-            body=json.dumps(response, default=str),
+        # Return success response with CORS headers
+        response = func.HttpResponse(
+            body=json.dumps(response_data, default=str),
             mimetype="application/json",
             status_code=200
         )
+        return add_cors_headers(response)
     
     except Exception as e:
         logging.error(f"Error retrieving marketplace products: {str(e)}")
-        return func.HttpResponse(
+        
+        # Return error response with CORS headers
+        error_response = func.HttpResponse(
             body=json.dumps({"error": str(e)}),
             mimetype="application/json",
             status_code=500
         )
-
-def enrich_plant_items(items, user_id=None):
-    """
-    Enrich plant items with seller info and wishlist status
-    
-    Args:
-        items: List of plant items
-        user_id: Optional user ID to check wishlist status
-        
-    Returns:
-        List of enriched plant items
-    """
-    try:
-        # Get seller IDs from items
-        seller_ids = list(set(item.get('sellerId') for item in items if 'sellerId' in item))
-        
-        # Get seller info for all items at once
-        seller_info = {}
-        if seller_ids:
-            try:
-                users_container = get_container("users")
-                
-                for seller_id in seller_ids:
-                    query = "SELECT c.id, c.email, c.name, c.avatar, c.stats.rating FROM c WHERE c.id = @id OR c.email = @email"
-                    parameters = [
-                        {"name": "@id", "value": seller_id},
-                        {"name": "@email", "value": seller_id}
-                    ]
-                    
-                    sellers = list(users_container.query_items(
-                        query=query,
-                        parameters=parameters,
-                        enable_cross_partition_query=True
-                    ))
-                    
-                    if sellers:
-                        seller_info[seller_id] = sellers[0]
-            except Exception as e:
-                logging.warning(f"Error fetching seller information: {str(e)}")
-        
-        # Get wishlist status if user_id provided
-        wishlist_status = {}
-        if user_id:
-            try:
-                wishlist_container = get_container("marketplace-wishlists")
-                
-                # Get all wishlist items for the user
-                query = "SELECT c.plantId FROM c WHERE c.userId = @userId"
-                parameters = [{"name": "@userId", "value": user_id}]
-                
-                wishlist_items = list(wishlist_container.query_items(
-                    query=query,
-                    parameters=parameters,
-                    enable_cross_partition_query=True
-                ))
-                
-                # Create a set of plant IDs in wishlist for faster lookup
-                wishlist_plant_ids = set(item['plantId'] for item in wishlist_items)
-                
-                # Set wishlist status for each plant ID
-                for plant_id in wishlist_plant_ids:
-                    wishlist_status[plant_id] = True
-            except Exception as e:
-                logging.warning(f"Error fetching wishlist status: {str(e)}")
-        
-        # Enrich items with seller info and wishlist status
-        for item in items:
-            # Add seller info
-            seller_id = item.get('sellerId')
-            if seller_id and seller_id in seller_info:
-                seller = seller_info[seller_id]
-                item['seller'] = {
-                    'name': seller.get('name', 'User'),
-                    '_id': seller.get('id') or seller.get('email'),
-                    'avatar': seller.get('avatar')
-                }
-                
-                # Add rating if available
-                if 'stats' in seller and 'rating' in seller['stats']:
-                    item['rating'] = seller['stats']['rating']
-            
-            # Add wishlist status
-            item_id = item.get('id')
-            if item_id in wishlist_status:
-                item['isFavorite'] = wishlist_status[item_id]
-            else:
-                item['isFavorite'] = False
-            
-            # Ensure there's at least one image URL
-            if 'images' not in item or not item['images']:
-                item['image'] = None
-            else:
-                if isinstance(item['images'], list) and len(item['images']) > 0:
-                    item['image'] = item['images'][0]
-                    
-            # Ensure city is available
-            if 'location' in item and isinstance(item['location'], dict):
-                if 'city' in item['location']:
-                    item['city'] = item['location']['city']
-            
-            # Ensure category is set
-            if 'category' not in item:
-                item['category'] = "Other"
-                
-            # Map addedAt to listedDate if needed
-            if 'addedAt' in item and 'listedDate' not in item:
-                item['listedDate'] = item['addedAt']
-                
-            # Ensure title exists
-            if 'title' not in item and 'name' in item:
-                item['title'] = item['name']
-                
-        return items
-    except Exception as e:
-        logging.error(f"Error enriching plant items: {str(e)}")
-        return items
+        return add_cors_headers(error_response)
