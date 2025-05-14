@@ -3,7 +3,7 @@ import logging
 import json
 import azure.functions as func
 from ..db_client import get_container, get_main_container
-from ..storage_helper import upload_image
+from shared.marketplace.storage_helper import upload_image
 import uuid
 from datetime import datetime
 

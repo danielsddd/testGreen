@@ -2,7 +2,7 @@
 import logging
 import json
 import azure.functions as func
-from ..db_client import get_container
+from shared.marketplace.db_client import get_container
 import uuid
 from datetime import datetime
 
