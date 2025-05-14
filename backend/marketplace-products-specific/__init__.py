@@ -1,14 +1,10 @@
-# backend/marketplace-products-specific/__init__.py
+# marketplace-products-specific/__init__.py
 import logging
 import json
 import azure.functions as func
-from shared.marketplace.db_client import get_container
-
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS, PUT, PATCH, DELETE'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-User-Email'
-    return response
+# Update import to use new module locations 
+from db_helpers import get_container
+from http_helpers import add_cors_headers
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for marketplace specific product processed a request.')

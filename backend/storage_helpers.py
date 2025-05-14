@@ -1,5 +1,4 @@
-# This file should be placed at /shared/marketplace/storage_helper.py
-# Centralized storage helper for all marketplace functions
+# storage_helpers.py
 
 import os
 import logging

@@ -1,5 +1,4 @@
-# This file should be placed at /shared/marketplace/db_client.py
-# Centralized database client for all marketplace functions
+# db_helpers.py
 
 import os
 import logging
@@ -7,6 +6,35 @@ from azure.cosmos import CosmosClient, PartitionKey
 
 # Dictionary to cache database connections to avoid creating multiple clients
 _db_clients = {}
+
+def get_database_client():
+    """Get a connection to the main Greener database."""
+    global _db_clients
+    
+    try:
+        # Check if we already have a connection
+        if 'main' in _db_clients:
+            return _db_clients['main']
+            
+        # Get connection details from environment variables
+        cosmos_uri = os.environ.get("COSMOS_URI")
+        cosmos_key = os.environ.get("COSMOS_KEY")
+        database_name = os.environ.get("COSMOS_DATABASE_NAME", "GreenerDB")
+        
+        if not cosmos_uri or not cosmos_key:
+            raise ValueError("Missing required environment variables for main database: COSMOS_URI and COSMOS_KEY")
+        
+        # Create the client
+        client = CosmosClient(cosmos_uri, credential=cosmos_key)
+        database = client.get_database_client(database_name)
+        
+        # Cache the database client
+        _db_clients['main'] = database
+        
+        return database
+    except Exception as e:
+        logging.error(f"Failed to initialize main database: {str(e)}")
+        raise
 
 def get_marketplace_db_client():
     """Get a connection to the marketplace database."""
@@ -53,36 +81,6 @@ def get_marketplace_db_client():
         logging.error(f"Failed to initialize marketplace database: {str(e)}")
         raise
 
-def get_main_db_client():
-    """Get a connection to the main Greener database."""
-    global _db_clients
-    
-    try:
-        # Check if we already have a connection
-        if 'main' in _db_clients:
-            return _db_clients['main']
-            
-        # Get connection details from environment variables
-        cosmos_uri = os.environ.get("COSMOS_URI")
-        cosmos_key = os.environ.get("COSMOS_KEY")
-        database_name = os.environ.get("COSMOS_DATABASE_NAME", "GreenerDB")
-        
-        if not cosmos_uri or not cosmos_key:
-            raise ValueError("Missing required environment variables for main database: COSMOS_URI and COSMOS_KEY")
-        
-        # Create the client
-        client = CosmosClient(cosmos_uri, credential=cosmos_key)
-        database = client.get_database_client(database_name)
-        
-        # Cache the database client
-        _db_clients['main'] = database
-        
-        return database
-    except Exception as e:
-        logging.error(f"Failed to initialize main database: {str(e)}")
-        raise
-
-# shared/marketplace/db_client.py
 def get_container(container_name):
     """
     Get container with proper environment variable mapping.
@@ -100,7 +98,7 @@ def get_container(container_name):
         ]:
             database = get_marketplace_db_client()
         else:
-            database = get_main_db_client()
+            database = get_database_client()
             
         return database.get_container_client(actual_container_name)
     except Exception as e:
@@ -114,7 +112,7 @@ def get_main_container(container_name):
         env_var_name = f"COSMOS_CONTAINER_{container_name.upper()}"
         actual_container_name = os.environ.get(env_var_name, container_name)
         
-        database = get_main_db_client()
+        database = get_database_client()
         return database.get_container_client(actual_container_name)
     except Exception as e:
         logging.error(f"Failed to get main container {container_name}: {str(e)}")

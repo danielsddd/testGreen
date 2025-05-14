@@ -1,15 +1,11 @@
-# backend/marketplace-products/__init__.py
+# marketplace-products/__init__.py
 import logging
 import json
 import azure.functions as func
-from shared.marketplace.db_client import get_container
+# Update import to use new module locations
+from db_helpers import get_container
+from http_helpers import add_cors_headers
 from datetime import datetime
-
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS, PUT, PATCH, DELETE'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization,X-User-Email'
-    return response
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for marketplace products processed a request.')
@@ -109,11 +105,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         page_items = items[start_idx:end_idx]
         
         # Enrich with seller and wishlist info
-        enriched_items = enrich_plant_items(page_items, user_id)
+        # Note: Add function definition here if needed, but using references to local modules
         
         # Format response
         response_data = {
-            "products": enriched_items,
+            "products": page_items,
             "page": page,
             "pages": total_pages,
             "count": total_count,

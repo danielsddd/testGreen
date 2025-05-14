@@ -69,7 +69,7 @@ const config = {
   },
   features: {
     useRealApi: true, // Set to true to use real Azure backend
-    useMockOnError: true, // Fall back to mock data on API error
+    useMockOnError: false, // Fall back to mock data on API error
   },
 
   // Environment helpers
