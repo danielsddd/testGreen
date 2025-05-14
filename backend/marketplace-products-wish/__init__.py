@@ -1,12 +1,13 @@
-# backend/marketplace/products-wish/__init__.py
+# This file should be placed at /marketplace-products-wish/__init__.py
+# Example of restructured wishlist toggle function
+
 import logging
 import json
 import azure.functions as func
-from ..db_client import get_container
+from shared.marketplace.db_client import get_container
 import uuid
 from datetime import datetime
 
-# SEARCH_KEY: MARKETPLACE_WISH_PRODUCT_CONFIG
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for wishlist toggle processed a request.')
     
@@ -26,7 +27,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         user_id = request_json.get('userId') or req.params.get('userId') or "default@example.com"
         
         # Access the marketplace_wishlists container
-        wishlists_container = get_container('marketplace_wishlists')
+        wishlists_container = get_container('marketplace-wishlists')
         
         # Check if the item is already in the wishlist
         query = "SELECT * FROM c WHERE c.userId = @userId AND c.plantId = @plantId"
@@ -50,7 +51,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             
             # Update plant statistics
             try:
-                plants_container = get_container('marketplace_plants')
+                plants_container = get_container('marketplace-plants')
                 
                 # Get the plant
                 plant_query = "SELECT * FROM c WHERE c.id = @id"
@@ -89,7 +90,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             
             # Update plant statistics
             try:
-                plants_container = get_container('marketplace_plants')
+                plants_container = get_container('marketplace-plants')
                 
                 # Get the plant
                 plant_query = "SELECT * FROM c WHERE c.id = @id"

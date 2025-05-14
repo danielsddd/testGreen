@@ -1,8 +1,10 @@
-# backend/marketplace/products-specific/__init__.py
+# This file should be placed at /marketplace-products-specific/__init__.py
+# Example of restructured specific product function
+
 import logging
 import json
 import azure.functions as func
-from ..db_client import get_container, get_main_container
+from shared.marketplace.db_client import get_container, get_main_container
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for marketplace specific product processed a request.')

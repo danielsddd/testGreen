@@ -1,4 +1,6 @@
-# backend/marketplace/storage_helper.py
+# This file should be placed at /shared/marketplace/storage_helper.py
+# Centralized storage helper for all marketplace functions
+
 import os
 import logging
 import base64
@@ -10,9 +12,19 @@ from azure.core.exceptions import ResourceExistsError
 def get_storage_client():
     """Get the Azure Blob Storage client for marketplace images."""
     try:
-        connection_string = os.environ.get("STORAGE_ACOUNT_MARKETPLACE_STRING")
+        # Try to get connection string from environment variables
+        connection_string = os.environ.get("STORAGE_ACCOUNT_MARKETPLACE_STRING")
+        
         if not connection_string:
-            raise ValueError("Missing required environment variable: STORAGE_ACOUNT_MARKETPLACE_STRING")
+            # Try fallback to account name and key
+            account_name = os.environ.get("STORAGE_ACCOUNT_NAME")
+            account_key = os.environ.get("STORAGE_ACCOUNT_KEY")
+            
+            if not account_name or not account_key:
+                raise ValueError("Missing required storage account configuration")
+                
+            # Create connection string from name and key
+            connection_string = f"DefaultEndpointsProtocol=https;AccountName={account_name};AccountKey={account_key};EndpointSuffix=core.windows.net"
             
         client = BlobServiceClient.from_connection_string(connection_string)
         return client

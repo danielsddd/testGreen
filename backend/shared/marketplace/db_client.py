@@ -1,4 +1,6 @@
-# backend/marketplace/db_client.py
+# This file should be placed at /shared/marketplace/db_client.py
+# Centralized database client for all marketplace functions
+
 import os
 import logging
 from azure.cosmos import CosmosClient, PartitionKey
@@ -20,19 +22,28 @@ def get_marketplace_db_client():
         database_name = os.environ.get("COSMOSDB_MARKETPLACE_DATABASE_NAME", "GreenerMarketplace")
         
         if not connection_string:
-            raise ValueError("Missing required environment variable: COSMOSDB__MARKETPLACE_CONNECTION_STRING")
-        
-        # Parse the connection string
-        params = dict(param.split('=', 1) for param in connection_string.split(';'))
-        account_endpoint = params.get('AccountEndpoint')
-        account_key = params.get('AccountKey')
-        
-        if not account_endpoint or not account_key:
-            raise ValueError("Invalid connection string format for marketplace database")
-        
-        # Create the client
-        client = CosmosClient(account_endpoint, credential=account_key)
-        database = client.get_database_client(database_name)
+            # Fall back to separate URI and KEY if connection string is not provided
+            cosmos_uri = os.environ.get("COSMOS_URI")
+            cosmos_key = os.environ.get("COSMOS_KEY")
+            
+            if not cosmos_uri or not cosmos_key:
+                raise ValueError("Missing required environment variables for database connection")
+            
+            # Create the client using URI and KEY
+            client = CosmosClient(cosmos_uri, credential=cosmos_key)
+            database = client.get_database_client(database_name)
+        else:
+            # Parse the connection string
+            params = dict(param.split('=', 1) for param in connection_string.split(';'))
+            account_endpoint = params.get('AccountEndpoint')
+            account_key = params.get('AccountKey')
+            
+            if not account_endpoint or not account_key:
+                raise ValueError("Invalid connection string format for marketplace database")
+            
+            # Create the client
+            client = CosmosClient(account_endpoint, credential=account_key)
+            database = client.get_database_client(database_name)
         
         # Cache the database client
         _db_clients['marketplace'] = database

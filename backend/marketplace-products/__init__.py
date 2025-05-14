@@ -1,8 +1,11 @@
-# backend/marketplace/products/__init__.py
+
+# This file should be placed at /marketplace-products/__init__.py
+# Example of a restructured function with updated imports
+
 import logging
 import json
 import azure.functions as func
-from ..db_client import get_container
+from shared.marketplace.db_client import get_container
 from datetime import datetime
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
