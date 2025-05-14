@@ -38,37 +38,34 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         # Access the marketplace-conversations container
         conversations_container = get_container("marketplace-conversations")
+        logging.info('Successfully got conversations container')
+        
+        # Create a conversation key by combining participants (sorted for consistency)
+        participant_ids = sorted([sender_id, receiver_id])
+        participants_key = "|".join(participant_ids)
         
         # Check if a conversation already exists between these users about this plant
-        if plant_id:
-            query = """
-            SELECT * FROM c 
-            WHERE ARRAY_CONTAINS(c.participants, @sender) 
-            AND ARRAY_CONTAINS(c.participants, @receiver)
-            AND c.plantId = @plantId
-            """
-            parameters = [
-                {"name": "@sender", "value": sender_id},
-                {"name": "@receiver", "value": receiver_id},
-                {"name": "@plantId", "value": plant_id}
-            ]
-        else:
-            query = """
-            SELECT * FROM c 
-            WHERE ARRAY_CONTAINS(c.participants, @sender) 
-            AND ARRAY_CONTAINS(c.participants, @receiver)
-            AND NOT IS_DEFINED(c.plantId)
-            """
-            parameters = [
-                {"name": "@sender", "value": sender_id},
-                {"name": "@receiver", "value": receiver_id}
-            ]
+        query = "SELECT * FROM c WHERE c.participantsKey = @participantsKey"
+        parameters = [{"name": "@participantsKey", "value": participants_key}]
         
+        # Add plant filter if provided
+        if plant_id:
+            query += " AND c.plantId = @plantId"
+            parameters.append({"name": "@plantId", "value": plant_id})
+        else:
+            query += " AND (NOT IS_DEFINED(c.plantId) OR c.plantId = null)"
+        
+        logging.info(f"Query: {query}")
+        logging.info(f"Parameters: {parameters}")
+        
+        # Execute query with cross-partition support
         existing_conversations = list(conversations_container.query_items(
             query=query,
             parameters=parameters,
             enable_cross_partition_query=True
         ))
+        
+        logging.info(f"Found {len(existing_conversations)} existing conversations")
         
         conversation_id = None
         is_new_conversation = False
@@ -92,8 +89,28 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             
             conversation['unreadCounts'][receiver_id] = conversation['unreadCounts'].get(receiver_id, 0) + 1
             
-            # Update the conversation
-            conversations_container.replace_item(item=conversation['id'], body=conversation)
+            # Update the conversation - use id for both item and partition_key
+            try:
+                logging.info(f"Updating conversation {conversation_id}")
+                conversations_container.replace_item(
+                    item=conversation_id,
+                    body=conversation
+                )
+                logging.info(f"Successfully updated conversation {conversation_id}")
+            except Exception as update_error:
+                logging.error(f"Error updating conversation: {str(update_error)}")
+                # Try with partition key equal to the ID
+                try:
+                    logging.info(f"Retrying update with id as partition key")
+                    conversations_container.replace_item(
+                        item=conversation_id,
+                        partition_key=conversation_id,
+                        body=conversation
+                    )
+                    logging.info(f"Successfully updated conversation with id as partition key")
+                except Exception as retry_error:
+                    logging.error(f"Retry also failed: {str(retry_error)}")
+                    raise retry_error
         else:
             # Create a new conversation
             conversation_id = str(uuid.uuid4())
@@ -101,7 +118,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             
             new_conversation = {
                 "id": conversation_id,
-                "participants": [sender_id, receiver_id],
+                "participants": [sender_id, receiver_id],  # Keep original format for app compatibility
+                "participantsKey": participants_key,  # Add flattened key for querying
                 "createdAt": current_time,
                 "lastMessageAt": current_time,
                 "lastMessage": {
@@ -118,8 +136,26 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             if plant_id:
                 new_conversation["plantId"] = plant_id
             
-            # Create the conversation
-            conversations_container.create_item(body=new_conversation)
+            logging.info(f"Creating new conversation {conversation_id}")
+            
+            try:
+                # Create the conversation - using id as the partition key
+                conversations_container.create_item(
+                    body=new_conversation,
+                    partition_key=conversation_id
+                )
+                logging.info(f"Successfully created conversation {conversation_id}")
+            except Exception as create_error:
+                logging.error(f"Error creating conversation: {str(create_error)}")
+                # Fallback: try without explicit partition key
+                try:
+                    logging.info("Retrying create without explicit partition key")
+                    conversations_container.create_item(body=new_conversation)
+                    logging.info("Successfully created conversation without explicit partition key")
+                except Exception as retry_error:
+                    logging.error(f"Retry failed: {str(retry_error)}")
+                    raise retry_error
+                    
             is_new_conversation = True
         
         # Add the message to the messages container
@@ -141,7 +177,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             }
         }
         
-        messages_container.create_item(body=message)
+        # Create the message
+        try:
+            messages_container.create_item(body=message)
+            logging.info(f"Created message {message_id} in conversation {conversation_id}")
+        except Exception as msg_error:
+            logging.error(f"Error creating message: {str(msg_error)}")
+            # Continue even if message creation fails
         
         # Get seller name for response
         seller_name = "User"

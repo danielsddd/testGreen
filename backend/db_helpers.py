@@ -87,19 +87,25 @@ def get_container(container_name):
     Keys from any database (marketplace or main)
     """
     try:
+        # Normalize container name format for checking (convert hyphens to underscores)
+        normalized_name = container_name.replace('-', '_')
+        
         # Convert container names with dashes to env var format
         env_var_name = f"COSMOS_CONTAINER_{container_name.upper().replace('-', '_')}"
-        actual_container_name = os.environ.get(env_var_name, container_name)
+        if container_name == "marketplace-conversations":
+            actual_container_name = "marketplace_conversations_new"
+        else:
+            actual_container_name = os.environ.get(env_var_name, normalized_name)
         
-        # Select right database based on container prefix
-        if container_name.startswith('marketplace-') or container_name in [
-            'marketplace-plants', 'marketplace-conversations', 
-            'marketplace-messages', 'marketplace-wishlists', 'users'
-        ]:
+        # Select right database based on container prefix using normalized name for checking
+        if (normalized_name.startswith('marketplace_') or normalized_name in 
+            ['marketplace_plants', 'marketplace_conversations', 
+             'marketplace_messages', 'marketplace_wishlists', 'users']):
             database = get_marketplace_db_client()
         else:
             database = get_database_client()
             
+        logging.info(f"Accessing container: {actual_container_name} from database")
         return database.get_container_client(actual_container_name)
     except Exception as e:
         logging.error(f"Failed to get container {container_name}: {str(e)}")

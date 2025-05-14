@@ -3,7 +3,7 @@ import logging
 import json
 import azure.functions as func
 from db_helpers import get_container
-from http_helpers import add_cors_headers, handle_options_request, create_error_response, create_success_response
+from http_helpers import add_cors_headers, handle_options_request, create_error_response, create_success_response, extract_user_id
 from datetime import datetime
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -42,10 +42,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         # Add filters
         if category and category.lower() != 'all':
+            # Only show active listings by default
             param_name = get_param_name()
-            query_parts.append(f"AND LOWER(c.category) = {param_name}")
-            parameters.append({"name": param_name, "value": category.lower()})
-        
+            query_parts.append(f"AND (c.status = {param_name} OR (NOT IS_DEFINED(c.status)))")  # Fixed syntax
+            parameters.append({"name": param_name, "value": "active"})
         if search:
             param_name = get_param_name()
             query_parts.append(f"AND (CONTAINS(LOWER(c.title), {param_name}) OR CONTAINS(LOWER(c.description), {param_name}))")
@@ -63,7 +63,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         # Only show active listings by default
         param_name = get_param_name()
-        query_parts.append(f"AND (c.status = {param_name} OR c.status IS NULL)")
+        # Fixed query: Properly check for status (using either IS_DEFINED or simple equality)
+        query_parts.append(f"AND (c.status = {param_name} OR (NOT IS_DEFINED(c.status)))")
         parameters.append({"name": param_name, "value": "active"})
         
         # Determine sort field
