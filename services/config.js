@@ -58,19 +58,28 @@ const envSpecificConfigs = {
 };
 
 // Merge configs
+// Merge configs
 const config = {
   ...baseConfig,
   ...envSpecificConfigs[currentEnv],
-  
+  api: {
+    baseUrl: 'https://usersfunctions.azurewebsites.net/api', // Your deployed Azure URL
+    timeout: 15000, // Longer timeout for remote calls
+  },
+  features: {
+    useRealApi: true, // Set to true to use real Azure backend
+  },
+
   // Environment helpers
   isDevelopment: currentEnv === ENV.DEV,
   isStaging: currentEnv === ENV.STAGING,
   isProduction: currentEnv === ENV.PROD,
-  
+
   // Platform helpers
   isIOS: Platform.OS === 'ios',
   isAndroid: Platform.OS === 'android',
   isWeb: Platform.OS === 'web',
 };
+
 
 export default config;
