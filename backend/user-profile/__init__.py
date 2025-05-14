@@ -1,10 +1,9 @@
-# Update this file at /user-profile/__init__.py
-
+# user-profile/__init__.py
 import logging
 import json
 import azure.functions as func
-from db_helpers import get_container
-from http_helpers import add_cors_headers
+from db_helpers import get_container, get_main_container
+from http_helpers import add_cors_headers, handle_options_request, create_error_response, create_success_response, extract_user_id
 from datetime import datetime
 
 def main(req: func.HttpRequest) -> func.HttpResponse:

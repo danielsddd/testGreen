@@ -2,14 +2,17 @@
 import logging
 import json
 import azure.functions as func
-# Update import to use new module locations
 from db_helpers import get_container
-from http_helpers import add_cors_headers
+from http_helpers import add_cors_headers, handle_options_request, create_error_response, create_success_response, extract_user_id
 import uuid
 from datetime import datetime
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function for creating chat room processed a request.')
+    
+    # Handle OPTIONS method for CORS preflight
+    if req.method == 'OPTIONS':
+        return handle_options_request()
     
     try:
         # Get request body
@@ -17,11 +20,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         # Validate required fields
         if not request_body:
-            return func.HttpResponse(
-                body=json.dumps({"error": "Request body is required"}),
-                mimetype="application/json",
-                status_code=400
-            )
+            return create_error_response("Request body is required", 400)
         
         sender_id = request_body.get('sender')
         receiver_id = request_body.get('receiver')
@@ -29,25 +28,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         initial_message = request_body.get('message')
         
         if not sender_id:
-            return func.HttpResponse(
-                body=json.dumps({"error": "Sender ID is required"}),
-                mimetype="application/json",
-                status_code=400
-            )
+            return create_error_response("Sender ID is required", 400)
         
         if not receiver_id:
-            return func.HttpResponse(
-                body=json.dumps({"error": "Receiver ID is required"}),
-                mimetype="application/json",
-                status_code=400
-            )
+            return create_error_response("Receiver ID is required", 400)
         
         if not initial_message:
-            return func.HttpResponse(
-                body=json.dumps({"error": "Initial message is required"}),
-                mimetype="application/json",
-                status_code=400
-            )
+            return create_error_response("Initial message is required", 400)
         
         # Access the marketplace-conversations container
         conversations_container = get_container("marketplace-conversations")
@@ -207,22 +194,14 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             except Exception as e:
                 logging.warning(f"Error updating plant info: {str(e)}")
         
-        return func.HttpResponse(
-            body=json.dumps({
-                "success": True,
-                "messageId": conversation_id,
-                "isNewConversation": is_new_conversation,
-                "sellerName": seller_name,
-                "plantName": plant_name
-            }),
-            mimetype="application/json",
-            status_code=201 if is_new_conversation else 200
-        )
+        return create_success_response({
+            "success": True,
+            "messageId": conversation_id,
+            "isNewConversation": is_new_conversation,
+            "sellerName": seller_name,
+            "plantName": plant_name
+        })
     
     except Exception as e:
         logging.error(f"Error creating chat room: {str(e)}")
-        return func.HttpResponse(
-            body=json.dumps({"error": str(e)}),
-            mimetype="application/json",
-            status_code=500
-        )
+        return create_error_response(str(e), 500)

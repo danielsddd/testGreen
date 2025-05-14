@@ -2,9 +2,8 @@
 import logging
 import json
 import azure.functions as func
-# Update import to use new module locations
 from db_helpers import get_container
-from http_helpers import add_cors_headers
+from http_helpers import add_cors_headers, handle_options_request, create_error_response, create_success_response
 from datetime import datetime
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -12,8 +11,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     
     # Handle OPTIONS method for CORS preflight
     if req.method == 'OPTIONS':
-        response = func.HttpResponse()
-        return add_cors_headers(response)
+        return handle_options_request()
     
     try:
         # Get query parameters
@@ -104,9 +102,6 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         end_idx = min(start_idx + page_size, total_count)
         page_items = items[start_idx:end_idx]
         
-        # Enrich with seller and wishlist info
-        # Note: Add function definition here if needed, but using references to local modules
-        
         # Format response
         response_data = {
             "products": page_items,
@@ -116,21 +111,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             "currentPage": page
         }
         
-        # Return success response with CORS headers
-        response = func.HttpResponse(
-            body=json.dumps(response_data, default=str),
-            mimetype="application/json",
-            status_code=200
-        )
-        return add_cors_headers(response)
+        # Return success response
+        return create_success_response(response_data)
     
     except Exception as e:
         logging.error(f"Error retrieving marketplace products: {str(e)}")
-        
-        # Return error response with CORS headers
-        error_response = func.HttpResponse(
-            body=json.dumps({"error": str(e)}),
-            mimetype="application/json",
-            status_code=500
-        )
-        return add_cors_headers(error_response)
+        return create_error_response(str(e), 500)
