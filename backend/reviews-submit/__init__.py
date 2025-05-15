@@ -53,16 +53,28 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Check if user has already reviewed this target
         reviews_container = get_container("marketplace-reviews")
         
-        query = f"SELECT VALUE COUNT(1) FROM c WHERE c.{target_type}Id = @targetId AND c.userId = @userId"
-        parameters = [
-            {"name": "@targetId", "value": target_id},
-            {"name": "@userId", "value": user_id}
-        ]
+        # Set up query parameters based on target type
+        if target_type == 'seller':
+            # For seller reviews, we can use the partition key
+            query = "SELECT VALUE COUNT(1) FROM c WHERE c.sellerId = @sellerId AND c.userId = @userId"
+            parameters = [
+                {"name": "@sellerId", "value": target_id},
+                {"name": "@userId", "value": user_id}
+            ]
+            enable_cross_partition = False
+        else:
+            # For product reviews, we need to use cross-partition query
+            query = "SELECT VALUE COUNT(1) FROM c WHERE c.productId = @productId AND c.userId = @userId"
+            parameters = [
+                {"name": "@productId", "value": target_id},
+                {"name": "@userId", "value": user_id}
+            ]
+            enable_cross_partition = True
         
         existing_review_count = list(reviews_container.query_items(
             query=query,
             parameters=parameters,
-            enable_cross_partition_query=True
+            enable_cross_partition_query=enable_cross_partition
         ))[0]
         
         if existing_review_count > 0:
@@ -93,9 +105,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         review_id = str(uuid.uuid4())
         current_time = datetime.utcnow().isoformat()
         
+        # Create review object
+        # IMPORTANT: Always include sellerId for proper partitioning
         review_item = {
             "id": review_id,
-            f"{target_type}Id": target_id,
+            "sellerId": target_id if target_type == 'seller' else "default",  # Default partition for product reviews
+            "productId": target_id if target_type == 'product' else None,
+            "targetType": target_type,  # Store the target type for clarity
             "userId": user_id,
             "userName": user_name,
             "rating": rating,
@@ -132,13 +148,21 @@ def update_target_rating(target_type, target_id):
     # Get all reviews for the target
     reviews_container = get_container("marketplace-reviews")
     
-    query = f"SELECT VALUE c.rating FROM c WHERE c.{target_type}Id = @targetId"
-    parameters = [{"name": "@targetId", "value": target_id}]
+    if target_type == 'seller':
+        # For seller reviews, we can use the partition key
+        query = "SELECT VALUE c.rating FROM c WHERE c.sellerId = @sellerId"
+        parameters = [{"name": "@sellerId", "value": target_id}]
+        enable_cross_partition = False
+    else:
+        # For product reviews, we need to use cross-partition query
+        query = "SELECT VALUE c.rating FROM c WHERE c.productId = @productId"
+        parameters = [{"name": "@productId", "value": target_id}]
+        enable_cross_partition = True
     
     ratings = list(reviews_container.query_items(
         query=query,
         parameters=parameters,
-        enable_cross_partition_query=True
+        enable_cross_partition_query=enable_cross_partition
     ))
     
     # Calculate average rating

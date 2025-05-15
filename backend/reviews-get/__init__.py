@@ -30,15 +30,29 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Access the marketplace-reviews container
         reviews_container = get_container("marketplace-reviews")
         
-        # Query for reviews of the target
-        query = f"SELECT * FROM c WHERE c.{target_type}Id = @targetId ORDER BY c.createdAt DESC"
-        parameters = [{"name": "@targetId", "value": target_id}]
-        
-        reviews = list(reviews_container.query_items(
-            query=query,
-            parameters=parameters,
-            enable_cross_partition_query=True
-        ))
+        # Query for reviews
+        if target_type == 'seller':
+            # For seller reviews, we can use the partition key directly
+            query = "SELECT * FROM c WHERE c.sellerId = @sellerId ORDER BY c.createdAt DESC"
+            parameters = [{"name": "@sellerId", "value": target_id}]
+            
+            # No need for cross-partition query when using the partition key
+            reviews = list(reviews_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=False  # Using partition key
+            ))
+        else:
+            # For product reviews, we still need cross-partition query
+            query = "SELECT * FROM c WHERE c.productId = @productId ORDER BY c.createdAt DESC"
+            parameters = [{"name": "@productId", "value": target_id}]
+            
+            # Enable cross-partition query for product reviews
+            reviews = list(reviews_container.query_items(
+                query=query,
+                parameters=parameters,
+                enable_cross_partition_query=True  # Crossing partitions for product reviews
+            ))
         
         # Mark reviews by the current user
         if current_user_id:

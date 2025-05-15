@@ -925,46 +925,7 @@ export const getCurrentLocation = async () => {
   }
 };
 
-/**
- * Get reviews for a product or seller
- * @param {string} targetId - The ID of the product or seller
- * @param {string} type - The type of review: 'product' or 'seller'
- * @returns {Promise<Object>} - The response with reviews array
- */
-export const getReviews = async (targetId, type = 'seller') => {
-  try {
-    return await apiRequest(`marketplace/${type}s/${targetId}/reviews`);
-  } catch (error) {
-    console.error(`Error fetching ${type} reviews:`, error);
-    
-    if (config.features.useMockOnError) {
-      // Return mock reviews for development
-      return {
-        reviews: [
-          {
-            id: '1',
-            rating: 5,
-            text: 'Great seller! Plants arrived in perfect condition.',
-            userName: 'Plant Lover',
-            userId: 'user1@example.com',
-            createdAt: new Date().toISOString(),
-          },
-          {
-            id: '2',
-            rating: 4,
-            text: 'Good communication and nice plants.',
-            userName: 'Green Thumb',
-            userId: 'user2@example.com',
-            createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-          },
-        ]
-      };
-    }
-    
-    throw error;
-  }
-};
-
+// Updated marketplaceApi.js functions for reviews
 
 /**
  * Get reviews for a product or seller
@@ -975,7 +936,7 @@ export const getReviews = async (targetId, type = 'seller') => {
 export const fetchReviews = async (targetType, targetId) => {
   try {
     // Use the correct endpoint format that matches your backend
-    return await apiRequest(`marketplace/reviews?targetType=${targetType}&targetId=${targetId}`);
+    return await apiRequest(`marketplace/${targetType}s/${targetId}/reviews`);
   } catch (error) {
     console.error(`Error fetching ${targetType} reviews:`, error);
     
@@ -1018,15 +979,8 @@ export const fetchReviews = async (targetType, targetId) => {
  */
 export const submitReview = async (targetId, targetType = 'seller', reviewData) => {
   try {
-    // Send data in the format expected by the backend
-    const data = {
-      targetType: targetType,
-      targetId: targetId,
-      rating: reviewData.rating,
-      text: reviewData.text
-    };
-    
-    return await apiRequest(`marketplace/reviews`, 'POST', data);
+    // Use the correct endpoint format to match the backend
+    return await apiRequest(`marketplace/${targetType}s/${targetId}/reviews`, 'POST', reviewData);
   } catch (error) {
     console.error(`Error submitting ${targetType} review:`, error);
     

@@ -28,14 +28,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Access the marketplace-reviews container
         reviews_container = get_container("marketplace-reviews")
         
-        # Get the review
+        # First, we need to get the review to check permissions and find the partition key (sellerId)
+        # Since we don't know the sellerId in advance, we need a cross-partition query
         query = "SELECT * FROM c WHERE c.id = @id"
         parameters = [{"name": "@id", "value": review_id}]
         
         reviews = list(reviews_container.query_items(
             query=query,
             parameters=parameters,
-            enable_cross_partition_query=True
+            enable_cross_partition_query=True  # Need cross-partition to find by id
         ))
         
         if not reviews:
@@ -47,12 +48,18 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         if review.get('userId') != user_id:
             return create_error_response("You are not authorized to delete this review", 403)
         
-        # Delete the review
-        reviews_container.delete_item(item=review_id, partition_key=review_id)
+        # Get the sellerId for the partition key
+        seller_id = review.get('sellerId')
+        
+        if not seller_id:
+            return create_error_response("Review has no sellerId (partition key)", 500)
         
         # Store target information for rating update
         target_type = 'product' if 'productId' in review else 'seller'
         target_id = review.get('productId' if target_type == 'product' else 'sellerId')
+        
+        # Delete the review (now we know the partition key)
+        reviews_container.delete_item(item=review_id, partition_key=seller_id)
         
         # Update the target's average rating
         if target_id:
@@ -77,13 +84,21 @@ def update_target_rating(target_type, target_id):
     # Get all reviews for the target
     reviews_container = get_container("marketplace-reviews")
     
-    query = f"SELECT VALUE c.rating FROM c WHERE c.{target_type}Id = @targetId"
-    parameters = [{"name": "@targetId", "value": target_id}]
+    if target_type == 'seller':
+        # For seller reviews, we can use the partition key
+        query = "SELECT VALUE c.rating FROM c WHERE c.sellerId = @sellerId"
+        parameters = [{"name": "@sellerId", "value": target_id}]
+        enable_cross_partition = False
+    else:
+        # For product reviews, we need cross-partition query
+        query = "SELECT VALUE c.rating FROM c WHERE c.productId = @productId"
+        parameters = [{"name": "@productId", "value": target_id}]
+        enable_cross_partition = True
     
     ratings = list(reviews_container.query_items(
         query=query,
         parameters=parameters,
-        enable_cross_partition_query=True
+        enable_cross_partition_query=enable_cross_partition
     ))
     
     # Calculate average rating

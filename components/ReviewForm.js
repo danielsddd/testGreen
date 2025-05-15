@@ -1,3 +1,5 @@
+// Updated ReviewForm.js with improved error handling and logging
+
 import React, { useState } from 'react';
 import {
   View,
@@ -44,7 +46,7 @@ const ReviewForm = ({
   };
 
   /**
-   * Handle form submission
+   * Handle form submission with improved error handling
    */
   const handleSubmit = async () => {
     try {
@@ -56,16 +58,22 @@ const ReviewForm = ({
       setIsSubmitting(true);
       setError(null);
 
+      // Log submission attempt
+      console.log(`Attempting to submit review for ${targetType} ${targetId}, rating: ${rating}`);
+
       const reviewData = {
         rating,
         text: reviewText.trim()
       };
 
+      // Submit review using the updated API function
       const result = await submitReview(targetId, targetType, reviewData);
+      console.log('Review submission result:', result);
 
       setIsSubmitting(false);
 
-      if (result.success) {
+      if (result && result.success) {
+        console.log('Review submitted successfully');
         resetForm();
         onClose();
         
@@ -74,11 +82,12 @@ const ReviewForm = ({
           onReviewSubmitted(result.review);
         }
       } else {
+        console.error('Review submission returned unsuccessful status', result);
         setError('Failed to submit review. Please try again.');
       }
     } catch (err) {
       console.error('Error submitting review:', err);
-      setError('An error occurred. Please try again later.');
+      setError(err.message || 'An error occurred. Please try again later.');
       setIsSubmitting(false);
     }
   };
@@ -270,3 +279,16 @@ const styles = StyleSheet.create({
 });
 
 export default ReviewForm;
+
+/* 
+Usage tip:
+Make sure you're passing the correct targetType and targetId to this component.
+For sellers, use:
+  - targetType="seller"
+  - targetId={seller.id} (or seller.email if that's their ID)
+For products, use:
+  - targetType="product" 
+  - targetId={plant.id}
+
+This component now makes API calls to: marketplace/{targetType}s/{targetId}/reviews
+*/

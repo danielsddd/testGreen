@@ -1,4 +1,5 @@
-// components/ReviewsList.js
+// Complete updated ReviewsList.js with enhanced error handling
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -40,12 +41,13 @@ const ReviewsList = ({
   // Load reviews when component mounts or when the target changes
   useEffect(() => {
     if (autoLoad && targetId && targetType) {
+      console.log(`Auto-loading reviews for ${targetType} ${targetId}`);
       loadReviews();
     }
   }, [targetId, targetType, autoLoad]);
 
   /**
-   * Load reviews from the API
+   * Load reviews from the API with improved debugging
    */
   const loadReviews = async () => {
     if (!targetId || !targetType) {
@@ -57,13 +59,17 @@ const ReviewsList = ({
     try {
       setIsLoading(true);
       setError(null);
-
+      
+      console.log(`Fetching reviews for ${targetType} ${targetId}...`);
       const data = await fetchReviews(targetType, targetId);
+      console.log(`Reviews fetch response:`, data);
 
       if (data) {
         setReviews(data.reviews || []);
         setAverageRating(data.averageRating || 0);
         setReviewCount(data.count || 0);
+        
+        console.log(`Loaded ${data.reviews?.length || 0} reviews with average rating ${data.averageRating || 0}`);
 
         // Notify parent component that reviews are loaded
         if (onReviewsLoaded) {
@@ -72,13 +78,15 @@ const ReviewsList = ({
             count: data.count || 0
           });
         }
+      } else {
+        console.warn('Review data is undefined or null');
       }
 
       setIsLoading(false);
       setRefreshing(false);
     } catch (err) {
       console.error('Error loading reviews:', err);
-      setError('Failed to load reviews. Please try again later.');
+      setError(`Failed to load reviews: ${err.message}`);
       setIsLoading(false);
       setRefreshing(false);
     }
@@ -142,13 +150,16 @@ const ReviewsList = ({
   };
 
   /**
-   * Render error state
+   * Render error state with more details
    */
   const renderError = () => {
     return (
       <View style={styles.errorContainer}>
         <MaterialIcons name="error-outline" size={48} color="#f44336" />
         <Text style={styles.errorText}>{error}</Text>
+        <Text style={styles.errorSubtext}>
+          targetType: {targetType}, targetId: {targetId}
+        </Text>
         <TouchableOpacity style={styles.retryButton} onPress={loadReviews}>
           <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
@@ -183,7 +194,7 @@ const ReviewsList = ({
       <FlatList
         data={reviews}
         renderItem={({ item }) => <ReviewItem review={item} />}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item.id || `review-${item.userId}-${Date.now()}`}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={renderEmptyState}
         refreshing={refreshing}
@@ -263,6 +274,11 @@ const styles = StyleSheet.create({
     color: '#f44336',
     fontSize: 16,
     textAlign: 'center',
+    marginBottom: 8,
+  },
+  errorSubtext: {
+    color: '#666',
+    fontSize: 12,
     marginBottom: 16,
   },
   retryButton: {
@@ -296,6 +312,33 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
+  errorSubtext: {
+    fontSize: 14,
+    color: '#777',
+    marginTop: 8,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
 });
 
 export default ReviewsList;
+
+/* 
+Usage tip:
+Make sure you're passing the correct targetType and targetId to this component.
+For sellers, use:
+  - targetType="seller"
+  - targetId={seller.id} (or seller.email if that's their ID)
+For products, use:
+  - targetType="product" 
+  - targetId={plant.id}
+
+Example usage in SellerProfileScreen:
+<ReviewsList
+  targetType="seller"
+  targetId={sellerId}
+  onAddReview={handleAddReview}
+  onReviewsLoaded={handleReviewsLoaded}
+  autoLoad={true}
+/>
+*/

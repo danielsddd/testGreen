@@ -1,17 +1,17 @@
 {
-    "bindings": [
-      {
-        "authLevel": "anonymous",
-        "type": "httpTrigger",
-        "direction": "in",
-        "name": "req",
-        "methods": ["delete", "options"],
-        "route": "marketplace/reviews/{reviewId}"
-      },
-      {
-        "type": "http",
-        "direction": "out",
-        "name": "$return"
-      }
-    ]
-  }
+  "bindings": [
+    {
+      "authLevel": "anonymous",
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["delete", "options"],
+      "route": "marketplace/{targetType}s/{targetId}/reviews/{reviewId}"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "$return"
+    }
+  ]
+}
