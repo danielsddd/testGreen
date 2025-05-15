@@ -212,32 +212,113 @@ export const deleteProduct = async (productId) => {
   }
 };
 
-// Update Product API
+
+// In services/marketplaceApi.js
+// Fix for update-product API in marketplaceApi.js
+
+/**
+ * Update an existing product with improved error handling and debugging
+ * @param {string} productId - The ID of the product to update
+ * @param {Object} updateData - The data to update the product with
+ * @returns {Promise<Object>} The response from the server
+ */
 export const updateProduct = async (productId, updateData) => {
   try {
-    return await apiRequest(`marketplace/products/${productId}`, 'PATCH', updateData);
+    if (!productId) {
+      throw new Error('Product ID is required');
+    }
+    
+    console.log(`Updating product ${productId}:`, updateData);
+    
+    // Process any image updates before sending to API
+    const processedUpdateData = { ...updateData };
+    
+    // Process main image if it's a local file
+    if (processedUpdateData.image && typeof processedUpdateData.image === 'string' && 
+        (processedUpdateData.image.startsWith('file:') || processedUpdateData.image.startsWith('data:'))) {
+      try {
+        console.log('Uploading updated main image...');
+        const uploadResult = await uploadImage(processedUpdateData.image, 'plant');
+        
+        if (uploadResult && uploadResult.url) {
+          console.log('Main image uploaded successfully:', uploadResult.url);
+          processedUpdateData.image = uploadResult.url;
+        } else {
+          console.warn('Image upload returned unexpected result:', uploadResult);
+        }
+      } catch (err) {
+        console.error('Failed to upload updated main image:', err);
+        // Continue with update but with original image
+        delete processedUpdateData.image;
+      }
+    }
+    
+    // Process additional images array if present
+    if (Array.isArray(processedUpdateData.images)) {
+      const processedImages = [];
+      let uploadFailed = false;
+      
+      console.log(`Processing ${processedUpdateData.images.length} additional images...`);
+      
+      for (const imgUri of processedUpdateData.images) {
+        // Only process if it's a local file
+        if (typeof imgUri === 'string' && 
+            (imgUri.startsWith('file:') || imgUri.startsWith('data:'))) {
+          try {
+            const uploadResult = await uploadImage(imgUri, 'plant');
+            
+            if (uploadResult && uploadResult.url) {
+              processedImages.push(uploadResult.url);
+            } else {
+              console.warn('Additional image upload returned unexpected result:', uploadResult);
+              uploadFailed = true;
+            }
+          } catch (err) {
+            console.error('Failed to upload additional image:', err);
+            uploadFailed = true;
+          }
+        } else {
+          // Keep existing remote URLs
+          processedImages.push(imgUri);
+        }
+      }
+      
+      if (uploadFailed) {
+        console.warn('Some images failed to upload. Proceeding with the images that succeeded.');
+      }
+      
+      processedUpdateData.images = processedImages;
+    }
+    
+    // Make the API request
+    // First try with PATCH which is the correct method
+    try {
+      console.log(`Sending PATCH request to marketplace/products/${productId}`);
+      const result = await apiRequest(`marketplace/products/${productId}`, 'PATCH', processedUpdateData);
+      console.log('Update successful with PATCH:', result);
+      return result;
+    } catch (patchError) {
+      // If PATCH fails with 404 or 405, try with PUT as fallback
+      if (patchError.message && (
+          patchError.message.includes('404') || 
+          patchError.message.includes('405') ||
+          patchError.message.includes('Method Not Allowed'))) {
+        console.log('PATCH failed, trying PUT instead...');
+        try {
+          const result = await apiRequest(`marketplace/products/${productId}`, 'PUT', processedUpdateData);
+          console.log('Update successful with PUT:', result);
+          return result;
+        } catch (putError) {
+          console.error('Both PATCH and PUT failed:', putError);
+          throw putError;
+        }
+      } else {
+        // Re-throw other errors
+        throw patchError;
+      }
+    }
   } catch (error) {
     console.error(`Error updating product ${productId}:`, error);
-    if (config.features.useMockOnError) {
-      return { 
-        success: true, 
-        message: 'Product updated successfully (mock)',
-        product: { ...getMockProductById(productId), ...updateData }
-      };
-    }
-    throw error;
-  }
-};
-
-// Mark Product as Sold API
-export const markProductAsSold = async (productId, buyerInfo = null) => {
-  try {
-    return await apiRequest(`marketplace/products/${productId}/sold`, 'POST', buyerInfo);
-  } catch (error) {
-    console.error(`Error marking product ${productId} as sold:`, error);
-    if (config.features.useMockOnError) {
-      return { success: true, message: 'Product marked as sold successfully (mock)' };
-    }
     throw error;
   }
 };
@@ -426,51 +507,147 @@ export const getUserListings = async (status = null) => {
 };
 
 // Image Upload API
+// Updated ImageUpload Service for marketplaceApi.js
+
+/**
+ * Upload an image to the server with improved error handling and cross-platform support
+ * @param {string} imageUri - The URI of the image to upload
+ * @param {string} type - The type of image (plant, avatar, etc.)
+ * @returns {Promise<Object>} The response from the server
+ */
 export const uploadImage = async (imageUri, type = 'plant') => {
   try {
+    // Get user email for identification
     const userEmail = await AsyncStorage.getItem('userEmail');
-
+    
+    // Validate image URI
+    if (!imageUri) {
+      throw new Error('Image URI is required');
+    }
+    
+    console.log(`Uploading ${type} image: ${imageUri.substring(0, 50)}...`);
+    
+    // Handle different platforms differently
     if (Platform.OS === 'web') {
-      // Web uses FormData
+      // Web implementation - use FormData
       const formData = new FormData();
-      formData.append('image', {
-        uri: imageUri,
-        name: `upload_${Date.now()}.jpg`,
-        type: 'image/jpeg',
-      });
+      
+      // For web, we need to handle the File/Blob differently
+      if (imageUri.startsWith('data:')) {
+        // Already a Data URI - convert to blob
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+        formData.append('image', blob, 'image.jpg');
+      } else {
+        // Assume it's a File object or similar
+        formData.append('image', {
+          uri: imageUri,
+          name: `${type}_${Date.now()}.jpg`,
+          type: 'image/jpeg',
+        });
+      }
+      
+      // Add additional metadata
       formData.append('type', type);
-
+      if (userEmail) {
+        formData.append('userId', userEmail);
+      }
+      
+      // Make the request
       const response = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
         method: 'POST',
         body: formData,
-        headers: {
-          'Authorization': authToken ? `Bearer ${authToken}` : '',
-        },
+        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
       });
-
+      
       if (!response.ok) {
-        throw new Error(`Web upload failed: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`Upload failed with status ${response.status}: ${errorText}`);
+        throw new Error(`Upload failed: ${response.status}`);
       }
-
+      
       return await response.json();
     } else {
-      // Mobile: convert to base64
-      const base64 = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      const res = await apiRequest('marketplace/uploadImage', 'POST', {
-        image: `data:image/jpeg;base64,${base64}`,
-        type,
-      });
-
-      return res;
+      // Mobile implementation - convert to base64
+      // Check if already base64
+      if (imageUri.startsWith('data:image')) {
+        // Already in base64 format
+        return await apiRequest('marketplace/uploadImage', 'POST', {
+          image: imageUri,
+          type,
+          userId: userEmail
+        });
+      }
+      
+      // Get file info to check size
+      const fileInfo = await FileSystem.getInfoAsync(imageUri);
+      if (!fileInfo.exists) {
+        throw new Error('Image file does not exist');
+      }
+      
+      // Check file size - warn if too large
+      if (fileInfo.size > 5 * 1024 * 1024) {
+        console.warn('Image is large (>5MB), upload may fail or be slow');
+      }
+      
+      try {
+        // Read as base64
+        const base64 = await FileSystem.readAsStringAsync(imageUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        // Determine MIME type based on file extension
+        let mimeType = 'image/jpeg'; // Default
+        if (imageUri.toLowerCase().endsWith('.png')) {
+          mimeType = 'image/png';
+        } else if (imageUri.toLowerCase().endsWith('.gif')) {
+          mimeType = 'image/gif';
+        }
+        
+        // Create data URI
+        const dataUri = `data:${mimeType};base64,${base64}`;
+        
+        // Send the request
+        return await apiRequest('marketplace/uploadImage', 'POST', {
+          image: dataUri,
+          type,
+          userId: userEmail
+        });
+      } catch (readError) {
+        console.error('Error reading file as base64:', readError);
+        
+        // Fallback to FormData approach for mobile
+        const formData = new FormData();
+        formData.append('image', {
+          uri: imageUri,
+          name: `${type}_${Date.now()}.jpg`,
+          type: 'image/jpeg',
+        });
+        formData.append('type', type);
+        if (userEmail) {
+          formData.append('userId', userEmail);
+        }
+        
+        const response = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
+          method: 'POST',
+          body: formData,
+          headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Upload failed with status: ${response.status}`);
+        }
+        
+        return await response.json();
+      }
     }
   } catch (error) {
     console.error('Image upload error:', error);
     throw error;
   }
 };
+
+
 
 // SignalR API
 export const getNegotiateToken = async () => {

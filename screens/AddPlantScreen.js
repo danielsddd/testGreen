@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uploadImage } from '../services/marketplaceApi'; 
-
+import * as Location from 'expo-location';
 
 // Import components
 import MarketplaceHeader from '../components/MarketplaceHeader';
@@ -123,100 +123,186 @@ const AddPlantScreen = () => {
     }
   };
 
-  const pickImage = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'We need permission to access your photos');
-        return;
-      }
   
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
-        selectionLimit: images.length < 4 ? 5 - images.length : 0, // NEW key for RN Web & Native
-      });
-  
-      if (!result.canceled && result.assets?.length > 0) {
-        if (images.length + result.assets.length > 5) {
-          Alert.alert('Too Many Images', 'You can only upload up to 5 images');
-          return;
-        }
-  
-        const newImages = [...images];
-  
-        for (const asset of result.assets) {
-          const imageUri = asset.uri;
-  
-          if (Platform.OS !== 'web') {
-            const fileInfo = await FileSystem.getInfoAsync(imageUri);
-            if (fileInfo.size > 5 * 1024 * 1024) {
-              Alert.alert('Image Too Large', 'Please select images smaller than 5MB');
-              continue;
-            }
-          }
-  
-          newImages.push(imageUri);
-        }
-  
-        setImages(newImages);
-  
-        if (formErrors.images) {
-          setFormErrors({ ...formErrors, images: '' });
-        }
-      }
-    } catch (error) {
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
+/**
+ * Open the device camera to take a photo
+ */
+const takePhoto = async () => {
+  try {
+    // Request camera permissions
+    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+    
+    if (!permissionResult.granted) {
+      Alert.alert(
+        'Permission Required', 
+        'We need camera permission to take photos',
+        [{ text: 'OK' }]
+      );
+      return;
     }
-  };
-  
+    
+    // Check if we've reached max images
+    if (images.length >= 5) {
+      Alert.alert(
+        'Too Many Images', 
+        'You can only upload up to 5 images',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
 
-  const takePhoto = async () => {
-    try {
-      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permissionResult.granted) {
-        Alert.alert('Permission Required', 'We need camera permission to take photos');
-        return;
+    // Launch camera
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+
+    // Handle cancellation
+    if (result.canceled) {
+      return;
+    }
+    
+    // Handle result - compatibility with different Expo versions
+    const selectedAsset = result.assets?.[0] || { uri: result.uri };
+    
+    if (selectedAsset?.uri) {
+      const imageUri = selectedAsset.uri;
+      
+      // Check file size on supported platforms
+      if (Platform.OS !== 'web') {
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(imageUri);
+          if (fileInfo.size > 5 * 1024 * 1024) {
+            Alert.alert(
+              'Image Too Large', 
+              'This image is larger than 5MB. It may upload slowly or fail.',
+              [{ text: 'Continue Anyway' }]
+            );
+          }
+        } catch (e) {
+          // Cannot check size, just continue
+          console.warn('Could not check image size:', e);
+        }
       }
       
-      if (images.length >= 5) {
-        Alert.alert('Too Many Images', 'You can only upload up to 5 images');
-        return;
+      setImages([...images, imageUri]);
+      
+      // Clear any error
+      if (formErrors.images) {
+        setFormErrors({ ...formErrors, images: '' });
       }
+    }
+  } catch (error) {
+    console.error('Error taking photo:', error);
+    Alert.alert(
+      'Error', 
+      'Failed to take photo. Please try again later.',
+      [{ text: 'OK' }]
+    );
+  }
+};
 
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.8,
-      });
+/**
+ * Open the device gallery to pick an image
+ */
+const pickImage = async () => {
+  try {
+    // Request permissions first
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    
+    if (!permissionResult.granted) {
+      Alert.alert(
+        'Permission Required', 
+        'We need permission to access your photos',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    // Check if we've reached max images
+    if (images.length >= 5) {
+      Alert.alert(
+        'Too Many Images', 
+        'You can only upload up to 5 images',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
 
-      if (!result.canceled && result.assets?.length > 0) {
-        const imageUri = result.assets[0].uri;
+    // Launch image picker
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+      // Only specify multiple selection on supported platforms
+      allowsMultipleSelection: Platform.OS === 'ios' || Platform.OS === 'android',
+      selectionLimit: images.length < 4 ? 5 - images.length : 1,
+    });
+
+    // Handle cancellation
+    if (result.canceled) {
+      return;
+    }
+    
+    // Handle results - compatibility with different Expo versions
+    const selectedAssets = result.assets || (result.uri ? [{ uri: result.uri }] : []);
+    
+    if (selectedAssets.length > 0) {
+      // Validate max images limit
+      if (images.length + selectedAssets.length > 5) {
+        Alert.alert(
+          'Too Many Images', 
+          'You can only upload up to 5 images. Only the first few will be added.',
+          [{ text: 'OK' }]
+        );
+        // Only take what we can fit
+        selectedAssets.length = 5 - images.length;
+      }
+      
+      // Add new images to state
+      const newImages = [...images];
+      
+      for (const asset of selectedAssets) {
+        const imageUri = asset.uri;
         
+        // Check file size on supported platforms
         if (Platform.OS !== 'web') {
-          const fileInfo = await FileSystem.getInfoAsync(imageUri);
-          const fileSize = fileInfo.size;
-          
-          if (fileSize > 5 * 1024 * 1024) {
-            Alert.alert('Image Too Large', 'Please select an image smaller than 5MB');
-            return;
+          try {
+            const fileInfo = await FileSystem.getInfoAsync(imageUri);
+            if (fileInfo.size > 5 * 1024 * 1024) {
+              Alert.alert(
+                'Image Too Large', 
+                'This image is larger than 5MB. It may upload slowly or fail.',
+                [{ text: 'Continue Anyway' }]
+              );
+            }
+          } catch (e) {
+            // Cannot check size, just continue
+            console.warn('Could not check image size:', e);
           }
         }
         
-        setImages([...images, imageUri]);
-
-        if (formErrors.images) {
-          setFormErrors({ ...formErrors, images: '' });
-        }
+        newImages.push(imageUri);
       }
-    } catch (error) {
-      console.error('Error taking photo:', error);
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
+      
+      setImages(newImages);
+      
+      // Clear any error
+      if (formErrors.images) {
+        setFormErrors({ ...formErrors, images: '' });
+      }
     }
-  };
+  } catch (error) {
+    console.error('Error picking image:', error);
+    Alert.alert(
+      'Error', 
+      'Failed to pick image. Please try again or use a different image.',
+      [{ text: 'OK' }]
+    );
+  }
+};
 
   const removeImage = (index) => {
     const newImages = [...images];
@@ -234,22 +320,118 @@ const AddPlantScreen = () => {
     setShowScientificNameModal(false);
   };
 
-  const useCurrentLocation = async () => {
-    setIsLoadingLocation(true);
-    try {
-      // In a real app, you would use something like expo-location to get the current position
-      // For this demo, we'll simulate it with a timeout and hardcoded location
-      setTimeout(() => {
-        const location = "Tel Aviv, Israel";
-        setFormData({ ...formData, city: location });
-        setIsLoadingLocation(false);
-      }, 1000);
-    } catch (error) {
-      console.error('Error getting location:', error);
-      Alert.alert('Location Error', 'Could not get your current location. Please enter it manually.');
+  /**
+ * Get the user's current location and update the form
+ */
+const useCurrentLocation = async () => {
+  setIsLoadingLocation(true);
+  try {
+    // Request permissions first
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission Denied',
+        'We need location access to use your current location. You can still enter your location manually.',
+        [{ text: 'OK' }]
+      );
       setIsLoadingLocation(false);
+      return;
     }
-  };
+    
+    // Get current position
+    const position = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+      timeout: 15000 // 15 seconds timeout
+    });
+    
+    // Get readable address from coordinates
+    const { latitude, longitude } = position.coords;
+    
+    try {
+      // First try reverse geocoding through our API
+      const locationData = await marketplaceApi.geocodeAddress(`${latitude},${longitude}`);
+      
+      if (locationData && locationData.city) {
+        // Use formatted address from our API
+        const formattedLocation = locationData.city + 
+          (locationData.country ? `, ${locationData.country}` : '');
+        
+        setFormData({
+          ...formData,
+          city: formattedLocation
+        });
+        
+        setIsLoadingLocation(false);
+        return;
+      }
+    } catch (apiError) {
+      // API geocoding failed, fall back to Expo's geocoder
+      console.warn('API geocoding failed, falling back to Expo geocoder:', apiError);
+    }
+    
+    // Fall back to Expo's reverse geocoding
+    const addresses = await Location.reverseGeocodeAsync({
+      latitude,
+      longitude
+    });
+    
+    if (addresses && addresses.length > 0) {
+      const address = addresses[0];
+      
+      // Format the address components
+      let formattedLocation = '';
+      
+      if (address.city) {
+        formattedLocation += address.city;
+      } else if (address.region) {
+        formattedLocation += address.region;
+      }
+      
+      if (address.country) {
+        if (formattedLocation) {
+          formattedLocation += `, ${address.country}`;
+        } else {
+          formattedLocation = address.country;
+        }
+      }
+      
+      // Default if no location found
+      if (!formattedLocation) {
+        formattedLocation = 'Unknown location';
+      }
+      
+      setFormData({
+        ...formData,
+        city: formattedLocation
+      });
+    } else {
+      // No address found, just use coordinates
+      setFormData({
+        ...formData,
+        city: `Lat: ${latitude.toFixed(4)}, Long: ${longitude.toFixed(4)}`
+      });
+    }
+    
+    setIsLoadingLocation(false);
+  } catch (error) {
+    console.error('Error getting location:', error);
+    
+    let errorMessage = 'Could not get your current location. Please enter it manually.';
+    
+    // Provide more specific error messages based on the error
+    if (error.code === 'E_LOCATION_SETTINGS_UNSATISFIED') {
+      errorMessage = 'Please enable location services in your device settings.';
+    } else if (error.code === 'E_LOCATION_GEOCODING_FAILED') {
+      errorMessage = 'Could not determine your address. Please enter it manually.';
+    } else if (error.code === 'E_LOCATION_ACTIVITY_MISSING') {
+      errorMessage = 'Location provider is unavailable. Please enter your location manually.';
+    }
+    
+    Alert.alert('Location Error', errorMessage, [{ text: 'OK' }]);
+    setIsLoadingLocation(false);
+  }
+};
 
   const validateForm = () => {
     const errors = {};

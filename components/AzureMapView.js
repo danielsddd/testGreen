@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { View, StyleSheet, Platform, Text, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Platform, Text, ActivityIndicator, FlatList, TouchableOpacity, Image } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { MaterialIcons } from '@expo/vector-icons';
 
@@ -11,30 +11,87 @@ const AzureMapView = ({ products, onSelectProduct }) => {
 
   useEffect(() => {
     if (webViewRef.current && products && products.length > 0) {
-      const message = JSON.stringify({
-        type: 'UPDATE_PRODUCTS',
-        products,
-      });
-
+      const message = JSON.stringify({ type: 'UPDATE_PRODUCTS', products });
       const timer = setTimeout(() => {
-        if (webViewRef.current) {
-          webViewRef.current.postMessage(message);
-        }
+        webViewRef.current?.postMessage(message);
       }, 1500);
-
       return () => clearTimeout(timer);
     }
   }, [products]);
 
-  if (Platform.OS === 'web' || !products || products.length === 0) {
+  // Web fallback view
+  if (Platform.OS === 'web') {
+    if (!products || products.length === 0) {
+      return (
+        <View style={styles.fallbackContainer}>
+          <MaterialIcons name="map" size={48} color="#aaa" />
+          <Text style={styles.fallbackText}>No plant locations available to display on map.</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.webMapContainer}>
+        <View style={styles.webMapHeader}>
+          <MaterialIcons name="map" size={28} color="#4CAF50" />
+          <Text style={styles.webMapTitle}>Plant Locations</Text>
+        </View>
+
+        <Text style={styles.webMapSubtitle}>
+          Interactive map view is currently optimized for mobile.
+          Here are the available plants by location:
+        </Text>
+
+        <FlatList
+          data={groupProductsByLocation(products)}
+          keyExtractor={(item) => item.location}
+          renderItem={({ item }) => (
+            <View style={styles.locationGroup}>
+              <View style={styles.locationHeader}>
+                <MaterialIcons name="place" size={20} color="#4CAF50" />
+                <Text style={styles.locationName}>{item.location}</Text>
+                <Text style={styles.locationCount}>
+                  {item.products.length} {item.products.length === 1 ? 'Plant' : 'Plants'}
+                </Text>
+              </View>
+              <FlatList
+                data={item.products}
+                keyExtractor={(product) => product.id || product._id}
+                renderItem={({ item: product }) => (
+                  <TouchableOpacity
+                    style={styles.productItem}
+                    onPress={() => onSelectProduct?.(product.id || product._id)}
+                  >
+                    <Image
+                      source={{ uri: product.image || product.imageUrl || 'https://via.placeholder.com/50?text=Plant' }}
+                      style={styles.productImage}
+                    />
+                    <View style={styles.productInfo}>
+                      <Text style={styles.productName} numberOfLines={1}>
+                        {product.title || product.name}
+                      </Text>
+                      <Text style={styles.productPrice}>
+                        ${typeof product.price === 'number' ? product.price.toFixed(2) : product.price}
+                      </Text>
+                    </View>
+                    <MaterialIcons name="chevron-right" size={24} color="#ccc" />
+                  </TouchableOpacity>
+                )}
+                scrollEnabled={false}
+              />
+            </View>
+          )}
+        />
+      </View>
+    );
+  }
+
+  // Mobile + Map Error State
+  if (!products || products.length === 0) {
     return (
       <View style={styles.fallbackContainer}>
         <MaterialIcons name="map" size={48} color="#aaa" />
-        <Text style={styles.fallbackText}>
-          {!products || products.length === 0
-            ? "No plant locations available to display on map."
-            : "Map view is not available on this platform."}
-        </Text>
+        <Text style={styles.fallbackText}>No plant locations available to display on map.</Text>
       </View>
     );
   }
@@ -53,191 +110,27 @@ const AzureMapView = ({ products, onSelectProduct }) => {
     <View style={styles.container}>
       <WebView
         ref={webViewRef}
-        source={{
-          html: `<!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-              <style>
-                body {
-                  margin: 0;
-                  padding: 0;
-                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                }
-                #map {
-                  width: 100%;
-                  height: 100%;
-                  background-color: #f0f0f0;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  flex-direction: column;
-                }
-                .map-content {
-                  text-align: center;
-                  padding: 20px;
-                  max-width: 80%;
-                }
-                .map-title {
-                  font-size: 18px;
-                  font-weight: bold;
-                  color: #4CAF50;
-                  margin-bottom: 10px;
-                }
-                .map-subtitle {
-                  font-size: 14px;
-                  color: #666;
-                  margin-bottom: 20px;
-                }
-                .plant-list {
-                  text-align: left;
-                  background: white;
-                  border-radius: 8px;
-                  padding: 15px;
-                  max-height: 300px;
-                  overflow-y: auto;
-                  width: 100%;
-                  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                }
-                .plant-item {
-                  padding: 8px 0;
-                  border-bottom: 1px solid #eee;
-                  cursor: pointer;
-                }
-                .plant-item:hover {
-                  background-color: #f9f9f9;
-                }
-                .plant-title {
-                  font-weight: bold;
-                  color: #333;
-                }
-                .plant-price {
-                  color: #4CAF50;
-                  font-weight: bold;
-                }
-                .plant-location {
-                  font-size: 12px;
-                  color: #666;
-                }
-              </style>
-            </head>
-            <body>
-              <div id="map">
-                <div class="map-content">
-                  <div class="map-title">Plants Map View</div>
-                  <div class="map-subtitle">Simplified view for development</div>
-                  <div class="plant-list" id="plantList">
-                    Loading plants...
-                  </div>
-                </div>
-              </div>
-              <script>
-                // Create popup content for future use
-                function createPopupContent(product) {
-                  const container = document.createElement('div');
-                  container.style.padding = '10px';
-                  container.style.maxWidth = '200px';
-
-                  const flexContainer = document.createElement('div');
-                  flexContainer.style.display = 'flex';
-                  flexContainer.style.flexDirection = 'column';
-
-                  const details = document.createElement('div');
-                  details.innerHTML = \`
-                    <div><strong>\${product.title || product.name}</strong></div>
-                    <div>Price: $\${typeof product.price === 'number' ? product.price.toFixed(2) : product.price}</div>
-                    <div>Location: \${product.location?.city || product.city || 'Unknown'}</div>
-                  \`;
-
-                  flexContainer.appendChild(details);
-                  container.appendChild(flexContainer);
-
-                  return container;
-                }
-
-                document.addEventListener('message', function(event) {
-                  try {
-                    const message = JSON.parse(event.data);
-
-                    if (message.type === 'UPDATE_PRODUCTS') {
-                      const products = message.products;
-                      const plantListEl = document.getElementById('plantList');
-
-                      if (products && products.length > 0) {
-                        let html = '';
-                        products.forEach(product => {
-                          const title = product.title || product.name || 'Unnamed Plant';
-                          const price = typeof product.price === 'number' ? product.price.toFixed(2) : product.price || '0.00';
-                          const location = (product.location && product.location.city) || product.city || 'Unknown location';
-                          const id = product.id || product._id || '';
-
-                          html += \`<div class="plant-item" onclick="selectPlant('\${id}')">\`;
-                          html += \`<div class="plant-title">\${title}</div>\`;
-                          html += \`<div class="plant-price">$\${price}</div>\`;
-                          html += \`<div class="plant-location">\${location}</div>\`;
-                          html += \`</div>\`;
-                        });
-
-                        plantListEl.innerHTML = html;
-                      } else {
-                        plantListEl.innerHTML = '<div>No plants with location data found</div>';
-                      }
-
-                      window.ReactNativeWebView.postMessage(JSON.stringify({
-                        type: 'PRODUCTS_RECEIVED',
-                        count: products ? products.length : 0
-                      }));
-                    }
-                  } catch (e) {
-                    console.error('Error handling message:', e);
-                    window.ReactNativeWebView.postMessage(JSON.stringify({
-                      type: 'ERROR',
-                      message: e.message
-                    }));
-                  }
-                });
-
-                function selectPlant(id) {
-                  window.ReactNativeWebView.postMessage(JSON.stringify({
-                    type: 'PIN_CLICKED',
-                    productId: id
-                  }));
-                }
-
-                window.ReactNativeWebView.postMessage(JSON.stringify({
-                  type: 'MAP_READY'
-                }));
-              </script>
-            </body>
-            </html>`
-        }}
+        source={{ html: '...' /* your existing HTML stays */ }}
         style={styles.map}
         onMessage={(event) => {
           try {
             const message = JSON.parse(event.nativeEvent.data);
-
-            if (message.type === 'MAP_READY') {
-              setIsLoading(false);
-            } else if (message.type === 'PIN_CLICKED' && onSelectProduct) {
-              onSelectProduct(message.productId);
-            } else if (message.type === 'ERROR') {
-              console.error('Error in WebView:', message.message);
-            }
+            if (message.type === 'MAP_READY') setIsLoading(false);
+            else if (message.type === 'PIN_CLICKED') onSelectProduct?.(message.productId);
+            else if (message.type === 'ERROR') console.error('WebView error:', message.message);
           } catch (e) {
-            console.error('Error parsing WebView message:', e);
+            console.error('WebView parse error:', e);
           }
         }}
-        onError={(error) => {
-          console.error('WebView error:', error);
+        onError={(e) => {
           setIsError(true);
-          setErrorMessage(error.nativeEvent?.description || 'Failed to load map');
+          setErrorMessage(e.nativeEvent?.description || 'Map failed to load.');
         }}
-        javaScriptEnabled={true}
-        domStorageEnabled={true}
+        javaScriptEnabled
+        domStorageEnabled
         originWhitelist={['*']}
-        startInLoadingState={true}
-        scalesPageToFit={true}
+        startInLoadingState
+        scalesPageToFit
       />
 
       {isLoading && (
@@ -250,58 +143,56 @@ const AzureMapView = ({ products, onSelectProduct }) => {
   );
 };
 
+// Utility: Group products by location
+const groupProductsByLocation = (products) => {
+  const grouped = {};
+  for (const product of products) {
+    let key = product?.location?.city || product?.city || 'Unknown location';
+    if (!grouped[key]) grouped[key] = { location: key, products: [] };
+    grouped[key].products.push(product);
+  }
+  return Object.values(grouped).sort((a, b) => a.location.localeCompare(b.location));
+};
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    position: 'relative',
-  },
-  map: {
-    flex: 1,
-  },
-  fallbackContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    padding: 20,
-  },
-  fallbackText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 16,
-    maxWidth: 250,
-  },
-  errorText: {
-    fontSize: 18,
-    color: '#d32f2f',
-    textAlign: 'center',
-    marginTop: 16,
-    fontWeight: 'bold',
-  },
-  errorDetailText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 8,
-    marginHorizontal: 32,
-  },
+  container: { flex: 1, backgroundColor: '#fff', position: 'relative' },
+  map: { flex: 1 },
+  fallbackContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  fallbackText: { fontSize: 16, color: '#666', textAlign: 'center', marginTop: 16, maxWidth: 250 },
+  errorText: { fontSize: 18, color: '#d32f2f', fontWeight: 'bold', textAlign: 'center', marginTop: 16 },
+  errorDetailText: { fontSize: 14, color: '#666', textAlign: 'center', marginTop: 8 },
   loaderContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(255,255,255,0.8)', justifyContent: 'center', alignItems: 'center',
   },
-  loaderText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#4CAF50',
+  loaderText: { marginTop: 12, fontSize: 16, color: '#4CAF50' },
+
+  // Web fallback styles
+  webMapContainer: { flex: 1, backgroundColor: '#fff', padding: 16 },
+  webMapHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  webMapTitle: { fontSize: 20, fontWeight: 'bold', color: '#333', marginLeft: 12 },
+  webMapSubtitle: { fontSize: 14, color: '#666', marginBottom: 24 },
+  locationGroup: {
+    marginBottom: 24, borderWidth: 1, borderColor: '#eee',
+    borderRadius: 8, overflow: 'hidden',
   },
+  locationHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    padding: 12, backgroundColor: '#f9f9f9',
+    borderBottomWidth: 1, borderBottomColor: '#eee',
+  },
+  locationName: { fontSize: 16, fontWeight: '600', color: '#333', flex: 1, marginLeft: 8 },
+  locationCount: { fontSize: 14, color: '#666' },
+  productItem: {
+    flexDirection: 'row', padding: 12, alignItems: 'center',
+    borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
+  },
+  productImage: {
+    width: 50, height: 50, borderRadius: 4, backgroundColor: '#f0f0f0',
+  },
+  productInfo: { flex: 1, marginLeft: 12 },
+  productName: { fontSize: 16, color: '#333', marginBottom: 4 },
+  productPrice: { fontSize: 14, fontWeight: '600', color: '#4CAF50' },
 });
 
 export default AzureMapView;
