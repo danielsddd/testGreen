@@ -965,18 +965,70 @@ export const getReviews = async (targetId, type = 'seller') => {
   }
 };
 
+
+/**
+ * Get reviews for a product or seller
+ * @param {string} targetType - The type of review target ('seller' or 'product')
+ * @param {string} targetId - ID of the review target
+ * @returns {Promise<Object>} - The response with reviews array
+ */
+export const fetchReviews = async (targetType, targetId) => {
+  try {
+    // Use the correct endpoint format that matches your backend
+    return await apiRequest(`marketplace/reviews?targetType=${targetType}&targetId=${targetId}`);
+  } catch (error) {
+    console.error(`Error fetching ${targetType} reviews:`, error);
+    
+    if (config.features.useMockOnError) {
+      // Return mock reviews for development
+      return {
+        reviews: [
+          {
+            id: '1',
+            rating: 5,
+            text: 'Great seller! Plants arrived in perfect condition.',
+            userName: 'Plant Lover',
+            userId: 'user1@example.com',
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: '2',
+            rating: 4,
+            text: 'Good communication and nice plants.',
+            userName: 'Green Thumb',
+            userId: 'user2@example.com',
+            createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ],
+        averageRating: 4.5,
+        count: 2
+      };
+    }
+    
+    throw error;
+  }
+};
+
 /**
  * Submit a review for a product or seller
  * @param {string} targetId - The ID of the product or seller
- * @param {string} type - The type of review: 'product' or 'seller' 
+ * @param {string} targetType - The type of review: 'product' or 'seller' 
  * @param {Object} reviewData - The review data with rating and text
  * @returns {Promise<Object>} - The response with success status
  */
-export const submitReview = async (targetId, type = 'seller', reviewData) => {
+export const submitReview = async (targetId, targetType = 'seller', reviewData) => {
   try {
-    return await apiRequest(`marketplace/${type}s/${targetId}/reviews`, 'POST', reviewData);
+    // Send data in the format expected by the backend
+    const data = {
+      targetType: targetType,
+      targetId: targetId,
+      rating: reviewData.rating,
+      text: reviewData.text
+    };
+    
+    return await apiRequest(`marketplace/reviews`, 'POST', data);
   } catch (error) {
-    console.error(`Error submitting ${type} review:`, error);
+    console.error(`Error submitting ${targetType} review:`, error);
     
     if (config.features.useMockOnError) {
       // Return mock success response for development
@@ -1052,6 +1104,9 @@ export default {
   deleteProduct,
   wishProduct,
   markProductAsSold,
+  fetchReviews,
+  submitReview,
+  deleteReview,
   
   // User methods
   fetchUserProfile,
