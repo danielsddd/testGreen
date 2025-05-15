@@ -1,6 +1,7 @@
-// marketplace/services/marketplaceApi.js
+// Frontend: services/marketplaceApi.js
 import config from './config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system';
 import { MOCK_USER, MOCK_PLANTS, getMockProducts, getMockProductById, getMockMessageData } from './mockData';
 
 // API Base URL points to Azure Functions
@@ -196,6 +197,49 @@ export const wishProduct = async (id) => {
   }
 };
 
+// Delete Product API
+export const deleteProduct = async (productId) => {
+  try {
+    return await apiRequest(`marketplace/products/${productId}`, 'DELETE');
+  } catch (error) {
+    console.error(`Error deleting product ${productId}:`, error);
+    if (config.features.useMockOnError) {
+      return { success: true, message: 'Product deleted successfully (mock)' };
+    }
+    throw error;
+  }
+};
+
+// Update Product API
+export const updateProduct = async (productId, updateData) => {
+  try {
+    return await apiRequest(`marketplace/products/${productId}`, 'PATCH', updateData);
+  } catch (error) {
+    console.error(`Error updating product ${productId}:`, error);
+    if (config.features.useMockOnError) {
+      return { 
+        success: true, 
+        message: 'Product updated successfully (mock)',
+        product: { ...getMockProductById(productId), ...updateData }
+      };
+    }
+    throw error;
+  }
+};
+
+// Mark Product as Sold API
+export const markProductAsSold = async (productId, buyerInfo = null) => {
+  try {
+    return await apiRequest(`marketplace/products/${productId}/sold`, 'POST', buyerInfo);
+  } catch (error) {
+    console.error(`Error marking product ${productId} as sold:`, error);
+    if (config.features.useMockOnError) {
+      return { success: true, message: 'Product marked as sold successfully (mock)' };
+    }
+    throw error;
+  }
+};
+
 // MESSAGING API
 export const fetchConversations = async () => {
   try {
@@ -256,6 +300,34 @@ export const startConversation = async (receiver, plantId, message) => {
   }
 };
 
+// Typing Indicator API
+export const sendTypingIndicator = async (conversationId, isTyping) => {
+  try {
+    return await apiRequest('marketplace/messages/typing', 'POST', {
+      conversationId,
+      isTyping
+    });
+  } catch (error) {
+    console.error('Error sending typing indicator:', error);
+    // Don't throw for typing indicators as they're not critical
+    return { success: false };
+  }
+};
+
+// Mark Messages as Read API
+export const markMessagesAsRead = async (conversationId, messageIds = []) => {
+  try {
+    return await apiRequest('marketplace/messages/markAsRead', 'POST', {
+      conversationId,
+      messageIds
+    });
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+    // Don't throw for read receipts as they're not critical
+    return { success: false };
+  }
+};
+
 // USER API
 export const fetchUserProfile = async (userId = null) => {
   try {
@@ -290,6 +362,105 @@ export const updateUserProfile = async (id, userData) => {
   }
 };
 
+// User Wishlist API
+export const getUserWishlist = async () => {
+  try {
+    // Get the current user's email
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    if (!userEmail) {
+      throw new Error('User is not authenticated');
+    }
+    
+    return await apiRequest(`marketplace/users/${encodeURIComponent(userEmail)}/wishlist`);
+  } catch (error) {
+    console.error('Error fetching user wishlist:', error);
+    if (config.features.useMockOnError) {
+      return { wishlist: MOCK_USER.favorites || [] };
+    }
+    throw error;
+  }
+};
+
+// User Listings API
+export const getUserListings = async (status = null) => {
+  try {
+    // Get the current user's email
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    if (!userEmail) {
+      throw new Error('User is not authenticated');
+    }
+    
+    let endpoint = `marketplace/users/${encodeURIComponent(userEmail)}/listings`;
+    if (status) {
+      endpoint += `?status=${status}`;
+    }
+    
+    return await apiRequest(endpoint);
+  } catch (error) {
+    console.error('Error fetching user listings:', error);
+    if (config.features.useMockOnError) {
+      const listings = MOCK_USER.listings || [];
+      
+      if (status === 'active') {
+        return { listings: listings.filter(l => l.status === 'active') };
+      } else if (status === 'sold') {
+        return { listings: listings.filter(l => l.status === 'sold') };
+      } else {
+        return { 
+          active: listings.filter(l => l.status === 'active'),
+          sold: listings.filter(l => l.status === 'sold'),
+          deleted: [],
+          count: {
+            active: listings.filter(l => l.status === 'active').length,
+            sold: listings.filter(l => l.status === 'sold').length,
+            deleted: 0,
+            total: listings.length
+          }
+        };
+      }
+    }
+    throw error;
+  }
+};
+
+// Image Upload API
+export const uploadImage = async (imageData, type = 'plant') => {
+  try {
+    // Check if imageData is a URI (from ImagePicker) or base64 string
+    let processedImageData = imageData;
+    
+    if (typeof imageData === 'string' && (imageData.startsWith('file://') || imageData.startsWith('content://'))) {
+      // It's a file URI, we need to read it as base64
+      try {
+        const base64 = await FileSystem.readAsStringAsync(imageData, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        processedImageData = `data:image/jpeg;base64,${base64}`;
+      } catch (readError) {
+        console.error('Error reading image:', readError);
+        throw new Error('Failed to process image');
+      }
+    }
+    
+    // Send to API
+    return await apiRequest('marketplace/uploadImage', 'POST', {
+      image: processedImageData,
+      type: type
+    });
+  } catch (error) {
+    console.error('Error uploading image:', error);
+    if (config.features.useMockOnError) {
+      // Return a mock image URL
+      return { 
+        url: 'https://via.placeholder.com/300?text=UploadedImage',
+        type: type,
+        filename: `mock_${Date.now()}.jpg`
+      };
+    }
+    throw error;
+  }
+};
+
 // SignalR API
 export const getNegotiateToken = async () => {
   try {
@@ -313,23 +484,40 @@ export const geocodeAddress = async (address) => {
   } catch (error) {
     console.error('Error geocoding address:', error);
     if (config.features.useMockOnError) {
-      // Mock geocoding result
+      // Generate mock coordinates from hash of address
+      const hash = address.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
       return {
-        latitude: 32.0853 + (Math.random() * 0.02 - 0.01),
-        longitude: 34.7818 + (Math.random() * 0.02 - 0.01),
+        latitude: 32.0853 + (hash % 20 - 10) / 100,
+        longitude: 34.7818 + (hash % 20 - 10) / 100,
+        city: address.split(',')[0],
+        country: 'Israel'
       };
     }
     throw error;
   }
 };
 
-export const getNearbyProducts = async (latitude, longitude, radius = 10) => {
+// Nearby Products API
+export const getNearbyProducts = async (latitude, longitude, radius = 10, category = null) => {
   try {
-    return await apiRequest(`marketplace/nearbyProducts?lat=${latitude}&lon=${longitude}&radius=${radius}`);
+    let endpoint = `marketplace/nearbyProducts?lat=${latitude}&lon=${longitude}&radius=${radius}`;
+    
+    if (category && category !== 'All') {
+      endpoint += `&category=${encodeURIComponent(category)}`;
+    }
+    
+    return await apiRequest(endpoint);
   } catch (error) {
     console.error('Error getting nearby products:', error);
     if (config.features.useMockOnError) {
-      return getMockProducts();
+      // Generate mock nearby products
+      return {
+        products: MOCK_PLANTS.map(plant => ({
+          ...plant,
+          distance: Math.random() * radius
+        })).slice(0, 5),
+        count: 5
+      };
     }
     throw error;
   }
@@ -382,23 +570,56 @@ export const identifyPlantPhoto = async (photoFormData) => {
   }
 };
 
+// Form multipart/form-data for image upload
+export const createImageFormData = async (uri, name = 'image', type = 'image/jpeg') => {
+  const formData = new FormData();
+  formData.append('image', {
+    uri,
+    name: name,
+    type: type,
+  });
+  return formData;
+};
+
 // Export the API
 export default {
+  // Auth methods
   setAuthToken,
   initializeAuthToken,
+  
+  // Product methods
   getAll,
   getSpecific,
   createPlant,
+  updateProduct,
+  deleteProduct,
   wishProduct,
-  fetchConversations,
-  sendMessage,
-  startConversation,
-  fetchMessages,
+  markProductAsSold,
+  
+  // User methods
   fetchUserProfile,
   updateUserProfile,
+  getUserWishlist,
+  getUserListings,
+  
+  // Messaging methods
+  fetchConversations,
+  fetchMessages,
+  sendMessage,
+  startConversation,
+  markMessagesAsRead,
+  sendTypingIndicator,
   getNegotiateToken,
+  
+  // Location methods
   geocodeAddress,
   getNearbyProducts,
+  
+  // Image methods
+  uploadImage,
+  createImageFormData,
+  
+  // Main app integration
   getUserPlantsByLocation,
   getUserLocations,
   identifyPlantPhoto
