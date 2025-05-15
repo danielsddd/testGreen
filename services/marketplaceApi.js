@@ -925,6 +925,118 @@ export const getCurrentLocation = async () => {
   }
 };
 
+/**
+ * Get reviews for a product or seller
+ * @param {string} targetId - The ID of the product or seller
+ * @param {string} type - The type of review: 'product' or 'seller'
+ * @returns {Promise<Object>} - The response with reviews array
+ */
+export const getReviews = async (targetId, type = 'seller') => {
+  try {
+    return await apiRequest(`marketplace/${type}s/${targetId}/reviews`);
+  } catch (error) {
+    console.error(`Error fetching ${type} reviews:`, error);
+    
+    if (config.features.useMockOnError) {
+      // Return mock reviews for development
+      return {
+        reviews: [
+          {
+            id: '1',
+            rating: 5,
+            text: 'Great seller! Plants arrived in perfect condition.',
+            userName: 'Plant Lover',
+            userId: 'user1@example.com',
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: '2',
+            rating: 4,
+            text: 'Good communication and nice plants.',
+            userName: 'Green Thumb',
+            userId: 'user2@example.com',
+            createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+          },
+        ]
+      };
+    }
+    
+    throw error;
+  }
+};
+
+/**
+ * Submit a review for a product or seller
+ * @param {string} targetId - The ID of the product or seller
+ * @param {string} type - The type of review: 'product' or 'seller' 
+ * @param {Object} reviewData - The review data with rating and text
+ * @returns {Promise<Object>} - The response with success status
+ */
+export const submitReview = async (targetId, type = 'seller', reviewData) => {
+  try {
+    return await apiRequest(`marketplace/${type}s/${targetId}/reviews`, 'POST', reviewData);
+  } catch (error) {
+    console.error(`Error submitting ${type} review:`, error);
+    
+    if (config.features.useMockOnError) {
+      // Return mock success response for development
+      return {
+        success: true,
+        review: {
+          id: 'new-' + Date.now(),
+          ...reviewData,
+          userName: 'You',
+          userId: await AsyncStorage.getItem('userEmail'),
+          createdAt: new Date().toISOString()
+        }
+      };
+    }
+    
+    throw error;
+  }
+};
+
+/**
+ * Delete a review
+ * @param {string} reviewId - The ID of the review to delete
+ * @returns {Promise<Object>} - The response with success status
+ */
+export const deleteReview = async (reviewId) => {
+  try {
+    return await apiRequest(`marketplace/reviews/${reviewId}`, 'DELETE');
+  } catch (error) {
+    console.error('Error deleting review:', error);
+    
+    if (config.features.useMockOnError) {
+      // Return mock success response for development
+      return { success: true };
+    }
+    
+    throw error;
+  }
+};
+
+export async function speechToText(audioUrl) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/speechToText`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ audioUrl }),
+    });
+
+    const data = await response.json();
+    if (response.ok && data.text) {
+      return data.text;
+    } else {
+      throw new Error(data.error || 'Speech recognition failed');
+    }
+  } catch (error) {
+    console.error('speechToText error:', error);
+    throw error;
+  }
+}
 
 // Export the API
 export default {
@@ -967,5 +1079,7 @@ export default {
   // Main app integration
   getUserPlantsByLocation,
   getUserLocations,
-  identifyPlantPhoto
+  identifyPlantPhoto,
+  //Speech recognition
+  speechToText
 };

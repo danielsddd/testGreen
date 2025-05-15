@@ -14,6 +14,8 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio } from 'expo-av';
+import { uploadImage, speechToText } from '../services/marketplaceApi'; 
 
 // Import components
 import MarketplaceHeader from '../components/MarketplaceHeader';
@@ -49,6 +51,7 @@ const MarketplaceScreen = ({ navigation }) => {
   const [userLocation, setUserLocation] = useState(null);
   const [activeFilters, setActiveFilters] = useState([]);
   const [isOnline, setIsOnline] = useState(true);
+  const [recording, setRecording] = useState(null);
 
   // Subscribe to sync service for online status
   useEffect(() => {

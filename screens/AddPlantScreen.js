@@ -16,7 +16,7 @@ import {
   Modal,
   FlatList,
 } from 'react-native';
-import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons,MaterialCommunityIcons,FontAwesome5  } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -77,7 +77,6 @@ const AddPlantScreen = () => {
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [newPlantId, setNewPlantId] = useState(null);
-
   // Load plant categories
   const categories = getAddPlantCategories();
   
@@ -507,9 +506,9 @@ const AddPlantScreen = () => {
 
   const handleSubmit = async () => {
     if (!validateForm()) return;
-
+  
     setIsLoading(true);
-
+  
     try {
       // Get the user's email from AsyncStorage
       const userEmail = await AsyncStorage.getItem('userEmail');
@@ -517,10 +516,10 @@ const AddPlantScreen = () => {
       if (!userEmail) {
         throw new Error('User is not authenticated');
       }
-
+  
       // Prepare image data
       const imageData = await prepareImageData();
-      
+  
       // Prepare plant data
       const plantData = {
         title: formData.title,
@@ -535,18 +534,18 @@ const AddPlantScreen = () => {
         sellerId: userEmail, // Use the authenticated user's email as sellerId
         productType: listingType, // Add product type field
       };
-
+  
       // Submit to API
       const result = await createPlant(plantData);
-
+  
       if (result?.productId) {
         setNewPlantId(result.productId);
         setShowSuccess(true);
-        
-        // Auto-navigate after a delay
+  
+        // Auto-navigate to Profile screen after a delay
         setTimeout(() => {
           setShowSuccess(false);
-          navigation.navigate('PlantDetail', { plantId: result.productId });
+          navigation.navigate('Profile', { refresh: true });
         }, 2500);
       } else {
         throw new Error('Failed to create listing');
@@ -558,6 +557,7 @@ const AddPlantScreen = () => {
       setIsLoading(false);
     }
   };
+  
 
   // Render Scientific Name Modal
   const renderScientificNameModal = () => {
@@ -711,7 +711,7 @@ const AddPlantScreen = () => {
                   ]}
                   onPress={() => setListingType('tool')}
                 >
-                  <MaterialIcons
+                  <MaterialCommunityIcons 
                     name="tools"
                     size={24}
                     color={listingType === 'tool' ? '#fff' : '#4CAF50'}
@@ -972,7 +972,7 @@ const AddPlantScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#FAFAFA',
   },
   keyboardAvoidingView: {
     flex: 1,
@@ -981,19 +981,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 16,
-    paddingBottom: 40,
+    padding: 20,
+    paddingBottom: 50,
   },
   listingTypeContainer: {
     marginBottom: 24,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#ffffff',
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
   },
   listingTypeTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2E7D32',
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -1004,10 +1008,11 @@ const styles = StyleSheet.create({
   listingTypeButton: {
     borderWidth: 1,
     borderColor: '#4CAF50',
-    borderRadius: 8,
+    borderRadius: 10,
     padding: 12,
     alignItems: 'center',
     minWidth: 100,
+    backgroundColor: '#F1F8E9',
   },
   selectedListingType: {
     backgroundColor: '#4CAF50',
@@ -1015,25 +1020,33 @@ const styles = StyleSheet.create({
   listingTypeText: {
     marginTop: 4,
     color: '#4CAF50',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   selectedListingTypeText: {
     color: '#fff',
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '700',
     marginBottom: 20,
-    color: '#2E7D32',
+    color: '#1B5E20',
+    textAlign: 'center',
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 28,
+    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#333',
+    fontWeight: '600',
+    marginBottom: 14,
+    color: '#2E7D32',
   },
   imageScroller: {
     flexDirection: 'row',
@@ -1042,19 +1055,19 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     position: 'relative',
-    marginRight: 10,
+    marginRight: 12,
   },
   plantImage: {
     width: 100,
     height: 100,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
+    borderRadius: 12,
+    backgroundColor: '#e0e0e0',
   },
   removeImageButton: {
     position: 'absolute',
     top: 5,
     right: 5,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: '#D32F2F',
     borderRadius: 12,
     width: 24,
     height: 24,
@@ -1063,73 +1076,73 @@ const styles = StyleSheet.create({
   },
   imageActionButtons: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
   },
   addImageButton: {
     width: 100,
     height: 100,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#BDBDBD',
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#F5F5F5',
     marginRight: 10,
   },
   addImageText: {
     marginTop: 4,
-    color: '#4CAF50',
-    fontSize: 12,
+    color: '#388E3C',
+    fontSize: 13,
+    fontWeight: '500',
   },
   label: {
     fontSize: 16,
-    marginBottom: 8,
-    color: '#555',
+    marginBottom: 6,
+    color: '#333',
   },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
-    borderRadius: 8,
+    borderRadius: 10,
     padding: 12,
-    marginBottom: 16,
     fontSize: 16,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#F1FDF4',
+    marginBottom: 14,
   },
   pickerButton: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
   },
   pickerButtonText: {
-    color: '#999',
+    color: '#2E7D32',
     fontSize: 16,
   },
   filledInput: {
-    borderColor: '#A5D6A7',
-    backgroundColor: '#f0f9f0',
+    borderColor: '#AED581',
+    backgroundColor: '#F1FDF4',
   },
   filledInputText: {
-    color: '#333',
+    color: '#2E7D32',
   },
   inputError: {
     borderColor: '#f44336',
   },
   errorText: {
-    color: '#f44336',
-    fontSize: 12,
-    marginTop: -12,
-    marginBottom: 12,
+    color: '#D32F2F',
+    fontSize: 13,
+    marginTop: -8,
+    marginBottom: 8,
   },
   helperText: {
-    color: '#666',
+    color: '#757575',
     fontSize: 12,
     marginTop: 4,
-    marginBottom: 12,
   },
   textArea: {
-    height: 120,
+    height: 100,
     textAlignVertical: 'top',
   },
   locationContainer: {
@@ -1148,32 +1161,32 @@ const styles = StyleSheet.create({
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
   },
   categoryScroller: {
-    marginBottom: 16,
+    marginVertical: 10,
   },
   categoryButton: {
     paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderRadius: 20,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#E8F5E9',
     marginRight: 8,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   selectedCategoryButton: {
-    backgroundColor: '#C8E6C9',
+    backgroundColor: '#81C784',
   },
   categoryText: {
-    color: '#333',
+    color: '#2E7D32',
   },
   selectedCategoryText: {
-    color: '#2E7D32',
-    fontWeight: 'bold',
+    color: '#fff',
+    fontWeight: '600',
   },
   requiredField: {
-    color: '#f44336',
+    color: '#D32F2F',
     fontWeight: 'bold',
   },
   requiredNote: {
@@ -1184,9 +1197,9 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   submitButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#388E3C',
     paddingVertical: 14,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
   },
   disabledButton: {
@@ -1194,8 +1207,8 @@ const styles = StyleSheet.create({
   },
   submitText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
@@ -1207,6 +1220,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     height: '80%',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 5,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1219,7 +1236,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: '#2E7D32',
   },
   closeButton: {
     padding: 4,
@@ -1253,7 +1270,7 @@ const styles = StyleSheet.create({
   },
   commonName: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#333',
   },
   scientificName: {
@@ -1267,7 +1284,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 16,
-    color: '#666',
+    color: '#999',
     textAlign: 'center',
   },
   successOverlay: {
@@ -1279,14 +1296,18 @@ const styles = StyleSheet.create({
   successContent: {
     backgroundColor: '#fff',
     padding: 30,
-    borderRadius: 12,
+    borderRadius: 14,
     alignItems: 'center',
     width: '80%',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
   },
   successTitle: {
     fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: '#2E7D32',
     marginTop: 16,
     marginBottom: 8,
   },

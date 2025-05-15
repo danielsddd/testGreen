@@ -1,4 +1,4 @@
-// components/PlantCard.js - Enhanced Version
+// components/PlantCard.js - Updated with seller rating display
 import React, { useState, useMemo } from 'react';
 import { 
   View, 
@@ -17,7 +17,7 @@ import syncService from '../services/SyncService';
 import { wishProduct } from '../services/marketplaceApi';
 
 /**
- * Enhanced PlantCard component with improved error handling and offline support
+ * Enhanced PlantCard component with improved error handling, offline support, and seller rating
  * @param {Object} props - Component props
  * @param {Object} props.plant - Plant data
  * @param {boolean} props.showActions - Whether to show action buttons
@@ -63,10 +63,6 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
     });
   };
 
-  /**
-   * Toggle wishlist/favorite status with offline support
-   */
-  
 /**
  * Toggle wishlist/favorite status with improved error handling and online/offline support
  */
@@ -315,6 +311,25 @@ const handleToggleFavorite = async () => {
     }
   };
 
+  /**
+   * Get seller rating if available
+   */
+  const getSellerRating = () => {
+    // Check all possible places where seller rating might be stored
+    if (plant.seller && typeof plant.seller.rating !== 'undefined') {
+      return plant.seller.rating;
+    } else if (plant.sellerRating) {
+      return plant.sellerRating;
+    } else if (plant.rating) {
+      // Some plants might store the seller rating directly
+      return plant.rating;
+    }
+    return null;
+  };
+
+  // Get the seller's rating
+  const sellerRating = getSellerRating();
+
   return (
     <TouchableOpacity
       style={[
@@ -392,12 +407,12 @@ const handleToggleFavorite = async () => {
             {plant.sellerName || plant.seller?.name || 'Plant Seller'}
           </Text>
           
-          {/* Display rating if available */}
-          {plant.rating && (
+          {/* Display seller rating if available */}
+          {sellerRating !== null && (
             <View style={styles.ratingContainer}>
               <FontAwesome name="star" size={12} color="#FFD700" />
               <Text style={styles.ratingText}>
-                {typeof plant.rating === 'number' ? plant.rating.toFixed(1) : plant.rating}
+                {typeof sellerRating === 'number' ? sellerRating.toFixed(1) : sellerRating}
               </Text>
             </View>
           )}
