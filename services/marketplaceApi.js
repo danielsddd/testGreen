@@ -970,37 +970,22 @@ export const fetchReviews = async (targetType, targetId) => {
   }
 };
 
-/**
- * Submit a review for a product or seller
- * @param {string} targetId - The ID of the product or seller
- * @param {string} targetType - The type of review: 'product' or 'seller' 
- * @param {Object} reviewData - The review data with rating and text
- * @returns {Promise<Object>} - The response with success status
- */
 export const submitReview = async (targetId, targetType = 'seller', reviewData) => {
   try {
-    // Use the correct endpoint format to match the backend
-    return await apiRequest(`marketplace/${targetType}s/${targetId}/reviews`, 'POST', reviewData);
+    // URL encode targetId (email or product ID)
+    const encodedTargetId = encodeURIComponent(targetId);
+
+    // Construct the correct endpoint URL
+    const url = `marketplace/${targetType}s/${encodedTargetId}/reviews`;  // Example: marketplace/sellers/dina2%40mail.tau.ac.il/reviews
+
+    // Make the POST request to submit the review
+    return await apiRequest(url, 'POST', reviewData);
   } catch (error) {
     console.error(`Error submitting ${targetType} review:`, error);
-    
-    if (config.features.useMockOnError) {
-      // Return mock success response for development
-      return {
-        success: true,
-        review: {
-          id: 'new-' + Date.now(),
-          ...reviewData,
-          userName: 'You',
-          userId: await AsyncStorage.getItem('userEmail'),
-          createdAt: new Date().toISOString()
-        }
-      };
-    }
-    
     throw error;
   }
 };
+
 
 /**
  * Delete a review

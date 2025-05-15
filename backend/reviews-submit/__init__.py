@@ -1,4 +1,3 @@
-# reviews-submit/__init__.py
 import logging
 import json
 import azure.functions as func
@@ -50,20 +49,49 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         except (ValueError, TypeError):
             return create_error_response("Rating must be a number between 1 and 5", 400)
         
-        # Check if user has already reviewed this target
+        # Access the reviews container
         reviews_container = get_container("marketplace-reviews")
         
-        # Set up query parameters based on target type
+        # Determine the seller ID for proper partitioning
+        if target_type == 'product':
+            try:
+                # Get the product to find the sellerId
+                logging.info(f"Finding sellerId for product {target_id}")
+                products_container = get_container("marketplace-plants")
+                product_query = "SELECT c.sellerId FROM c WHERE c.id = @id"
+                product_params = [{"name": "@id", "value": target_id}]
+                
+                products = list(products_container.query_items(
+                    query=product_query,
+                    parameters=product_params,
+                    enable_cross_partition_query=True
+                ))
+                
+                if products and 'sellerId' in products[0]:
+                    seller_id = products[0]['sellerId']
+                    logging.info(f"Found sellerId {seller_id} for product {target_id}")
+                else:
+                    # Fallback if product doesn't have sellerId
+                    logging.warning(f"Could not find sellerId for product {target_id}")
+                    seller_id = f"product_{target_id}_seller"
+            except Exception as e:
+                logging.warning(f"Error finding product seller: {str(e)}")
+                seller_id = f"product_{target_id}_seller"
+        else:
+            # For seller reviews, the seller ID is the target ID
+            seller_id = target_id
+        
+        logging.info(f"Using sellerId {seller_id} as partition key")
+        
+        # Check if user has already reviewed this target
         if target_type == 'seller':
-            # For seller reviews, we can use the partition key
             query = "SELECT VALUE COUNT(1) FROM c WHERE c.sellerId = @sellerId AND c.userId = @userId"
             parameters = [
-                {"name": "@sellerId", "value": target_id},
+                {"name": "@sellerId", "value": seller_id},
                 {"name": "@userId", "value": user_id}
             ]
             enable_cross_partition = False
         else:
-            # For product reviews, we need to use cross-partition query
             query = "SELECT VALUE COUNT(1) FROM c WHERE c.productId = @productId AND c.userId = @userId"
             parameters = [
                 {"name": "@productId", "value": target_id},
@@ -105,11 +133,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         review_id = str(uuid.uuid4())
         current_time = datetime.utcnow().isoformat()
         
-        # Create review object
-        # IMPORTANT: Always include sellerId for proper partitioning
+        # Create review object with proper partition key
         review_item = {
             "id": review_id,
-            "sellerId": target_id if target_type == 'seller' else "default",  # Default partition for product reviews
+            "sellerId": seller_id,  # Always use a valid sellerId for the partition key
             "productId": target_id if target_type == 'product' else None,
             "targetType": target_type,  # Store the target type for clarity
             "userId": user_id,
@@ -119,8 +146,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             "createdAt": current_time
         }
         
-        # Create the review in the database
-        reviews_container.create_item(body=review_item)
+        # Create the review in the database with partition key
+        logging.info(f"Creating review with id {review_id} and partition key {seller_id}")
+        reviews_container.create_item(body=review_item, partition_key=seller_id)
         
         # Add isOwnReview flag for the frontend
         review_item['isOwnReview'] = True
@@ -149,12 +177,10 @@ def update_target_rating(target_type, target_id):
     reviews_container = get_container("marketplace-reviews")
     
     if target_type == 'seller':
-        # For seller reviews, we can use the partition key
         query = "SELECT VALUE c.rating FROM c WHERE c.sellerId = @sellerId"
         parameters = [{"name": "@sellerId", "value": target_id}]
         enable_cross_partition = False
     else:
-        # For product reviews, we need to use cross-partition query
         query = "SELECT VALUE c.rating FROM c WHERE c.productId = @productId"
         parameters = [{"name": "@productId", "value": target_id}]
         enable_cross_partition = True
@@ -165,17 +191,14 @@ def update_target_rating(target_type, target_id):
         enable_cross_partition_query=enable_cross_partition
     ))
     
-    # Calculate average rating
     if not ratings:
         return
     
     average_rating = sum(ratings) / len(ratings)
     
-    # Determine which container to update
     container_name = "marketplace-plants" if target_type == "product" else "users"
     container = get_container(container_name)
     
-    # Get the target
     query = "SELECT * FROM c WHERE c.id = @id"
     parameters = [{"name": "@id", "value": target_id}]
     
@@ -186,11 +209,9 @@ def update_target_rating(target_type, target_id):
     ))
     
     if not targets:
-        # Try with email as ID for users
         if target_type == "seller":
             query = "SELECT * FROM c WHERE c.email = @email"
             parameters = [{"name": "@email", "value": target_id}]
-            
             targets = list(container.query_items(
                 query=query,
                 parameters=parameters,
@@ -203,12 +224,10 @@ def update_target_rating(target_type, target_id):
     
     target = targets[0]
     
-    # Update rating
     if 'stats' not in target:
         target['stats'] = {}
     
     target['stats']['rating'] = average_rating
     target['stats']['reviewCount'] = len(ratings)
     
-    # Update the target
     container.replace_item(item=target['id'], body=target)
