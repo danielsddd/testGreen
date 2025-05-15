@@ -1,4 +1,4 @@
-# Backend: /backend/user-wishlist/__init__.py
+# Backend: Fix for user-wishlist/__init__.py
 
 import logging
 import json
@@ -24,7 +24,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         current_user_id = extract_user_id(req)
         
         # Only allow users to view their own wishlist
-        if current_user_id != user_id:
+        if current_user_id and current_user_id != user_id:
             return create_error_response("You don't have permission to view this wishlist", 403)
         
         # Access the marketplace-wishlists container
@@ -67,6 +67,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 plant['isWished'] = True  # Flag this as a wishlist item
                 plants_data.append(plant)
         
+        # If we found no wishlist items or no plants, return an empty array
+        if not plants_data:
+            return create_success_response({
+                "wishlist": [],
+                "count": 0
+            })
+            
         return create_success_response({
             "wishlist": plants_data,
             "count": len(plants_data)

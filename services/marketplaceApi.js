@@ -3,6 +3,8 @@ import config from './config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import { MOCK_USER, MOCK_PLANTS, getMockProducts, getMockProductById, getMockMessageData } from './mockData';
+import { Platform } from 'react-native';
+
 
 // API Base URL points to Azure Functions
 const API_BASE_URL = config.api.baseUrl;
@@ -424,39 +426,48 @@ export const getUserListings = async (status = null) => {
 };
 
 // Image Upload API
-export const uploadImage = async (imageData, type = 'plant') => {
+export const uploadImage = async (imageUri, type = 'plant') => {
   try {
-    // Check if imageData is a URI (from ImagePicker) or base64 string
-    let processedImageData = imageData;
-    
-    if (typeof imageData === 'string' && (imageData.startsWith('file://') || imageData.startsWith('content://'))) {
-      // It's a file URI, we need to read it as base64
-      try {
-        const base64 = await FileSystem.readAsStringAsync(imageData, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        processedImageData = `data:image/jpeg;base64,${base64}`;
-      } catch (readError) {
-        console.error('Error reading image:', readError);
-        throw new Error('Failed to process image');
+    const userEmail = await AsyncStorage.getItem('userEmail');
+
+    if (Platform.OS === 'web') {
+      // Web uses FormData
+      const formData = new FormData();
+      formData.append('image', {
+        uri: imageUri,
+        name: `upload_${Date.now()}.jpg`,
+        type: 'image/jpeg',
+      });
+      formData.append('type', type);
+
+      const response = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Authorization': authToken ? `Bearer ${authToken}` : '',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Web upload failed: ${response.status}`);
       }
+
+      return await response.json();
+    } else {
+      // Mobile: convert to base64
+      const base64 = await FileSystem.readAsStringAsync(imageUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const res = await apiRequest('marketplace/uploadImage', 'POST', {
+        image: `data:image/jpeg;base64,${base64}`,
+        type,
+      });
+
+      return res;
     }
-    
-    // Send to API
-    return await apiRequest('marketplace/uploadImage', 'POST', {
-      image: processedImageData,
-      type: type
-    });
   } catch (error) {
-    console.error('Error uploading image:', error);
-    if (config.features.useMockOnError) {
-      // Return a mock image URL
-      return { 
-        url: 'https://via.placeholder.com/300?text=UploadedImage',
-        type: type,
-        filename: `mock_${Date.now()}.jpg`
-      };
-    }
+    console.error('Image upload error:', error);
     throw error;
   }
 };

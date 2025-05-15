@@ -1,4 +1,4 @@
-# Backend: /backend/nearby-products/__init__.py
+# Backend: Fix for nearby-products/__init__.py
 
 import logging
 import json
@@ -52,10 +52,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Access the marketplace-plants container
         container = get_container("marketplace-plants")
         
-        # Get all products with location data
-        # Note: For a real implementation with large datasets, you would use a more efficient
-        # approach like a spatial query, but for simplicity we'll filter after retrieval
-        query = "SELECT * FROM c WHERE IS_DEFINED(c.location) AND (c.status = 'active' OR NOT IS_DEFINED(c.status))"
+        # Get all products with active status
+        query = "SELECT * FROM c WHERE c.status = 'active' OR NOT IS_DEFINED(c.status)"
         
         # Add category filter if provided
         if category and category.lower() != 'all':
@@ -70,7 +68,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             enable_cross_partition_query=True
         ))
         
-        # Filter products by distance
+        # Filter products by distance if they have location data
         nearby_products = []
         
         for product in products:

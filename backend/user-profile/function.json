@@ -5,7 +5,7 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["get", "post", "options"],
+      "methods": ["get", "post", "patch", "options"],
       "route": "marketplace/users/{id}"
     },
     {
