@@ -38,26 +38,25 @@ const ProfileScreen = () => {
     loadUserProfile();
   }, []);
   
-  // SEARCH_KEY: LOAD_USER_PROFILE_API
-const loadUserProfile = async () => {
-  try {
-    setIsLoading(true);
-    setError(null);
-    
-    // Get the current user's email
-    const userEmail = await AsyncStorage.getItem('userEmail') || 'default@example.com';
-    
-    // For real app, use API
-    const data = await fetchUserProfile(userEmail);
-    
-    setUser(data.user);
-    setIsLoading(false);
-  } catch (err) {
-    setError('Failed to load profile. Please try again later.');
-    setIsLoading(false);
-    console.error('Error loading profile:', err);
-  }
-};
+  const loadUserProfile = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Get the current user's email
+      const userEmail = await AsyncStorage.getItem('userEmail') || 'default@example.com';
+      
+      // For real app, use API
+      const data = await fetchUserProfile(userEmail);
+      
+      setUser(data.user);
+      setIsLoading(false);
+    } catch (err) {
+      setError('Failed to load profile. Please try again later.');
+      setIsLoading(false);
+      console.error('Error loading profile:', err);
+    }
+  };
   
   const handleSignOut = () => {
     Alert.alert(
@@ -81,6 +80,12 @@ const loadUserProfile = async () => {
         },
       ]
     );
+  };
+
+  // Handle Browse Plants button click
+  const handleBrowsePlants = () => {
+    // Navigate to the marketplace home screen
+    navigation.navigate('MarketplaceHome');
   };
   
   if (isLoading && !user) {
@@ -186,7 +191,7 @@ const loadUserProfile = async () => {
               <Text style={styles.emptyStateText}>You don't have any saved plants</Text>
               <TouchableOpacity 
                 style={styles.browseButton}
-                onPress={() => navigation.navigate('Marketplace')}
+                onPress={handleBrowsePlants}
               >
                 <Text style={styles.browseButtonText}>Browse Plants</Text>
               </TouchableOpacity>

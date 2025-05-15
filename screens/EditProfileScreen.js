@@ -1,3 +1,5 @@
+// screens/EditProfileScreen.js - Complete file
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -12,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
+  Modal,
 } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -56,6 +59,7 @@ const EditProfileScreen = () => {
     email: '',
     phoneNumber: '',
   });
+  const [showSuccess, setShowSuccess] = useState(false);
 
   // Load user profile on mount
   useEffect(() => {
@@ -124,7 +128,7 @@ const EditProfileScreen = () => {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mmediaTypes: [ImagePicker.MediaType.IMAGE],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -194,43 +198,28 @@ const EditProfileScreen = () => {
         updatedUserData.avatar = formData.avatar;
       }
   
-      // For real app, use API
-      if (config.isDevelopment && !config.features.useRealApi) {
-        // Simulate API delay in development
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Simulate success in development
-        console.log('Development mode: Simulating successful profile update');
-        
-        Alert.alert(
-          'Success',
-          'Your profile has been updated',
-          [{ 
-            text: 'OK', 
-            onPress: () => {
-              // Always navigate back to ProfileScreen on success
-              navigation.goBack();
-            }
-          }]
-        );
-      } else {
-        // Make the actual API call in production
-        try {
-          await updateUserProfile(user.id, updatedUserData);
-          
-          Alert.alert(
-            'Success',
-            'Your profile has been updated',
-            [{ 
-              text: 'OK', 
-              onPress: () => navigation.goBack() 
-            }]
-          );
-        } catch (apiError) {
-          console.error('API Error:', apiError);
-          throw apiError;
-        }
+      // Make the actual API call
+      const result = await updateUserProfile(user.id, updatedUserData);
+      
+      // Show success message
+      setShowSuccess(true);
+      
+      // Update the global user data in AsyncStorage for immediate reflection
+      try {
+        const userProfile = JSON.stringify({
+          ...user,
+          ...updatedUserData
+        });
+        await AsyncStorage.setItem('userProfile', userProfile);
+      } catch (asyncError) {
+        console.error('Error updating local user data:', asyncError);
       }
+      
+      // Auto-navigate after a short delay
+      setTimeout(() => {
+        setShowSuccess(false);
+        navigation.goBack();
+      }, 1500);
     } catch (err) {
       setError('Failed to update profile. Please try again later.');
       Alert.alert('Error', 'Failed to update profile. Please try again later.');
@@ -243,6 +232,25 @@ const EditProfileScreen = () => {
   const handleCancel = () => {
     // Simply go back to previous screen
     navigation.goBack();
+  };
+
+  // Success modal
+  const renderSuccessModal = () => {
+    return (
+      <Modal
+        visible={showSuccess}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.successOverlay}>
+          <View style={styles.successContent}>
+            <MaterialIcons name="check-circle" size={60} color="#4CAF50" />
+            <Text style={styles.successTitle}>Profile Updated</Text>
+            <Text style={styles.successText}>Your changes have been saved successfully</Text>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   // Loading state with consistent header
@@ -395,6 +403,9 @@ const EditProfileScreen = () => {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      {/* Success Modal */}
+      {renderSuccessModal()}
     </SafeAreaView>
   );
 };
@@ -526,6 +537,31 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     backgroundColor: '#A5D6A7',
+  },
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successContent: {
+    backgroundColor: '#fff',
+    padding: 30,
+    borderRadius: 12,
+    alignItems: 'center',
+    width: '80%',
+  },
+  successTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  successText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
   },
 });
 

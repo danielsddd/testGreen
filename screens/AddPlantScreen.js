@@ -51,6 +51,7 @@ const AddPlantScreen = () => {
   
   const [isLoading, setIsLoading] = useState(false);
   const [images, setImages] = useState([]);
+  const [listingType, setListingType] = useState('plant'); // 'plant', 'accessory', or 'tool'
   const [formData, setFormData] = useState({
     title: '',
     price: '',
@@ -74,6 +75,8 @@ const AddPlantScreen = () => {
   const [filteredScientificNames, setFilteredScientificNames] = useState(SCIENTIFIC_NAMES);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [newPlantId, setNewPlantId] = useState(null);
 
   // Load plant categories
   const categories = getAddPlantCategories();
@@ -115,6 +118,29 @@ const AddPlantScreen = () => {
     }
   }, [searchQuery]);
 
+  // Update category based on listing type
+  useEffect(() => {
+    if (listingType === 'accessory') {
+      setFormData(prev => ({
+        ...prev,
+        category: 'Accessories'
+      }));
+    } else if (listingType === 'tool') {
+      setFormData(prev => ({
+        ...prev,
+        category: 'Tools'
+      }));
+    } else {
+      // For plants, keep the current category if it's not accessories or tools
+      if (formData.category === 'Accessories' || formData.category === 'Tools') {
+        setFormData(prev => ({
+          ...prev,
+          category: 'Indoor Plants'
+        }));
+      }
+    }
+  }, [listingType]);
+
   const handleChange = (key, value) => {
     setFormData({ ...formData, [key]: value });
 
@@ -123,149 +149,47 @@ const AddPlantScreen = () => {
     }
   };
 
-  
-/**
- * Open the device camera to take a photo
- */
-const takePhoto = async () => {
-  try {
-    // Request camera permissions
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-    
-    if (!permissionResult.granted) {
-      Alert.alert(
-        'Permission Required', 
-        'We need camera permission to take photos',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    
-    // Check if we've reached max images
-    if (images.length >= 5) {
-      Alert.alert(
-        'Too Many Images', 
-        'You can only upload up to 5 images',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    // Launch camera
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-    });
-
-    // Handle cancellation
-    if (result.canceled) {
-      return;
-    }
-    
-    // Handle result - compatibility with different Expo versions
-    const selectedAsset = result.assets?.[0] || { uri: result.uri };
-    
-    if (selectedAsset?.uri) {
-      const imageUri = selectedAsset.uri;
+  const takePhoto = async () => {
+    try {
+      // Request camera permissions
+      const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
       
-      // Check file size on supported platforms
-      if (Platform.OS !== 'web') {
-        try {
-          const fileInfo = await FileSystem.getInfoAsync(imageUri);
-          if (fileInfo.size > 5 * 1024 * 1024) {
-            Alert.alert(
-              'Image Too Large', 
-              'This image is larger than 5MB. It may upload slowly or fail.',
-              [{ text: 'Continue Anyway' }]
-            );
-          }
-        } catch (e) {
-          // Cannot check size, just continue
-          console.warn('Could not check image size:', e);
-        }
-      }
-      
-      setImages([...images, imageUri]);
-      
-      // Clear any error
-      if (formErrors.images) {
-        setFormErrors({ ...formErrors, images: '' });
-      }
-    }
-  } catch (error) {
-    console.error('Error taking photo:', error);
-    Alert.alert(
-      'Error', 
-      'Failed to take photo. Please try again later.',
-      [{ text: 'OK' }]
-    );
-  }
-};
-
-/**
- * Open the device gallery to pick an image
- */
-const pickImage = async () => {
-  try {
-    // Request permissions first
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (!permissionResult.granted) {
-      Alert.alert(
-        'Permission Required', 
-        'We need permission to access your photos',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    
-    // Check if we've reached max images
-    if (images.length >= 5) {
-      Alert.alert(
-        'Too Many Images', 
-        'You can only upload up to 5 images',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    // Launch image picker
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-      // Only specify multiple selection on supported platforms
-      allowsMultipleSelection: Platform.OS === 'ios' || Platform.OS === 'android',
-      selectionLimit: images.length < 4 ? 5 - images.length : 1,
-    });
-
-    // Handle cancellation
-    if (result.canceled) {
-      return;
-    }
-    
-    // Handle results - compatibility with different Expo versions
-    const selectedAssets = result.assets || (result.uri ? [{ uri: result.uri }] : []);
-    
-    if (selectedAssets.length > 0) {
-      // Validate max images limit
-      if (images.length + selectedAssets.length > 5) {
+      if (!permissionResult.granted) {
         Alert.alert(
-          'Too Many Images', 
-          'You can only upload up to 5 images. Only the first few will be added.',
+          'Permission Required', 
+          'We need camera permission to take photos',
           [{ text: 'OK' }]
         );
-        // Only take what we can fit
-        selectedAssets.length = 5 - images.length;
+        return;
       }
       
-      // Add new images to state
-      const newImages = [...images];
+      // Check if we've reached max images
+      if (images.length >= 5) {
+        Alert.alert(
+          'Too Many Images', 
+          'You can only upload up to 5 images',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Launch camera
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      // Handle cancellation
+      if (result.canceled) {
+        return;
+      }
       
-      for (const asset of selectedAssets) {
-        const imageUri = asset.uri;
+      // Handle result - compatibility with different Expo versions
+      const selectedAsset = result.assets?.[0] || { uri: result.uri };
+      
+      if (selectedAsset?.uri) {
+        const imageUri = selectedAsset.uri;
         
         // Check file size on supported platforms
         if (Platform.OS !== 'web') {
@@ -284,25 +208,120 @@ const pickImage = async () => {
           }
         }
         
-        newImages.push(imageUri);
+        setImages([...images, imageUri]);
+        
+        // Clear any error
+        if (formErrors.images) {
+          setFormErrors({ ...formErrors, images: '' });
+        }
       }
-      
-      setImages(newImages);
-      
-      // Clear any error
-      if (formErrors.images) {
-        setFormErrors({ ...formErrors, images: '' });
-      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert(
+        'Error', 
+        'Failed to take photo. Please try again later.',
+        [{ text: 'OK' }]
+      );
     }
-  } catch (error) {
-    console.error('Error picking image:', error);
-    Alert.alert(
-      'Error', 
-      'Failed to pick image. Please try again or use a different image.',
-      [{ text: 'OK' }]
-    );
-  }
-};
+  };
+
+  const pickImage = async () => {
+    try {
+      // Request permissions first
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (!permissionResult.granted) {
+        Alert.alert(
+          'Permission Required', 
+          'We need permission to access your photos',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      
+      // Check if we've reached max images
+      if (images.length >= 5) {
+        Alert.alert(
+          'Too Many Images', 
+          'You can only upload up to 5 images',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+        // Only specify multiple selection on supported platforms
+        allowsMultipleSelection: Platform.OS === 'ios' || Platform.OS === 'android',
+        selectionLimit: images.length < 4 ? 5 - images.length : 1,
+      });
+
+      // Handle cancellation
+      if (result.canceled) {
+        return;
+      }
+      
+      // Handle results - compatibility with different Expo versions
+      const selectedAssets = result.assets || (result.uri ? [{ uri: result.uri }] : []);
+      
+      if (selectedAssets.length > 0) {
+        // Validate max images limit
+        if (images.length + selectedAssets.length > 5) {
+          Alert.alert(
+            'Too Many Images', 
+            'You can only upload up to 5 images. Only the first few will be added.',
+            [{ text: 'OK' }]
+          );
+          // Only take what we can fit
+          selectedAssets.length = 5 - images.length;
+        }
+        
+        // Add new images to state
+        const newImages = [...images];
+        
+        for (const asset of selectedAssets) {
+          const imageUri = asset.uri;
+          
+          // Check file size on supported platforms
+          if (Platform.OS !== 'web') {
+            try {
+              const fileInfo = await FileSystem.getInfoAsync(imageUri);
+              if (fileInfo.size > 5 * 1024 * 1024) {
+                Alert.alert(
+                  'Image Too Large', 
+                  'This image is larger than 5MB. It may upload slowly or fail.',
+                  [{ text: 'Continue Anyway' }]
+                );
+              }
+            } catch (e) {
+              // Cannot check size, just continue
+              console.warn('Could not check image size:', e);
+            }
+          }
+          
+          newImages.push(imageUri);
+        }
+        
+        setImages(newImages);
+        
+        // Clear any error
+        if (formErrors.images) {
+          setFormErrors({ ...formErrors, images: '' });
+        }
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert(
+        'Error', 
+        'Failed to pick image. Please try again or use a different image.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
 
   const removeImage = (index) => {
     const newImages = [...images];
@@ -320,118 +339,115 @@ const pickImage = async () => {
     setShowScientificNameModal(false);
   };
 
-  /**
- * Get the user's current location and update the form
- */
-const useCurrentLocation = async () => {
-  setIsLoadingLocation(true);
-  try {
-    // Request permissions first
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    
-    if (status !== 'granted') {
-      Alert.alert(
-        'Permission Denied',
-        'We need location access to use your current location. You can still enter your location manually.',
-        [{ text: 'OK' }]
-      );
-      setIsLoadingLocation(false);
-      return;
-    }
-    
-    // Get current position
-    const position = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-      timeout: 15000 // 15 seconds timeout
-    });
-    
-    // Get readable address from coordinates
-    const { latitude, longitude } = position.coords;
-    
+  const useCurrentLocation = async () => {
+    setIsLoadingLocation(true);
     try {
-      // First try reverse geocoding through our API
-      const locationData = await marketplaceApi.geocodeAddress(`${latitude},${longitude}`);
+      // Request permissions first
+      const { status } = await Location.requestForegroundPermissionsAsync();
       
-      if (locationData && locationData.city) {
-        // Use formatted address from our API
-        const formattedLocation = locationData.city + 
-          (locationData.country ? `, ${locationData.country}` : '');
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Denied',
+          'We need location access to use your current location. You can still enter your location manually.',
+          [{ text: 'OK' }]
+        );
+        setIsLoadingLocation(false);
+        return;
+      }
+      
+      // Get current position
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        timeout: 15000 // 15 seconds timeout
+      });
+      
+      // Get readable address from coordinates
+      const { latitude, longitude } = position.coords;
+      
+      try {
+        // First try reverse geocoding through our API
+        const locationData = await marketplaceApi.geocodeAddress(`${latitude},${longitude}`);
+        // screens/AddPlantScreen.js (continued)
+        if (locationData && locationData.city) {
+          // Use formatted address from our API
+          const formattedLocation = locationData.city + 
+            (locationData.country ? `, ${locationData.country}` : '');
+          
+          setFormData({
+            ...formData,
+            city: formattedLocation
+          });
+          
+          setIsLoadingLocation(false);
+          return;
+        }
+      } catch (apiError) {
+        // API geocoding failed, fall back to Expo's geocoder
+        console.warn('API geocoding failed, falling back to Expo geocoder:', apiError);
+      }
+      
+      // Fall back to Expo's reverse geocoding
+      const addresses = await Location.reverseGeocodeAsync({
+        latitude,
+        longitude
+      });
+      
+      if (addresses && addresses.length > 0) {
+        const address = addresses[0];
+        
+        // Format the address components
+        let formattedLocation = '';
+        
+        if (address.city) {
+          formattedLocation += address.city;
+        } else if (address.region) {
+          formattedLocation += address.region;
+        }
+        
+        if (address.country) {
+          if (formattedLocation) {
+            formattedLocation += `, ${address.country}`;
+          } else {
+            formattedLocation = address.country;
+          }
+        }
+        
+        // Default if no location found
+        if (!formattedLocation) {
+          formattedLocation = 'Unknown location';
+        }
         
         setFormData({
           ...formData,
           city: formattedLocation
         });
-        
-        setIsLoadingLocation(false);
-        return;
+      } else {
+        // No address found, just use coordinates
+        setFormData({
+          ...formData,
+          city: `Lat: ${latitude.toFixed(4)}, Long: ${longitude.toFixed(4)}`
+        });
       }
-    } catch (apiError) {
-      // API geocoding failed, fall back to Expo's geocoder
-      console.warn('API geocoding failed, falling back to Expo geocoder:', apiError);
+      
+      setIsLoadingLocation(false);
+    } catch (error) {
+      console.error('Error getting location:', error);
+      
+      let errorMessage = 'Could not get your current location. Please enter it manually.';
+      
+      // Provide more specific error messages based on the error
+      if (error.code === 'E_LOCATION_SETTINGS_UNSATISFIED') {
+        errorMessage = 'Please enable location services in your device settings.';
+      } else if (error.code === 'E_LOCATION_GEOCODING_FAILED') {
+        errorMessage = 'Could not determine your address. Please enter it manually.';
+      } else if (error.code === 'E_LOCATION_ACTIVITY_MISSING') {
+        errorMessage = 'Location provider is unavailable. Please enter your location manually.';
+      }
+      
+      Alert.alert('Location Error', errorMessage, [{ text: 'OK' }]);
+      setIsLoadingLocation(false);
     }
-    
-    // Fall back to Expo's reverse geocoding
-    const addresses = await Location.reverseGeocodeAsync({
-      latitude,
-      longitude
-    });
-    
-    if (addresses && addresses.length > 0) {
-      const address = addresses[0];
-      
-      // Format the address components
-      let formattedLocation = '';
-      
-      if (address.city) {
-        formattedLocation += address.city;
-      } else if (address.region) {
-        formattedLocation += address.region;
-      }
-      
-      if (address.country) {
-        if (formattedLocation) {
-          formattedLocation += `, ${address.country}`;
-        } else {
-          formattedLocation = address.country;
-        }
-      }
-      
-      // Default if no location found
-      if (!formattedLocation) {
-        formattedLocation = 'Unknown location';
-      }
-      
-      setFormData({
-        ...formData,
-        city: formattedLocation
-      });
-    } else {
-      // No address found, just use coordinates
-      setFormData({
-        ...formData,
-        city: `Lat: ${latitude.toFixed(4)}, Long: ${longitude.toFixed(4)}`
-      });
-    }
-    
-    setIsLoadingLocation(false);
-  } catch (error) {
-    console.error('Error getting location:', error);
-    
-    let errorMessage = 'Could not get your current location. Please enter it manually.';
-    
-    // Provide more specific error messages based on the error
-    if (error.code === 'E_LOCATION_SETTINGS_UNSATISFIED') {
-      errorMessage = 'Please enable location services in your device settings.';
-    } else if (error.code === 'E_LOCATION_GEOCODING_FAILED') {
-      errorMessage = 'Could not determine your address. Please enter it manually.';
-    } else if (error.code === 'E_LOCATION_ACTIVITY_MISSING') {
-      errorMessage = 'Location provider is unavailable. Please enter your location manually.';
-    }
-    
-    Alert.alert('Location Error', errorMessage, [{ text: 'OK' }]);
-    setIsLoadingLocation(false);
-  }
-};
+  };
 
   const validateForm = () => {
     const errors = {};
@@ -475,7 +491,6 @@ const useCurrentLocation = async () => {
     return isValid;
   };
 
-
   const prepareImageData = async () => {
     try {
       const uploaded = [];
@@ -489,7 +504,6 @@ const useCurrentLocation = async () => {
       throw new Error('Image upload failed. Please try again.');
     }
   };
-  
 
   const handleSubmit = async () => {
     if (!validateForm()) return;
@@ -519,22 +533,21 @@ const useCurrentLocation = async () => {
         image: imageData[0],  // Main image
         images: imageData.slice(1),  // Additional images
         sellerId: userEmail, // Use the authenticated user's email as sellerId
+        productType: listingType, // Add product type field
       };
 
       // Submit to API
       const result = await createPlant(plantData);
 
       if (result?.productId) {
-        Alert.alert('Success', 'Your plant has been listed!', [
-          {
-            text: 'View Listing',
-            onPress: () => navigation.navigate('PlantDetail', { plantId: result.productId }),
-          },
-          {
-            text: 'Go to Marketplace',
-            onPress: () => navigation.navigate('MarketplaceHome'),
-          },
-        ]);
+        setNewPlantId(result.productId);
+        setShowSuccess(true);
+        
+        // Auto-navigate after a delay
+        setTimeout(() => {
+          setShowSuccess(false);
+          navigation.navigate('PlantDetail', { plantId: result.productId });
+        }, 2500);
       } else {
         throw new Error('Failed to create listing');
       }
@@ -610,10 +623,29 @@ const useCurrentLocation = async () => {
     );
   };
 
+  // Success overlay
+  const renderSuccessOverlay = () => {
+    return (
+      <Modal
+        visible={showSuccess}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.successOverlay}>
+          <View style={styles.successContent}>
+            <MaterialIcons name="check-circle" size={60} color="#4CAF50" />
+            <Text style={styles.successTitle}>Successfully Listed!</Text>
+            <Text style={styles.successText}>Your item has been added to the marketplace</Text>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <MarketplaceHeader
-        title="Add New Plant"
+        title="Add New Listing"
         showBackButton={true}
         onNotificationsPress={() => navigation.navigate('Messages')}
       />
@@ -623,11 +655,88 @@ const useCurrentLocation = async () => {
       >
         <ScrollView style={styles.scrollView}>
           <View style={styles.content}>
-            <Text style={styles.title}>Add a New Plant</Text>
+            {/* Listing Type Selector */}
+            <View style={styles.listingTypeContainer}>
+              <Text style={styles.listingTypeTitle}>What are you listing?</Text>
+              
+              <View style={styles.listingTypeButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.listingTypeButton,
+                    listingType === 'plant' && styles.selectedListingType
+                  ]}
+                  onPress={() => setListingType('plant')}
+                >
+                  <MaterialIcons
+                    name="eco"
+                    size={24}
+                    color={listingType === 'plant' ? '#fff' : '#4CAF50'}
+                  />
+                  <Text 
+                    style={[
+                      styles.listingTypeText,
+                      listingType === 'plant' && styles.selectedListingTypeText
+                    ]}
+                  >
+                    Plant
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.listingTypeButton,
+                    listingType === 'accessory' && styles.selectedListingType
+                  ]}
+                  onPress={() => setListingType('accessory')}
+                >
+                  <MaterialIcons
+                    name="pot-mix-outline"
+                    size={24}
+                    color={listingType === 'accessory' ? '#fff' : '#4CAF50'}
+                  />
+                  <Text 
+                    style={[
+                      styles.listingTypeText,
+                      listingType === 'accessory' && styles.selectedListingTypeText
+                    ]}
+                  >
+                    Accessory
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.listingTypeButton,
+                    listingType === 'tool' && styles.selectedListingType
+                  ]}
+                  onPress={() => setListingType('tool')}
+                >
+                  <MaterialIcons
+                    name="tools"
+                    size={24}
+                    color={listingType === 'tool' ? '#fff' : '#4CAF50'}
+                  />
+                  <Text 
+                    style={[
+                      styles.listingTypeText,
+                      listingType === 'tool' && styles.selectedListingTypeText
+                    ]}
+                  >
+                    Tool
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            <Text style={styles.title}>
+              Add New {listingType === 'plant' ? 'Plant' : listingType === 'accessory' ? 'Accessory' : 'Tool'}
+            </Text>
             
             {/* Image Section */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Plant Images</Text>
+              <Text style={styles.sectionTitle}>
+                Images <Text style={styles.requiredField}>*</Text>
+              </Text>
               <ScrollView horizontal style={styles.imageScroller}>
                 {images.map((uri, index) => (
                   <View key={index} style={styles.imageContainer}>
@@ -669,36 +778,50 @@ const useCurrentLocation = async () => {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Basic Information</Text>
               
-              <Text style={styles.label}>Plant Name</Text>
+              <Text style={styles.label}>
+                {listingType === 'plant' ? 'Plant Name' : listingType === 'accessory' ? 'Accessory Name' : 'Tool Name'} <Text style={styles.requiredField}>*</Text>
+              </Text>
               <TextInput
                 style={[styles.input, formErrors.title && styles.inputError]}
                 value={formData.title}
                 onChangeText={(text) => handleChange('title', text)}
-                placeholder="What kind of plant is it?"
+                placeholder={
+                  listingType === 'plant' 
+                    ? "What kind of plant is it?" 
+                    : listingType === 'accessory' 
+                      ? "What is the accessory?" 
+                      : "What kind of tool is it?"
+                }
               />
               {formErrors.title ? <Text style={styles.errorText}>{formErrors.title}</Text> : null}
 
-              <Text style={styles.label}>Scientific Name (Optional)</Text>
-              <TouchableOpacity 
-                style={[
-                  styles.input, 
-                  styles.pickerButton,
-                  formData.scientificName ? styles.filledInput : null
-                ]}
-                onPress={() => setShowScientificNameModal(true)}
-              >
-                <Text 
-                  style={[
-                    styles.pickerButtonText,
-                    formData.scientificName ? styles.filledInputText : null
-                  ]}
-                >
-                  {formData.scientificName || "Select plant type to auto-fill care info"}
-                </Text>
-                <MaterialIcons name="arrow-drop-down" size={24} color="#666" />
-              </TouchableOpacity>
+              {listingType === 'plant' && (
+                <>
+                  <Text style={styles.label}>Scientific Name (Optional)</Text>
+                  <TouchableOpacity 
+                    style={[
+                      styles.input, 
+                      styles.pickerButton,
+                      formData.scientificName ? styles.filledInput : null
+                    ]}
+                    onPress={() => setShowScientificNameModal(true)}
+                  >
+                    <Text 
+                      style={[
+                        styles.pickerButtonText,
+                        formData.scientificName ? styles.filledInputText : null
+                      ]}
+                    >
+                      {formData.scientificName || "Select plant type to auto-fill care info"}
+                    </Text>
+                    <MaterialIcons name="arrow-drop-down" size={24} color="#666" />
+                  </TouchableOpacity>
+                </>
+              )}
 
-              <Text style={styles.label}>Price</Text>
+              <Text style={styles.label}>
+                Price <Text style={styles.requiredField}>*</Text>
+              </Text>
               <TextInput
                 style={[styles.input, formErrors.price && styles.inputError]}
                 value={formData.price}
@@ -710,28 +833,43 @@ const useCurrentLocation = async () => {
 
               <Text style={styles.label}>Category</Text>
               <ScrollView horizontal style={styles.categoryScroller}>
-                {categories.map((category) => (
-                  <TouchableOpacity
-                    key={category}
-                    style={[
-                      styles.categoryButton,
-                      formData.category === category && styles.selectedCategoryButton,
-                    ]}
-                    onPress={() => handleChange('category', category)}
-                  >
-                    <Text
+                {categories
+                  .filter(category => {
+                    // Filter categories based on listing type
+                    if (listingType === 'plant') {
+                      return category !== 'Accessories' && category !== 'Tools';
+                    } else if (listingType === 'accessory') {
+                      return category === 'Accessories';
+                    } else if (listingType === 'tool') {
+                      return category === 'Tools';
+                    }
+                    return true;
+                  })
+                  .map((category) => (
+                    <TouchableOpacity
+                      key={category}
                       style={[
-                        styles.categoryText,
-                        formData.category === category && styles.selectedCategoryText,
+                        styles.categoryButton,
+                        formData.category === category && styles.selectedCategoryButton,
                       ]}
+                      onPress={() => handleChange('category', category)}
                     >
-                      {category}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text
+                        style={[
+                          styles.categoryText,
+                          formData.category === category && styles.selectedCategoryText,
+                        ]}
+                      >
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                }
               </ScrollView>
 
-              <Text style={styles.label}>Location</Text>
+              <Text style={styles.label}>
+                Location <Text style={styles.requiredField}>*</Text>
+              </Text>
               <View style={styles.locationContainer}>
                 <TextInput
                   style={[
@@ -741,7 +879,7 @@ const useCurrentLocation = async () => {
                   ]}
                   value={formData.city}
                   onChangeText={(text) => handleChange('city', text)}
-                  placeholder="Where can buyers pick up the plant?"
+                  placeholder="Where can buyers pick up the item?"
                 />
                 <TouchableOpacity 
                   style={styles.locationButton}
@@ -760,12 +898,20 @@ const useCurrentLocation = async () => {
             
             {/* Description */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Description</Text>
+              <Text style={styles.sectionTitle}>
+                Description <Text style={styles.requiredField}>*</Text>
+              </Text>
               <TextInput
                 style={[styles.input, styles.textArea, formErrors.description && styles.inputError]}
                 value={formData.description}
                 onChangeText={(text) => handleChange('description', text)}
-                placeholder="Describe your plant (size, age, condition, etc.)"
+                placeholder={
+                  listingType === 'plant' 
+                    ? "Describe your plant (size, age, condition, etc.)" 
+                    : listingType === 'accessory' 
+                      ? "Describe the accessory (size, material, condition, etc.)" 
+                      : "Describe the tool (brand, condition, age, etc.)"
+                }
                 multiline
               />
               {formErrors.description ? (
@@ -773,21 +919,28 @@ const useCurrentLocation = async () => {
               ) : null}
             </View>
             
-            {/* Care Instructions */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Care Instructions</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={formData.careInstructions}
-                onChangeText={(text) => handleChange('careInstructions', text)}
-                placeholder="Share how to care for this plant (optional)"
-                multiline
-              />
-              <Text style={styles.helperText}>
-                Providing care instructions can help increase interest in your plant.
-                {formData.scientificName ? " Care info will be auto-filled from our database." : ""}
-              </Text>
-            </View>
+            {/* Care Instructions - only for plants */}
+            {listingType === 'plant' && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Care Instructions (Optional)</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={formData.careInstructions}
+                  onChangeText={(text) => handleChange('careInstructions', text)}
+                  placeholder="Share how to care for this plant"
+                  multiline
+                />
+                <Text style={styles.helperText}>
+                  Providing care instructions can help increase interest in your plant.
+                  {formData.scientificName ? " Care info will be auto-filled from our database." : ""}
+                </Text>
+              </View>
+            )}
+            
+            {/* Required Fields Note */}
+            <Text style={styles.requiredNote}>
+              <Text style={styles.requiredField}>*</Text> Required fields
+            </Text>
             
             {/* Submit */}
             <TouchableOpacity
@@ -798,7 +951,9 @@ const useCurrentLocation = async () => {
               {isLoading ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.submitText}>List Plant for Sale</Text>
+                <Text style={styles.submitText}>
+                  List {listingType === 'plant' ? 'Plant' : listingType === 'accessory' ? 'Accessory' : 'Tool'} for Sale
+                </Text>
               )}
             </TouchableOpacity>
           </View>
@@ -807,6 +962,9 @@ const useCurrentLocation = async () => {
       
       {/* Scientific Name Selection Modal */}
       {renderScientificNameModal()}
+      
+      {/* Success Overlay */}
+      {renderSuccessOverlay()}
     </SafeAreaView>
   );
 };
@@ -825,6 +983,42 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 40,
+  },
+  listingTypeContainer: {
+    marginBottom: 24,
+    backgroundColor: '#f9f9f9',
+    padding: 16,
+    borderRadius: 8,
+  },
+  listingTypeTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  listingTypeButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  listingTypeButton: {
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    minWidth: 100,
+  },
+  selectedListingType: {
+    backgroundColor: '#4CAF50',
+  },
+  listingTypeText: {
+    marginTop: 4,
+    color: '#4CAF50',
+    fontWeight: '500',
+  },
+  selectedListingTypeText: {
+    color: '#fff',
   },
   title: {
     fontSize: 24,
@@ -978,6 +1172,17 @@ const styles = StyleSheet.create({
     color: '#2E7D32',
     fontWeight: 'bold',
   },
+  requiredField: {
+    color: '#f44336',
+    fontWeight: 'bold',
+  },
+  requiredNote: {
+    fontSize: 12,
+    color: '#777',
+    marginBottom: 16,
+    marginTop: -8,
+    fontStyle: 'italic',
+  },
   submitButton: {
     backgroundColor: '#4CAF50',
     paddingVertical: 14,
@@ -1065,6 +1270,31 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
+  successOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successContent: {
+    backgroundColor: '#fff',
+    padding: 30,
+    borderRadius: 12,
+    alignItems: 'center',
+    width: '80%',
+  },
+  successTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  successText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
 });
 
-export default AddPlantScreen
+export default AddPlantScreen;

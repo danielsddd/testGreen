@@ -666,26 +666,78 @@ export const getNegotiateToken = async () => {
 };
 
 // Location and Maps API
+/**
+ * Geocode an address to get coordinates
+ * @param {string} address The address to geocode
+ * @returns {Promise<Object>} Location data with coordinates
+ */
 export const geocodeAddress = async (address) => {
   try {
-    return await apiRequest(`marketplace/geocode?address=${encodeURIComponent(address)}`);
-  } catch (error) {
-    console.error('Error geocoding address:', error);
-    if (config.features.useMockOnError) {
+    if (!address || address === 'Unknown location' || address.length < 3) {
+      throw new Error('Invalid address for geocoding');
+    }
+
+    // Check for cached geocode results first
+    const cacheKey = `geocode_${address.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+    try {
+      const cachedData = await AsyncStorage.getItem(cacheKey);
+      if (cachedData) {
+        return JSON.parse(cachedData);
+      }
+    } catch (e) {
+      // Failed to check cache, continue with API request
+      console.warn('Failed to check geocode cache:', e);
+    }
+
+    // Development mockup mode
+    if (config.isDevelopment && !config.features.useRealApi) {
       // Generate mock coordinates from hash of address
       const hash = address.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      return {
+      const mockResult = {
         latitude: 32.0853 + (hash % 20 - 10) / 100,
         longitude: 34.7818 + (hash % 20 - 10) / 100,
         city: address.split(',')[0],
         country: 'Israel'
       };
+      
+      // Cache the mock result
+      try {
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(mockResult));
+      } catch (e) {
+        console.warn('Failed to cache geocode result:', e);
+      }
+      
+      return mockResult;
     }
+
+    // Make the API request
+    const response = await apiRequest(`marketplace/geocode?address=${encodeURIComponent(address)}`);
+    
+    // Cache the result
+    if (response && response.latitude && response.longitude) {
+      try {
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(response));
+      } catch (e) {
+        console.warn('Failed to cache geocode result:', e);
+      }
+    }
+    
+    return response;
+  } catch (error) {
+    console.error('Error geocoding address:', error);
     throw error;
   }
 };
 
 // Nearby Products API
+/**
+ * Get nearby products within a radius from location
+ * @param {number} latitude Latitude coordinate
+ * @param {number} longitude Longitude coordinate
+ * @param {number} radius Radius in kilometers (default: 10)
+ * @param {string} category Optional category filter
+ * @returns {Promise<Object>} Object containing nearby products
+ */
 export const getNearbyProducts = async (latitude, longitude, radius = 10, category = null) => {
   try {
     let endpoint = `marketplace/nearbyProducts?lat=${latitude}&lon=${longitude}&radius=${radius}`;
@@ -697,19 +749,58 @@ export const getNearbyProducts = async (latitude, longitude, radius = 10, catego
     return await apiRequest(endpoint);
   } catch (error) {
     console.error('Error getting nearby products:', error);
-    if (config.features.useMockOnError) {
+    
+    if (config.features.useMockOnError || (config.isDevelopment && !config.features.useRealApi)) {
       // Generate mock nearby products
-      return {
-        products: MOCK_PLANTS.map(plant => ({
-          ...plant,
-          distance: Math.random() * radius
-        })).slice(0, 5),
-        count: 5
+      const mockProducts = [];
+      
+      // Create 5-10 mock products
+      const count = 5 + Math.floor(Math.random() * 6);
+      
+      for (let i = 0; i < count; i++) {
+        // Generate a random position within the radius
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * radius;
+        
+        // Convert distance to lat/lon offset (approximate)
+        const latOffset = distance * Math.cos(angle) / 111; // 1 degree lat is about 111 km
+        const lonOffset = distance * Math.sin(angle) / (111 * Math.cos(latitude * Math.PI / 180));
+        
+        mockProducts.push({
+          id: `nearby-${i}`,
+          title: `${category || 'Plant'} ${i+1}`,
+          price: (Math.random() * 50 + 5).toFixed(2),
+          category: category || 'Indoor Plants',
+          location: {
+            latitude: latitude + latOffset,
+            longitude: longitude + lonOffset,
+            city: 'Nearby Location'
+          },
+          image: `https://via.placeholder.com/150?text=Plant${i+1}`,
+          description: 'This is a mock plant generated for the map view.',
+          distance: distance,
+          seller: {
+            name: 'Local Seller',
+            _id: `seller-${i}`
+          }
+        });
+      }
+      
+      return { 
+        products: mockProducts,
+        count: mockProducts.length,
+        center: {
+          latitude,
+          longitude
+        },
+        radius
       };
     }
+    
     throw error;
   }
 };
+
 
 // User Plant API (main app integration)
 export const getUserPlantsByLocation = async (location) => {
@@ -768,6 +859,72 @@ export const createImageFormData = async (uri, name = 'image', type = 'image/jpe
   });
   return formData;
 };
+
+/**
+ * Mark a product as sold
+ * @param {string} productId - The ID of the product to mark as sold
+ * @param {Object} buyerInfo - Optional information about the buyer
+ * @returns {Promise<Object>} The response from the API
+ */
+export const markProductAsSold = async (productId, transactionInfo = {}) => {
+  try {
+    return await apiRequest(`marketplace/products/${productId}/sold`, 'POST', transactionInfo);
+  } catch (error) {
+    console.error(`Error marking product ${productId} as sold:`, error);
+    
+    if (config.features.useMockOnError || (config.isDevelopment && !config.features.useRealApi)) {
+      return { 
+        success: true, 
+        message: 'Product marked as sold successfully (mock)',
+        productId
+      };
+    }
+    
+    throw error;
+  }
+};
+/**
+ * Get user's current location if available
+ * @returns {Promise<Object>} Location object with coordinates
+ */
+export const getCurrentLocation = async () => {
+  try {
+    // Check if we have cached location
+    const cachedLocation = await AsyncStorage.getItem('@UserLocation');
+    if (cachedLocation) {
+      return JSON.parse(cachedLocation);
+    }
+    
+    // Request location permission
+    if (Platform.OS !== 'web') {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        throw new Error('Location permission denied');
+      }
+    }
+    
+    // Get current location
+    const location = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced
+    });
+    
+    const result = {
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+      accuracy: location.coords.accuracy,
+      timestamp: location.timestamp
+    };
+    
+    // Cache the result
+    await AsyncStorage.setItem('@UserLocation', JSON.stringify(result));
+    
+    return result;
+  } catch (error) {
+    console.error('Error getting current location:', error);
+    throw error;
+  }
+};
+
 
 // Export the API
 export default {
