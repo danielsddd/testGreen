@@ -1,5 +1,4 @@
-// Complete updated ReviewsList.js with enhanced error handling
-
+// components/ReviewsList.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -193,7 +192,14 @@ const ReviewsList = ({
       {/* Reviews list */}
       <FlatList
         data={reviews}
-        renderItem={({ item }) => <ReviewItem review={item} />}
+        renderItem={({ item }) => (
+          <ReviewItem 
+            review={item} 
+            targetType={targetType}
+            targetId={targetId}
+            onReviewDeleted={loadReviews}
+          />
+        )}
         keyExtractor={item => item.id || `review-${item.userId}-${Date.now()}`}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={renderEmptyState}
@@ -322,23 +328,3 @@ const styles = StyleSheet.create({
 });
 
 export default ReviewsList;
-
-/* 
-Usage tip:
-Make sure you're passing the correct targetType and targetId to this component.
-For sellers, use:
-  - targetType="seller"
-  - targetId={seller.id} (or seller.email if that's their ID)
-For products, use:
-  - targetType="product" 
-  - targetId={plant.id}
-
-Example usage in SellerProfileScreen:
-<ReviewsList
-  targetType="seller"
-  targetId={sellerId}
-  onAddReview={handleAddReview}
-  onReviewsLoaded={handleReviewsLoaded}
-  autoLoad={true}
-/>
-*/

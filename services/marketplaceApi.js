@@ -1068,26 +1068,53 @@ export const submitReview = async (targetId, targetType = 'seller', reviewData) 
   }
 };
 
-
 /**
  * Delete a review
  * @param {string} reviewId - The ID of the review to delete
+ * @param {string} targetType - The type of target ('seller' or 'product')
+ * @param {string} targetId - The ID of the target
  * @returns {Promise<Object>} - The response with success status
  */
-export const deleteReview = async (reviewId) => {
+export const deleteReview = async (reviewId, targetType, targetId) => {
   try {
-    return await apiRequest(`marketplace/reviews/${reviewId}`, 'DELETE');
+    if (!reviewId) {
+      throw new Error('Review ID is required');
+    }
+    
+    // For debugging
+    console.log(`Deleting review ${reviewId} for ${targetType} ${targetId}...`);
+    
+    // URL encode parameters to handle special characters
+    const encodedTargetType = encodeURIComponent(targetType || 'seller');
+    const encodedTargetId = encodeURIComponent(targetId || '');
+    const encodedReviewId = encodeURIComponent(reviewId);
+    
+    // Construct endpoint with the correct route format
+    const endpoint = `marketplace/reviews/${encodedTargetType}/${encodedTargetId}/${encodedReviewId}`;
+    
+    console.log(`DELETE request to: ${endpoint}`);
+    
+    // Make the API request
+    const response = await apiRequest(endpoint, 'DELETE');
+    console.log('Delete response:', response);
+    
+    return response;
   } catch (error) {
     console.error('Error deleting review:', error);
     
-    if (config.features.useMockOnError) {
+    if (config.features.useMockOnError || (config.isDevelopment && !config.features.useRealApi)) {
       // Return mock success response for development
-      return { success: true };
+      console.log('Using mock success response for deleteReview');
+      return { 
+        success: true,
+        message: 'Review deleted successfully (mock)'
+      };
     }
     
     throw error;
   }
 };
+
 
 export async function speechToText(audioUrl) {
   try {
