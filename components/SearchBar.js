@@ -31,6 +31,7 @@ const PLANT_SEARCH_QUERIES = [
 
 /**
  * Enhanced SearchBar component with voice search capabilities
+ * and in-browser WebM to WAV conversion for better compatibility
  */
 const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
   const [recording, setRecording] = useState(null);
@@ -153,62 +154,201 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
     pulseAnim.setValue(1);
   };
 
-  const createWavFile = (audioData, sampleRate = 44100) => {
-    try {
-      // For MediaRecorder approach
-      if (audioData instanceof Blob) {
-        return audioData;
-      }
-      
-      // For ScriptProcessor approach, concatenate audio data
-      // Concatenate audio data into a single Float32Array
-      const mergedAudioData = new Float32Array(audioData.reduce((acc, curr) => [...acc, ...curr], []));
-      
-      // Convert to 16-bit PCM
-      const pcmData = new Int16Array(mergedAudioData.length);
-      for (let i = 0; i < mergedAudioData.length; i++) {
-        // Convert float [-1, 1] to int16 [-32768, 32767]
-        const s = Math.max(-1, Math.min(1, mergedAudioData[i]));
-        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      
-      // Create WAVE header (44 bytes)
-      const wavHeader = new ArrayBuffer(44);
-      const view = new DataView(wavHeader);
-      
-      // RIFF chunk descriptor
-      writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + pcmData.byteLength, true);
-      writeString(view, 8, 'WAVE');
-      
-      // fmt sub-chunk
-      writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true); // Sub-chunk size
-      view.setUint16(20, 1, true); // Audio format (PCM)
-      view.setUint16(22, 1, true); // Num channels (mono)
-      view.setUint32(24, sampleRate, true); // Sample rate
-      view.setUint32(28, sampleRate * 2, true); // Byte rate
-      view.setUint16(32, 2, true); // Block align
-      view.setUint16(34, 16, true); // Bits per sample
-      
-      // data sub-chunk
-      writeString(view, 36, 'data');
-      view.setUint32(40, pcmData.byteLength, true);
-      
-      // Combine header and data
-      const wavBlob = new Blob([wavHeader, pcmData.buffer], { type: 'audio/wav' });
-      
-      return wavBlob;
-    } catch (error) {
-      console.error('Error creating WAV file:', error);
-      return null;
+  // WAV encoder implementation for browser
+  class WavAudioEncoder {
+    constructor(sampleRate, numChannels) {
+      this.sampleRate = sampleRate;
+      this.numChannels = numChannels;
+      this.numSamples = 0;
+      this.dataViews = [];
     }
-  };
-  
+
+    encode(buffer) {
+      const len = buffer[0].length;
+      const view = new DataView(new ArrayBuffer(len * this.numChannels * 2));
+      let offset = 0;
+      for (let i = 0; i < len; i++) {
+        for (let ch = 0; ch < this.numChannels; ch++) {
+          const x = buffer[ch][i] * 0x7FFF;
+          view.setInt16(offset, x < 0 ? Math.max(-0x8000, Math.floor(x)) : Math.min(0x7FFF, Math.floor(x)), true);
+          offset += 2;
+        }
+      }
+      this.dataViews.push(view);
+      this.numSamples += len;
+      return this;
+    }
+
+    finish() {
+      const dataSize = this.numChannels * this.numSamples * 2;
+      const view = new DataView(new ArrayBuffer(44));
+      
+      // RIFF identifier
+      writeString(view, 0, 'RIFF');
+      // File length
+      view.setUint32(4, 36 + dataSize, true);
+      // RIFF type
+      writeString(view, 8, 'WAVE');
+      // Format chunk identifier
+      writeString(view, 12, 'fmt ');
+      // Format chunk length
+      view.setUint32(16, 16, true);
+      // Sample format (raw)
+      view.setUint16(20, 1, true);
+      // Channel count
+      view.setUint16(22, this.numChannels, true);
+      // Sample rate
+      view.setUint32(24, this.sampleRate, true);
+      // Byte rate (sample rate * block align)
+      view.setUint32(28, this.sampleRate * this.numChannels * 2, true);
+      // Block align (channel count * bytes per sample)
+      view.setUint16(32, this.numChannels * 2, true);
+      // Bits per sample
+      view.setUint16(34, 16, true);
+      // Data chunk identifier
+      writeString(view, 36, 'data');
+      // Data chunk length
+      view.setUint32(40, dataSize, true);
+      
+      const chunks = [view];
+      chunks.push(...this.dataViews);
+      
+      return new Blob(chunks, { type: 'audio/wav' });
+    }
+  }
+
+  // Helper function to write string to DataView
   const writeString = (view, offset, string) => {
     for (let i = 0; i < string.length; i++) {
       view.setUint8(offset + i, string.charCodeAt(i));
     }
+  };
+
+  // WebM to WAV conversion for web browsers
+  const convertWebmToWav = async (webmBlob) => {
+    console.log('Starting WebM to WAV conversion...');
+    
+    try {
+      // Create audio context
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const audioContext = new AudioContext({ sampleRate: 16000 }); // 16 kHz for better compatibility
+      
+      // Convert blob to array buffer
+      const arrayBuffer = await webmBlob.arrayBuffer();
+      
+      console.log(`WebM data size: ${arrayBuffer.byteLength} bytes`);
+      
+      // Decode the WebM audio
+      console.log('Decoding WebM audio...');
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      
+      console.log(`Decoded audio: ${audioBuffer.duration}s, ${audioBuffer.numberOfChannels} channels, ${audioBuffer.sampleRate}Hz`);
+      
+      // Prepare audio data for WAV encoding (resampling to 16 kHz mono if needed)
+      const resampledData = [];
+      const originalChannel = audioBuffer.getChannelData(0); // Use first channel for mono
+      
+      // If source is not 16 kHz, resample it
+      if (audioBuffer.sampleRate !== 16000) {
+        console.log('Resampling audio to 16 kHz...');
+        
+        // Simple resampling
+        const resampleRatio = 16000 / audioBuffer.sampleRate;
+        const newLength = Math.floor(originalChannel.length * resampleRatio);
+        const resampled = new Float32Array(newLength);
+        
+        for (let i = 0; i < newLength; i++) {
+          const originalIndex = Math.floor(i / resampleRatio);
+          resampled[i] = originalChannel[originalIndex];
+        }
+        
+        resampledData.push(resampled);
+      } else {
+        // No resampling needed
+        resampledData.push(originalChannel);
+      }
+      
+      // Create WAV encoder
+      console.log('Creating WAV file...');
+      const wavEncoder = new WavAudioEncoder(16000, 1); // 16 kHz mono
+      
+      // Add audio data to encoder
+      wavEncoder.encode(resampledData);
+      
+      // Finish encoding
+      const wavBlob = wavEncoder.finish();
+      
+      console.log(`WAV data created: ${wavBlob.size} bytes`);
+      return wavBlob;
+    } catch (error) {
+      console.error('Failed to convert WebM to WAV:', error);
+      throw error;
+    }
+  };
+
+  const createWavFromAudioBuffer = (audioBuffer) => {
+    // Target sample rate of 16kHz for speech recognition
+    const targetSampleRate = 16000;
+    const numChannels = 1; // Mono
+    
+    // If we need to resample
+    let resampledBuffer;
+    if (audioBuffer.sampleRate !== targetSampleRate) {
+      const originalData = audioBuffer.getChannelData(0);
+      const resampleRatio = targetSampleRate / audioBuffer.sampleRate;
+      const newLength = Math.floor(originalData.length * resampleRatio);
+      resampledBuffer = new Float32Array(newLength);
+      
+      for (let i = 0; i < newLength; i++) {
+        const originalIndex = Math.floor(i / resampleRatio);
+        resampledBuffer[i] = originalData[originalIndex];
+      }
+    } else {
+      resampledBuffer = audioBuffer.getChannelData(0);
+    }
+    
+    // Convert float to int16
+    const length = resampledBuffer.length;
+    const result = new Int16Array(length);
+    for (let i = 0; i < length; i++) {
+      const s = Math.max(-1, Math.min(1, resampledBuffer[i]));
+      result[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    
+    // Create WAV header
+    const wavHeader = new ArrayBuffer(44);
+    const view = new DataView(wavHeader);
+    
+    // RIFF identifier
+    writeString(view, 0, 'RIFF');
+    // File length
+    view.setUint32(4, 36 + result.length * 2, true);
+    // RIFF type
+    writeString(view, 8, 'WAVE');
+    // Format chunk identifier
+    writeString(view, 12, 'fmt ');
+    // Format chunk length
+    view.setUint32(16, 16, true);
+    // Sample format (raw)
+    view.setUint16(20, 1, true);
+    // Channel count
+    view.setUint16(22, numChannels, true);
+    // Sample rate
+    view.setUint32(24, targetSampleRate, true);
+    // Byte rate (sample rate * block align)
+    view.setUint32(28, targetSampleRate * numChannels * 2, true);
+    // Block align (channel count * bytes per sample)
+    view.setUint16(32, numChannels * 2, true);
+    // Bits per sample
+    view.setUint16(34, 16, true);
+    // Data chunk identifier
+    writeString(view, 36, 'data');
+    // Data chunk length
+    view.setUint32(40, result.length * 2, true);
+    
+    // Combine header and data
+    const blob = new Blob([wavHeader, result.buffer], { type: 'audio/wav' });
+    return blob;
   };
 
   const startRecording = async () => {
@@ -216,12 +356,7 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
       cleanupRecording(); // Clean up any existing recording
       
       console.log('Requesting audio permissions...');
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission denied', 'Microphone access is required for voice search.');
-        return;
-      }
-
+      
       // Start recording animation and UI state
       setRecordingDuration(0);
       startPulse();
@@ -230,6 +365,14 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
       if (Platform.OS === 'web') {
         await startWebRecording();
       } else {
+        // For native, request permissions first
+        const permission = await Audio.requestPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('Permission denied', 'Microphone access is required for voice search.');
+          stopPulse();
+          return;
+        }
+        
         await startNativeRecording();
       }
       
@@ -243,6 +386,7 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
       console.error('Failed to start recording', err);
       Alert.alert('Recording Error', `Failed to start voice recording: ${err.message}`);
       cleanupRecording();
+      stopPulse();
     }
   };
   
@@ -250,47 +394,42 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
     try {
       isRecording.current = true;
       
-      // Get user media
+      // Get user media with optimized settings for speech
       audioStream.current = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 44100
         }
       });
       
-      // Try MediaRecorder approach first (preferred)
+      // Check for MediaRecorder support
       if ('MediaRecorder' in window) {
-        try {
-          // Create MediaRecorder with WAV MIME type
-          audioRecorder.current = new MediaRecorder(audioStream.current, {
-            mimeType: 'audio/wav'
-          });
+        const supportedMimeTypes = [
+          'audio/webm',
+          'audio/webm;codecs=opus',
+          'audio/ogg;codecs=opus',
+          'audio/mp4'
+        ];
+        
+        // Find first supported MIME type
+        let mimeType = null;
+        for (const type of supportedMimeTypes) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            mimeType = type;
+            break;
+          }
+        }
+        
+        if (mimeType) {
+          console.log(`Using MediaRecorder with mime type: ${mimeType}`);
           
-          const chunks = [];
-          
-          audioRecorder.current.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-              chunks.push(e.data);
-            }
-          };
-          
-          audioRecorder.current.onstop = () => {
-            if (isRecording.current && chunks.length > 0) {
-              audioData.current = new Blob(chunks, { type: 'audio/wav' });
-            }
-          };
-          
-          // Start recording
-          audioRecorder.current.start();
-          return true;
-        } catch (recorderError) {
-          console.warn('MediaRecorder with WAV failed, trying WebM:', recorderError);
-          
-          // Try with WebM instead
           try {
             audioRecorder.current = new MediaRecorder(audioStream.current, {
-              mimeType: 'audio/webm'
+              mimeType,
+              audioBitsPerSecond: 128000
             });
             
             const chunks = [];
@@ -302,23 +441,25 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
             };
             
             audioRecorder.current.onstop = () => {
-              if (isRecording.current && chunks.length > 0) {
-                audioData.current = new Blob(chunks, { type: 'audio/webm' });
+              if (chunks.length > 0) {
+                audioData.current = new Blob(chunks, { type: mimeType });
+                console.log(`Recording completed: ${chunks.length} chunks, type: ${mimeType}`);
               }
             };
             
-            // Start recording
-            audioRecorder.current.start();
+            // Request data every second to ensure we get data even for short recordings
+            audioRecorder.current.start(1000);
+            console.log('MediaRecorder started successfully');
             return true;
-          } catch (webmError) {
-            console.warn('MediaRecorder with WebM failed, falling back to ScriptProcessor:', webmError);
-            // Continue to ScriptProcessor fallback
+          } catch (recorderError) {
+            console.warn('MediaRecorder init failed:', recorderError);
+            // Will fall back to AudioContext below
           }
         }
       }
       
-      // Fallback to ScriptProcessor
-      console.log('Using ScriptProcessor fallback for audio recording');
+      // Fallback to AudioContext approach
+      console.log('Using AudioContext fallback for recording');
       
       // Clear previous data
       audioData.current = [];
@@ -426,22 +567,23 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
       
       // Stop recording based on platform
       let audioUri = null;
+      let audioBlob = null;
       
       if (isWebPlatform) {
-        // Mark as no longer recording
+        // Stop Web recording
         isRecording.current = false;
         
-        // Stop Web recording
-        if (audioRecorder.current) {
+        if (audioRecorder.current && audioRecorder.current.state !== 'inactive') {
           try {
             audioRecorder.current.stop();
-            // We need to wait a moment for the onstop event to fire
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // Wait for the onstop event to fire
+            await new Promise(resolve => setTimeout(resolve, 500));
           } catch (e) {
             console.warn('Error stopping MediaRecorder:', e);
           }
         }
         
+        // Clean up audio processor if used
         if (audioProcessor.current) {
           try {
             audioProcessor.current.disconnect();
@@ -451,15 +593,19 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
           }
         }
         
+        // Close audio context
         if (audioContext.current) {
           try {
-            await audioContext.current.close();
+            if (audioContext.current.state !== 'closed') {
+              await audioContext.current.close();
+            }
             audioContext.current = null;
           } catch (e) {
             console.warn('Error closing audio context:', e);
           }
         }
         
+        // Stop media stream tracks
         if (audioStream.current) {
           try {
             const tracks = audioStream.current.getTracks();
@@ -470,29 +616,56 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
           }
         }
         
-        // Create a WAV file from the collected audio data
+        // Return audio data
         if (audioData.current) {
-          if (Array.isArray(audioData.current) && audioData.current.length > 0) {
-            // For ScriptProcessor approach
-            const wavBlob = createWavFile(audioData.current, 44100);
-            if (wavBlob) {
+          if (audioData.current instanceof Blob) {
+            // Convert WebM to WAV for better compatibility
+            try {
+              console.log('Converting WebM to WAV...');
+              const wavBlob = await convertWebmToWav(audioData.current);
+              audioBlob = wavBlob;
               audioUri = URL.createObjectURL(wavBlob);
-              console.log('Created WAV from ScriptProcessor data');
+              console.log('Converted to WAV successfully');
+            } catch (convError) {
+              console.error('Error converting WebM to WAV:', convError);
+              audioBlob = audioData.current;
+              audioUri = URL.createObjectURL(audioData.current);
             }
-          } else if (audioData.current instanceof Blob) {
-            // For MediaRecorder approach
-            audioUri = URL.createObjectURL(audioData.current);
-            console.log('Created blob URL from MediaRecorder data');
+          } else if (Array.isArray(audioData.current) && audioData.current.length > 0) {
+            // Create WAV from audio processor data
+            try {
+              console.log('Creating WAV from audio processor data...');
+              // Create AudioBuffer from the collected data
+              const AudioContext = window.AudioContext || window.webkitAudioContext;
+              const ctx = new AudioContext();
+              const buffer = ctx.createBuffer(1, audioData.current.reduce((acc, curr) => acc + curr.length, 0), ctx.sampleRate);
+              
+              // Copy data to the buffer
+              let offset = 0;
+              for (const chunk of audioData.current) {
+                buffer.copyToChannel(chunk, 0, offset);
+                offset += chunk.length;
+              }
+              
+              // Create WAV from the buffer
+              const wavBlob = createWavFromAudioBuffer(buffer);
+              audioBlob = wavBlob;
+              audioUri = URL.createObjectURL(wavBlob);
+              ctx.close();
+            } catch (e) {
+              console.error('Error creating WAV from audio data:', e);
+              return;
+            }
           }
         }
       } else if (recording) {
         // Native platform
-        // Check if the native recording is still valid
         try {
           const status = await recording.getStatusAsync();
           if (status.isLoaded) {
             await recording.stopAndUnloadAsync();
             audioUri = recording.getURI();
+            console.log('Native recording URI:', audioUri);
           } else {
             console.log('Recording already unloaded');
           }
@@ -505,6 +678,7 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
       setRecording(null);
       
       if (skipTranscription || !audioUri) {
+        console.log('Skipping transcription or no audio URI available');
         return;
       }
       
@@ -516,7 +690,43 @@ const SearchBar = ({ value, onChangeText, onSubmit, style }) => {
       try {
         setTranscribingStatus('Uploading audio...');
         console.log('Uploading audio file...');
-        const uploadResult = await uploadImage(audioUri, 'speech');
+        
+        let uploadResult;
+        
+        // Handle web upload with FormData
+        if (isWebPlatform && audioBlob) {
+          try {
+            const formData = new FormData();
+            const fileName = `speech_${Date.now()}.wav`;
+            
+            // Add the file as WAV
+            formData.append('file', new File([audioBlob], fileName, { type: 'audio/wav' }));
+            formData.append('type', 'speech');
+            formData.append('contentType', 'audio/wav');
+            
+            // Get the base URL from the environment or config
+            const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
+            
+            // Upload the WAV file
+            const uploadResponse = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
+              method: 'POST',
+              body: formData,
+            });
+            
+            if (!uploadResponse.ok) {
+              throw new Error(`Upload failed with status: ${uploadResponse.status}`);
+            }
+            
+            uploadResult = await uploadResponse.json();
+          } catch (formDataError) {
+            console.error('FormData upload failed:', formDataError);
+            // Fall back to regular upload
+            uploadResult = await uploadImage(audioUri, 'speech');
+          }
+        } else {
+          // Use regular upload for non-web platforms
+          uploadResult = await uploadImage(audioUri, 'speech');
+        }
         
         if (!uploadResult?.url) {
           throw new Error('Audio upload failed. No URL returned.');
