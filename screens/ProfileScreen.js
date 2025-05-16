@@ -104,8 +104,12 @@ const ProfileScreen = () => {
   if (isLoading && !user) {
     return (
       <SafeAreaView style={styles.container}>
-        <MarketplaceHeader title="My Profile" showBackButton onNotificationsPress={() => navigation.navigate('Messages')} />
-        <View style={styles.loadingContainer}>
+<MarketplaceHeader 
+  title="My Profile" 
+  showBackButton 
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')} 
+/>        <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
@@ -116,8 +120,12 @@ const ProfileScreen = () => {
   if (error && !user) {
     return (
       <SafeAreaView style={styles.container}>
-        <MarketplaceHeader title="My Profile" showBackButton onNotificationsPress={() => navigation.navigate('Messages')} />
-        <View style={styles.errorContainer}>
+<MarketplaceHeader 
+  title="My Profile" 
+  showBackButton 
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')} 
+/>        <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
         </View>
@@ -127,8 +135,12 @@ const ProfileScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <MarketplaceHeader title="My Profile" showBackButton onNotificationsPress={() => navigation.navigate('Messages')} />
-
+<MarketplaceHeader 
+  title="My Profile" 
+  showBackButton 
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')} 
+/>
       <View style={styles.profileCard}>
         <Image source={{ uri: user.avatar }} style={styles.avatar} />
         <Text style={styles.userName}>{user.name}</Text>

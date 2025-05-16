@@ -53,6 +53,11 @@ const MarketplaceScreen = ({ navigation }) => {
   const [isOnline, setIsOnline] = useState(true);
   const [recording, setRecording] = useState(null);
 
+  // Handler for back button press - navigate to Home screen
+  const handleBackPress = () => {
+    navigation.navigate('Home');
+  };
+
   // Subscribe to sync service for online status
   useEffect(() => {
     const unsubscribe = syncService.registerSyncListener((event) => {
@@ -549,7 +554,8 @@ const MarketplaceScreen = ({ navigation }) => {
       <SafeAreaView style={styles.container}>
         <MarketplaceHeader
           title="Plant Marketplace"
-          showBackButton={false}
+          showBackButton={true}
+          onBackPress={handleBackPress}
           onNotificationsPress={() => navigation.navigate('Messages')}
         />
         <View style={styles.centerContainer}>
@@ -566,7 +572,8 @@ const MarketplaceScreen = ({ navigation }) => {
       <SafeAreaView style={styles.container}>
         <MarketplaceHeader
           title="Plant Marketplace"
-          showBackButton={false}
+          showBackButton={true}
+          onBackPress={handleBackPress}
           onNotificationsPress={() => navigation.navigate('Messages')}
         />
         <View style={styles.centerContainer}>
@@ -585,10 +592,11 @@ const MarketplaceScreen = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Custom Header */}
+      {/* Custom Header with back button enabled */}
       <MarketplaceHeader
         title="Plant Marketplace"
-        showBackButton={false}
+        showBackButton={true}
+        onBackPress={handleBackPress}
         onNotificationsPress={() => navigation.navigate('Messages')}
       />
 

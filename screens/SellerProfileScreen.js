@@ -111,10 +111,11 @@ const SellerProfileScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <MarketplaceHeader
-          title="Seller Profile"
-          showBackButton={true}
-          onNotificationsPress={() => navigation.navigate('Messages')}
-        />
+  title="Seller Profile"
+  showBackButton={true}
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')}
+/>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Loading profile...</Text>
@@ -127,10 +128,11 @@ const SellerProfileScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <MarketplaceHeader
-          title="Seller Profile"
-          showBackButton={true}
-          onNotificationsPress={() => navigation.navigate('Messages')}
-        />
+  title="Seller Profile"
+  showBackButton={true}
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')}
+/>
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
@@ -154,10 +156,11 @@ const SellerProfileScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <MarketplaceHeader
-        title="Seller Profile"
-        showBackButton={true}
-        onNotificationsPress={() => navigation.navigate('Messages')}
-      />
+  title="Seller Profile"
+  showBackButton={true}
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')}
+/>
       
       <ScrollView>
         <View style={styles.headerWrapper}>

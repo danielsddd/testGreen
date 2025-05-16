@@ -359,10 +359,11 @@ const PlantDetailScreen = () => {
     <SafeAreaView style={styles.container}>
       {/* Use the consistent header with back button */}
       <MarketplaceHeader 
-        title={plant.title || plant.name || "Plant Details"}
-        showBackButton={true}
-        onNotificationsPress={() => navigation.navigate('Messages')}
-      />
+  title={plant.title || plant.name || "Plant Details"}
+  showBackButton={true}
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')}
+/>
       
       <ScrollView>
         {/* Plant Image Gallery */}

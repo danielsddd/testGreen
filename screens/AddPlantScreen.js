@@ -645,10 +645,11 @@ const AddPlantScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <MarketplaceHeader
-        title="Add New Listing"
-        showBackButton={true}
-        onNotificationsPress={() => navigation.navigate('Messages')}
-      />
+  title="Add New Listing"
+  showBackButton={true}
+  onBackPress={() => navigation.goBack()}
+  onNotificationsPress={() => navigation.navigate('Messages')}
+/>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoidingView}
