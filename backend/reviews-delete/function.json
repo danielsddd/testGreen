@@ -6,7 +6,7 @@
       "direction": "in",
       "name": "req",
       "methods": ["delete", "options"],
-      "route": "marketplace/{targetType}s/{targetId}/reviews/{reviewId}"
+      "route": "marketplace/reviews/{targetType}/{targetId}/{reviewId}"
     },
     {
       "type": "http",

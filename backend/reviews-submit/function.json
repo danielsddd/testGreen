@@ -5,8 +5,11 @@
       "type": "httpTrigger",
       "direction": "in",
       "name": "req",
-      "methods": ["post", "options"],
-      "route": "marketplace/{targetType}s/{targetId}/reviews"
+      "methods": [
+        "post",
+        "options"
+      ],
+      "route": "submitreview/{targetType}/{targetId}"
     },
     {
       "type": "http",

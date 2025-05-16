@@ -926,17 +926,32 @@ export const getCurrentLocation = async () => {
 };
 
 // Updated marketplaceApi.js functions for reviews
-
+// Updated fetchReviews function with the new route format
 /**
- * Get reviews for a product or seller
+ * Get reviews for a product or seller with the updated route format
  * @param {string} targetType - The type of review target ('seller' or 'product')
  * @param {string} targetId - ID of the review target
  * @returns {Promise<Object>} - The response with reviews array
  */
 export const fetchReviews = async (targetType, targetId) => {
   try {
-    // Use the correct endpoint format that matches your backend
-    return await apiRequest(`marketplace/${targetType}s/${targetId}/reviews`);
+    // Validate inputs
+    if (!targetId || !targetType) {
+      throw new Error('Target ID and type are required');
+    }
+    
+    // URL encode targetId to handle special characters
+    const encodedTargetId = encodeURIComponent(targetId);
+    
+    // Use the new endpoint format that matches your updated backend route
+    // Changed from: marketplace/${targetType}s/${targetId}/reviews
+    // To: marketplace/reviews/${targetType}/${targetId}
+    const endpoint = `marketplace/reviews/${targetType}/${encodedTargetId}`;
+    
+    console.log(`Fetching reviews for ${targetType} ${targetId}...`);
+    console.log(`Using endpoint: ${endpoint}`);
+    
+    return await apiRequest(endpoint);
   } catch (error) {
     console.error(`Error fetching ${targetType} reviews:`, error);
     
@@ -970,18 +985,85 @@ export const fetchReviews = async (targetType, targetId) => {
   }
 };
 
+// Updated submitReview function for new endpoint structure
 export const submitReview = async (targetId, targetType = 'seller', reviewData) => {
   try {
+    // Validate inputs
+    if (!targetId) {
+      throw new Error('Target ID is required');
+    }
+    
+    if (!reviewData || !reviewData.rating || !reviewData.text) {
+      throw new Error('Review must include both rating and text');
+    }
+    
     // URL encode targetId (email or product ID)
     const encodedTargetId = encodeURIComponent(targetId);
-
-    // Construct the correct endpoint URL
-    const url = `marketplace/${targetType}s/${encodedTargetId}/reviews`;  // Example: marketplace/sellers/dina2%40mail.tau.ac.il/reviews
-
-    // Make the POST request to submit the review
-    return await apiRequest(url, 'POST', reviewData);
+    
+    // Log the request details for debugging
+    console.log(`Submitting ${targetType} review for ${targetId}:`, reviewData);
+    
+    // Construct the endpoint with new simplified route
+    // Using a completely new route to avoid any conflicts with existing routes
+    const endpoint = `submitreview/${targetType}/${encodedTargetId}`;
+    const fullUrl = `${API_BASE_URL}/${endpoint}`;
+    
+    console.log('Attempting to submit review to URL:', fullUrl);
+    
+    // Get user email for headers
+    const userEmail = await AsyncStorage.getItem('userEmail') || '';
+    console.log('User email for review:', userEmail);
+    
+    // Make the POST request with detailed error handling
+    const response = await fetch(fullUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authToken ? `Bearer ${authToken}` : '',
+        'X-User-Email': userEmail,
+      },
+      body: JSON.stringify(reviewData),
+    });
+    
+    // Log the response status for debugging
+    console.log('POST response status:', response.status, response.statusText);
+    
+    // Check for error responses
+    if (!response.ok) {
+      // Try to get detailed error message
+      let errorMessage = `Server returned ${response.status}`;
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          console.log('Error response JSON:', errorData);
+          if (errorData && errorData.error) {
+            errorMessage = errorData.error;
+          }
+        } else {
+          // If not JSON, try to get the text
+          const errorText = await response.text();
+          console.log('Error response text:', errorText);
+          if (errorText) {
+            errorMessage = errorText;
+          }
+        }
+      } catch (e) {
+        console.log('Error parsing error response:', e.message);
+      }
+      
+      throw new Error(`Error submitting review: ${errorMessage}`);
+    }
+    
+    // Parse the successful response
+    const result = await response.json();
+    console.log('Review submission successful:', result);
+    return result;
   } catch (error) {
     console.error(`Error submitting ${targetType} review:`, error);
+    
+    // Provide more context in the error
+    error.message = `Failed to submit review: ${error.message}`;
     throw error;
   }
 };
