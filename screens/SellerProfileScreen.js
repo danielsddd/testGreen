@@ -18,6 +18,8 @@ import ReviewsList from '../components/ReviewsList';
 import MarketplaceHeader from '../components/MarketplaceHeader';
 import { fetchUserProfile } from '../services/marketplaceApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ReviewForm from '../components/ReviewForm';
+
 
 const SellerProfileScreen = () => {
   const navigation = useNavigation();

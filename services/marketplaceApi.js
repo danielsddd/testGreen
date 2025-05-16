@@ -411,21 +411,28 @@ export const markMessagesAsRead = async (conversationId, messageIds = []) => {
   }
 };
 
-// USER API
+// Clean fetchUserProfile implementation without mock data
+// For services/marketplaceApi.js
+
 export const fetchUserProfile = async (userId = null) => {
   try {
     // If no userId provided, use current user
     if (!userId) {
       userId = await AsyncStorage.getItem('userEmail');
     }
+    
+    console.log(`Fetching user profile for ID: ${userId}`);
 
-    return await apiRequest(`marketplace/users/${encodeURIComponent(userId)}`);
+    // Make the API request
+    const response = await apiRequest(`marketplace/users/${encodeURIComponent(userId)}`);
+    
+    // Add a log to see the response
+    console.log('User profile API response:', response);
+    
+    return response;
   } catch (error) {
     console.error('Error fetching user profile:', error);
-    if (config.features.useMockOnError) {
-      return { user: MOCK_USER };
-    }
-    throw error;
+    throw error; // Rethrow the error to be handled by the component
   }
 };
 
