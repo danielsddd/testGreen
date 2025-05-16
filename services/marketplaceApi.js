@@ -506,147 +506,148 @@ export const getUserListings = async (status = null) => {
   }
 };
 
-// Image Upload API
-// Updated ImageUpload Service for marketplaceApi.js
 
 /**
- * Upload an image to the server with improved error handling and cross-platform support
- * @param {string} imageUri - The URI of the image to upload
- * @param {string} type - The type of image (plant, avatar, etc.)
- * @returns {Promise<Object>} The response from the server
+ * Upload an image or audio file to the Azure Function backend
+ * Supports web and mobile (with base64 fallback)
+ * @param {string} fileUri - URI or base64 data of the file
+ * @param {string} type - File category ('plant', 'avatar', 'speech', etc.)
+ * @returns {Promise<Object>} - Response from the server
  */
-export const uploadImage = async (imageUri, type = 'plant') => {
+export const uploadImage = async (fileUri, type = 'plant') => {
   try {
-    // Get user email for identification
     const userEmail = await AsyncStorage.getItem('userEmail');
-    
-    // Validate image URI
-    if (!imageUri) {
-      throw new Error('Image URI is required');
-    }
-    
-    console.log(`Uploading ${type} image: ${imageUri.substring(0, 50)}...`);
-    
-    // Handle different platforms differently
-    if (Platform.OS === 'web') {
-      // Web implementation - use FormData
-      const formData = new FormData();
-      
-      // For web, we need to handle the File/Blob differently
-      if (imageUri.startsWith('data:')) {
-        // Already a Data URI - convert to blob
-        const response = await fetch(imageUri);
-        const blob = await response.blob();
-        formData.append('image', blob, 'image.jpg');
+
+    if (!fileUri) throw new Error('File URI is required');
+    console.log(`Uploading ${type} file: ${fileUri.substring(0, 50)}...`);
+
+    const url = 'https://usersfunctions.azurewebsites.net/api/marketplace/uploadImage';
+
+    // Helper: get filename and mime based on type
+    const getFilenameAndMime = (type) => {
+      let filename = `${type}_${Date.now()}`;
+      let mimeType = 'image/jpeg';
+
+      if (type === 'speech') {
+        filename += '.wav';          // or '.mp3' if needed
+        mimeType = 'audio/wav';
+      } else if (type === 'plant' || type === 'avatar') {
+        filename += '.jpg';
+        mimeType = 'image/jpeg';
       } else {
-        // Assume it's a File object or similar
+        // Default fallback
+        filename += '.jpg';
+      }
+
+      return { filename, mimeType };
+    };
+
+    if (Platform.OS === 'web') {
+      const formData = new FormData();
+
+      if (fileUri.startsWith('blob:') || fileUri.startsWith('data:')) {
+        const response = await fetch(fileUri);
+        const blob = await response.blob();
+
+        const { filename, mimeType } = getFilenameAndMime(type);
+        formData.append('image', blob, filename); // use correct filename
+
+      } else {
+        // fallback for standard URI or File on web
+        const { filename, mimeType } = getFilenameAndMime(type);
         formData.append('image', {
-          uri: imageUri,
-          name: `${type}_${Date.now()}.jpg`,
-          type: 'image/jpeg',
+          uri: fileUri,
+          name: filename,
+          type: mimeType,
         });
       }
-      
-      // Add additional metadata
+
       formData.append('type', type);
       if (userEmail) {
         formData.append('userId', userEmail);
       }
-      
-      // Make the request
-      const response = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
+
+      const response = await fetch(url, {
         method: 'POST',
         body: formData,
-        headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`Upload failed with status ${response.status}: ${errorText}`);
-        throw new Error(`Upload failed: ${response.status}`);
+        throw new Error(`Upload failed: ${response.status} - ${errorText}`);
       }
-      
+
       return await response.json();
     } else {
-      // Mobile implementation - convert to base64
-      // Check if already base64
-      if (imageUri.startsWith('data:image')) {
-        // Already in base64 format
+      // === Mobile (React Native) ===
+
+      if (fileUri.startsWith('data:image') || fileUri.startsWith('data:audio')) {
         return await apiRequest('marketplace/uploadImage', 'POST', {
-          image: imageUri,
+          image: fileUri,
           type,
-          userId: userEmail
+          userId: userEmail,
         });
       }
-      
-      // Get file info to check size
-      const fileInfo = await FileSystem.getInfoAsync(imageUri);
-      if (!fileInfo.exists) {
-        throw new Error('Image file does not exist');
-      }
-      
-      // Check file size - warn if too large
+
+      // Load from file path
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      if (!fileInfo.exists) throw new Error('File does not exist');
+
       if (fileInfo.size > 5 * 1024 * 1024) {
-        console.warn('Image is large (>5MB), upload may fail or be slow');
+        console.warn('File is large (>5MB), upload may fail or be slow');
       }
-      
+
       try {
-        // Read as base64
-        const base64 = await FileSystem.readAsStringAsync(imageUri, {
+        const base64 = await FileSystem.readAsStringAsync(fileUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        
-        // Determine MIME type based on file extension
-        let mimeType = 'image/jpeg'; // Default
-        if (imageUri.toLowerCase().endsWith('.png')) {
-          mimeType = 'image/png';
-        } else if (imageUri.toLowerCase().endsWith('.gif')) {
-          mimeType = 'image/gif';
-        }
-        
-        // Create data URI
+
+        let mimeType = 'image/jpeg';
+        if (type === 'speech') mimeType = 'audio/wav'; // or .mp3
+        else if (fileUri.endsWith('.png')) mimeType = 'image/png';
+        else if (fileUri.endsWith('.gif')) mimeType = 'image/gif';
+
         const dataUri = `data:${mimeType};base64,${base64}`;
-        
-        // Send the request
+
         return await apiRequest('marketplace/uploadImage', 'POST', {
           image: dataUri,
           type,
-          userId: userEmail
+          userId: userEmail,
         });
+
       } catch (readError) {
-        console.error('Error reading file as base64:', readError);
-        
-        // Fallback to FormData approach for mobile
+        console.error('Error reading base64. Using FormData fallback:', readError);
+
+        const { filename, mimeType } = getFilenameAndMime(type);
         const formData = new FormData();
         formData.append('image', {
-          uri: imageUri,
-          name: `${type}_${Date.now()}.jpg`,
-          type: 'image/jpeg',
+          uri: fileUri,
+          name: filename,
+          type: mimeType,
         });
         formData.append('type', type);
         if (userEmail) {
           formData.append('userId', userEmail);
         }
-        
-        const response = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
+
+        const response = await fetch(url, {
           method: 'POST',
           body: formData,
-          headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {},
         });
-        
+
         if (!response.ok) {
-          throw new Error(`Upload failed with status: ${response.status}`);
+          const errorText = await response.text();
+          throw new Error(`Upload failed: ${response.status} - ${errorText}`);
         }
-        
+
         return await response.json();
       }
     }
   } catch (error) {
-    console.error('Image upload error:', error);
+    console.error('File upload error:', error);
     throw error;
   }
 };
-
 
 
 // SignalR API
@@ -925,10 +926,9 @@ export const getCurrentLocation = async () => {
   }
 };
 
-// Updated marketplaceApi.js functions for reviews
-// Updated fetchReviews function with the new route format
+
 /**
- * Get reviews for a product or seller with the updated route format
+ * Get reviews for a product or seller
  * @param {string} targetType - The type of review target ('seller' or 'product')
  * @param {string} targetId - ID of the review target
  * @returns {Promise<Object>} - The response with reviews array
@@ -943,9 +943,7 @@ export const fetchReviews = async (targetType, targetId) => {
     // URL encode targetId to handle special characters
     const encodedTargetId = encodeURIComponent(targetId);
     
-    // Use the new endpoint format that matches your updated backend route
-    // Changed from: marketplace/${targetType}s/${targetId}/reviews
-    // To: marketplace/reviews/${targetType}/${targetId}
+    // Use the correct endpoint format that matches your backend route
     const endpoint = `marketplace/reviews/${targetType}/${encodedTargetId}`;
     
     console.log(`Fetching reviews for ${targetType} ${targetId}...`);
@@ -966,6 +964,7 @@ export const fetchReviews = async (targetType, targetId) => {
             userName: 'Plant Lover',
             userId: 'user1@example.com',
             createdAt: new Date().toISOString(),
+            isOwnReview: Math.random() > 0.5, // Randomly set as own review for testing
           },
           {
             id: '2',
@@ -974,6 +973,7 @@ export const fetchReviews = async (targetType, targetId) => {
             userName: 'Green Thumb',
             userId: 'user2@example.com',
             createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+            isOwnReview: false,
           },
         ],
         averageRating: 4.5,
@@ -985,7 +985,13 @@ export const fetchReviews = async (targetType, targetId) => {
   }
 };
 
-// Updated submitReview function for new endpoint structure
+/**
+ * Submit a review for a product or seller
+ * @param {string} targetId - ID of the target (seller or product)
+ * @param {string} targetType - Type of target ('seller' or 'product')
+ * @param {Object} reviewData - The review data (rating, text)
+ * @returns {Promise<Object>} - The response with the created review
+ */
 export const submitReview = async (targetId, targetType = 'seller', reviewData) => {
   try {
     // Validate inputs
@@ -1003,62 +1009,14 @@ export const submitReview = async (targetId, targetType = 'seller', reviewData) 
     // Log the request details for debugging
     console.log(`Submitting ${targetType} review for ${targetId}:`, reviewData);
     
-    // Construct the endpoint with new simplified route
-    // Using a completely new route to avoid any conflicts with existing routes
+    // Construct the endpoint with the correct route
     const endpoint = `submitreview/${targetType}/${encodedTargetId}`;
-    const fullUrl = `${API_BASE_URL}/${endpoint}`;
     
-    console.log('Attempting to submit review to URL:', fullUrl);
+    // Make the API request
+    const response = await apiRequest(endpoint, 'POST', reviewData);
+    console.log('Review submission response:', response);
     
-    // Get user email for headers
-    const userEmail = await AsyncStorage.getItem('userEmail') || '';
-    console.log('User email for review:', userEmail);
-    
-    // Make the POST request with detailed error handling
-    const response = await fetch(fullUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authToken ? `Bearer ${authToken}` : '',
-        'X-User-Email': userEmail,
-      },
-      body: JSON.stringify(reviewData),
-    });
-    
-    // Log the response status for debugging
-    console.log('POST response status:', response.status, response.statusText);
-    
-    // Check for error responses
-    if (!response.ok) {
-      // Try to get detailed error message
-      let errorMessage = `Server returned ${response.status}`;
-      try {
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const errorData = await response.json();
-          console.log('Error response JSON:', errorData);
-          if (errorData && errorData.error) {
-            errorMessage = errorData.error;
-          }
-        } else {
-          // If not JSON, try to get the text
-          const errorText = await response.text();
-          console.log('Error response text:', errorText);
-          if (errorText) {
-            errorMessage = errorText;
-          }
-        }
-      } catch (e) {
-        console.log('Error parsing error response:', e.message);
-      }
-      
-      throw new Error(`Error submitting review: ${errorMessage}`);
-    }
-    
-    // Parse the successful response
-    const result = await response.json();
-    console.log('Review submission successful:', result);
-    return result;
+    return response;
   } catch (error) {
     console.error(`Error submitting ${targetType} review:`, error);
     
@@ -1068,57 +1026,80 @@ export const submitReview = async (targetId, targetType = 'seller', reviewData) 
   }
 };
 
-/**
- * Delete a review
- * @param {string} reviewId - The ID of the review to delete
- * @param {string} targetType - The type of target ('seller' or 'product')
- * @param {string} targetId - The ID of the target
- * @returns {Promise<Object>} - The response with success status
- */
+
+// Function to update in services/marketplaceApi.js
+
 export const deleteReview = async (reviewId, targetType, targetId) => {
+  // This function is not used anymore, we make the API call directly from ReviewItem component
+  console.log('[API] deleteReview API function is called but not used, using direct fetch instead');
+  console.log('[API] Parameters:', { reviewId, targetType, targetId });
+  
   try {
     if (!reviewId) {
       throw new Error('Review ID is required');
     }
     
-    // For debugging
-    console.log(`Deleting review ${reviewId} for ${targetType} ${targetId}...`);
+    // Get authentication info
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    const token = await AsyncStorage.getItem('googleAuthToken');
     
-    // URL encode parameters to handle special characters
-    const encodedTargetType = encodeURIComponent(targetType || 'seller');
-    const encodedTargetId = encodeURIComponent(targetId || '');
+    // Build URL
+    const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
+    const encodedTargetType = encodeURIComponent(targetType);
+    const encodedTargetId = encodeURIComponent(targetId);
     const encodedReviewId = encodeURIComponent(reviewId);
     
-    // Construct endpoint with the correct route format
     const endpoint = `marketplace/reviews/${encodedTargetType}/${encodedTargetId}/${encodedReviewId}`;
+    const fullUrl = `${API_BASE_URL}/${endpoint}`;
     
-    console.log(`DELETE request to: ${endpoint}`);
+    console.log(`[API] DELETE request URL: ${fullUrl}`);
     
-    // Make the API request
-    const response = await apiRequest(endpoint, 'DELETE');
-    console.log('Delete response:', response);
+    // Build headers
+    const headers = {
+      'Content-Type': 'application/json',
+    };
     
-    return response;
-  } catch (error) {
-    console.error('Error deleting review:', error);
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     
-    if (config.features.useMockOnError || (config.isDevelopment && !config.features.useRealApi)) {
-      // Return mock success response for development
-      console.log('Using mock success response for deleteReview');
-      return { 
-        success: true,
-        message: 'Review deleted successfully (mock)'
+    headers['X-User-Email'] = userEmail;
+    
+    // Make the request
+    const response = await fetch(fullUrl, {
+      method: 'DELETE',
+      headers
+    });
+    
+    // Try to parse response
+    let responseData;
+    try {
+      responseData = await response.json();
+    } catch (e) {
+      const textResponse = await response.text();
+      responseData = { 
+        success: response.ok, 
+        message: response.ok ? 'Review deleted successfully' : textResponse 
       };
     }
     
+    // Handle response
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}: ${responseData?.message || 'Unknown error'}`);
+    }
+    
+    return responseData;
+  } catch (error) {
+    console.error('[API] Error deleting review:', error);
     throw error;
   }
 };
 
+async function speechToText(audioUrl) {
+  const API_URL = 'https://usersfunctions.azurewebsites.net/api/speechToText';
 
-export async function speechToText(audioUrl) {
   try {
-    const response = await fetch(`${API_BASE_URL}/speechToText`, {
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1126,17 +1107,26 @@ export async function speechToText(audioUrl) {
       body: JSON.stringify({ audioUrl }),
     });
 
-    const data = await response.json();
-    if (response.ok && data.text) {
-      return data.text;
-    } else {
-      throw new Error(data.error || 'Speech recognition failed');
+    if (!response.ok) {
+      // Throw an error with status code
+      throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
     }
+
+    const data = await response.json();
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return data.text; // recognized speech text
+
   } catch (error) {
     console.error('speechToText error:', error);
     throw error;
   }
 }
+
+
 
 // Export the API
 export default {

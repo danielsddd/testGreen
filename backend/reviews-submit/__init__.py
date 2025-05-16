@@ -80,7 +80,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             try:
                 # Get the product to find the sellerId
                 logging.info(f"Finding sellerId for product {target_id}")
-                products_container = get_container("marketplace-plants")
+                products_container = get_container("marketplace_plants")
                 product_query = "SELECT c.sellerId FROM c WHERE c.id = @id"
                 product_params = [{"name": "@id", "value": target_id}]
                 
@@ -204,7 +204,7 @@ def update_target_rating(target_type, target_id):
     
     average_rating = sum(ratings) / len(ratings)
     
-    container_name = "marketplace-plants" if target_type == "product" else "users"
+    container_name = "marketplace_plants" if target_type == "product" else "users"
     container = get_container(container_name)
     
     query = "SELECT * FROM c WHERE c.id = @id"

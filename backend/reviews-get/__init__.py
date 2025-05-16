@@ -27,8 +27,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Get user ID from request for identifying own reviews
         current_user_id = extract_user_id(req)
         
-        # Access the marketplace-reviews container
-        reviews_container = get_container("marketplace-reviews")
+        # Access the marketplace_reviews container
+        reviews_container = get_container("marketplace_reviews")
         
         # Query for reviews
         if target_type == 'seller':
