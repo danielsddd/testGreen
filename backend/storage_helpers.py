@@ -117,3 +117,48 @@ def get_file_extension(content_type):
     if not extension:
         extension = '.jpg'
     return extension
+
+
+def upload_image_with_content_type(image_data, container_name=None, filename=None, content_type=None):
+    """
+    Upload an image or audio blob to Azure Blob Storage with a specific content type and return the URL.
+    """
+    try:
+        if not container_name:
+            container_name = os.environ.get("STORAGE_CONTAINER_PLANTS", "marketplace-plants")
+        
+        client = get_storage_client()
+        container_client = client.get_container_client(container_name)
+        
+        image_bytes, detected_content_type = process_image_data(image_data)
+        
+        # Use provided content_type if available, otherwise use detected one
+        if not content_type:
+            content_type = detected_content_type
+        
+        if not filename:
+            extension = get_file_extension(content_type)
+            filename = f"{uuid.uuid4()}{extension}"
+        
+        blob_client = container_client.get_blob_client(filename)
+        
+        # Set the content type in content settings
+        content_settings = ContentSettings(
+            content_type=content_type,
+            cache_control=None,  # Optional: Add cache control as needed
+            content_disposition=None,  # Optional: Add content disposition as needed
+            content_encoding=None,  # Optional: Add content encoding as needed
+            content_language=None,  # Optional: Add content language as needed
+            content_md5=None  # Optional: Add content MD5 as needed
+        )
+        
+        # Log the content type
+        logging.info(f"Uploading file with content type: {content_type}")
+        
+        blob_client.upload_blob(image_bytes, content_settings=content_settings, overwrite=True)
+        
+        return blob_client.url
+    
+    except Exception as e:
+        logging.error(f"Error uploading image with content type: {str(e)}")
+        raise
