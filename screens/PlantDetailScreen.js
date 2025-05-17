@@ -6,6 +6,7 @@ import {
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import MarketplaceHeader from '../components/MarketplaceHeader';
 import { getSpecific, wishProduct } from '../services/marketplaceApi';
 import PlantLocationMap from '../components/PlantLocationMap';

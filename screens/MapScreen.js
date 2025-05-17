@@ -13,6 +13,7 @@ import CrossPlatformAzureMapView from '../components/CrossPlatformAzureMapView';
 import MapSearchBox from '../components/MapSearchBox';
 import RadiusControl from '../components/RadiusControl';
 import { getNearbyProducts } from '../services/marketplaceApi';
+import { getAzureMapsKey } from '../services/azureMapsService';
 
 const MapScreen = () => {
   const navigation = useNavigation();
@@ -24,6 +25,26 @@ const MapScreen = () => {
   const [error, setError] = useState(null);
   const [selectedLocation, setSelectedLocation] = useState(initialLocation);
   const [searchRadius, setSearchRadius] = useState(10);
+  const [azureMapsKey, setAzureMapsKey] = useState(null);
+  const [isKeyLoading, setIsKeyLoading] = useState(true);
+  
+  // Load Azure Maps key when component mounts
+  useEffect(() => {
+    const loadMapsKey = async () => {
+      try {
+        setIsKeyLoading(true);
+        const key = await getAzureMapsKey();
+        setAzureMapsKey(key);
+        setIsKeyLoading(false);
+      } catch (err) {
+        console.error('Error fetching Azure Maps key:', err);
+        setError('Failed to load map configuration. Please try again later.');
+        setIsKeyLoading(false);
+      }
+    };
+    
+    loadMapsKey();
+  }, []);
   
   useEffect(() => {
     if (products.length > 0) {
@@ -76,6 +97,24 @@ const MapScreen = () => {
     navigation.navigate('PlantDetail', { plantId: productId });
   };
   
+  // Show loading indicator while fetching the API key
+  if (isKeyLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <MarketplaceHeader
+          title="Map View"
+          showBackButton={true}
+          onBackPress={() => navigation.goBack()}
+          onNotificationsPress={() => navigation.navigate('Messages')}
+        />
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.loadingText}>Loading map configuration...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
   return (
     <SafeAreaView style={styles.container}>
       <MarketplaceHeader
@@ -109,6 +148,7 @@ const MapScreen = () => {
                 : undefined
             }
             showControls={true}
+            azureMapsKey={azureMapsKey}
           />
         )}
         
