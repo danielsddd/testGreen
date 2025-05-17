@@ -1,308 +1,594 @@
-// screens/ProfileScreen.js
-import React, { useState, useCallback, useEffect } from 'react';
+// screens/ProfileScreen.js - Updated with RatingStars
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, Image, TouchableOpacity, FlatList, 
-  ActivityIndicator, SafeAreaView
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  ScrollView,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
 } from 'react-native';
-import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Import components
 import MarketplaceHeader from '../components/MarketplaceHeader';
 import PlantCard from '../components/PlantCard';
-import ReviewsList from '../components/ReviewsList';
-import { fetchUserProfile } from '../services/marketplaceApi';
-import { checkForUpdate, clearUpdate, UPDATE_TYPES, addUpdateListener, removeUpdateListener } from '../services/MarketplaceUpdates';
+import RatingStars from '../components/RatingStars';
 
-const ProfileScreen = () => {
-  const navigation = useNavigation();
-  const route = useRoute();
-  const [user, setUser] = useState(null);
+// Import services
+import { fetchUserProfile, getUserListings, getUserWishlist } from '../services/marketplaceApi';
+
+/**
+ * ProfileScreen - User profile screen
+ */
+const ProfileScreen = ({ navigation }) => {
+  // State
+  const [userProfile, setUserProfile] = useState(null);
+  const [userListings, setUserListings] = useState([]);
+  const [userWishlist, setUserWishlist] = useState([]);
+  const [activeTab, setActiveTab] = useState('listings');
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('myPlants');
-  const [ratingData, setRatingData] = useState({ average: 0, count: 0 });
-  const [lastUpdateTime, setLastUpdateTime] = useState(Date.now());
 
-  // Set up update listeners
+  // Load user data on mount
   useEffect(() => {
-    const listenerId = 'profile-screen';
-    
-    const handleUpdate = (updateType, data) => {
-      console.log(`[ProfileScreen] Received update: ${updateType}`, data);
-      
-      if ([UPDATE_TYPES.PROFILE, UPDATE_TYPES.WISHLIST, UPDATE_TYPES.PRODUCT, UPDATE_TYPES.REVIEW].includes(updateType)) {
-        loadUserProfile();
-      }
-    };
-    
-    // Add web event listener
-    addUpdateListener(listenerId, handleUpdate);
-    
-    // Clean up listener on unmount
-    return () => {
-      removeUpdateListener(listenerId);
-    };
-  }, []);
+    loadUserData();
 
-  useFocusEffect(
-    useCallback(() => {
-      // Load user profile
-      loadUserProfile();
-      
-      // Check for updates
-      const checkUpdates = async () => {
-        try {
-          // Check relevant update types
-          const updateTypes = [UPDATE_TYPES.PROFILE, UPDATE_TYPES.WISHLIST, UPDATE_TYPES.PRODUCT, UPDATE_TYPES.REVIEW];
-          let needsRefresh = false;
-          
-          for (const updateType of updateTypes) {
-            const hasUpdate = await checkForUpdate(updateType, lastUpdateTime);
-            if (hasUpdate) {
-              needsRefresh = true;
-              await clearUpdate(updateType);
-            }
-          }
-          
-          if (needsRefresh || route.params?.refresh) {
-            loadUserProfile();
-            setLastUpdateTime(Date.now());
-            
-            // Clear route params
-            if (route.params?.refresh) {
-              navigation.setParams({ refresh: undefined });
-            }
-          }
-        } catch (error) {
-          console.error('[ProfileScreen] Error checking updates:', error);
-        }
-      };
-      
-      checkUpdates();
-    }, [])
-  );
+    // Listen for profile updates
+    const unsubscribe = navigation.addListener('focus', () => {
+      checkProfileUpdates();
+    });
 
-  useEffect(() => {
-    if (route.params?.refresh) {
-      loadUserProfile();
-      navigation.setParams({ refresh: undefined });
-    }
-  }, [route.params?.refresh]);
+    return unsubscribe;
+  }, [navigation]);
 
-  const loadUserProfile = async () => {
+  // Check if profile was updated
+  const checkProfileUpdates = async () => {
     try {
-      setIsLoading(true);
-      const userEmail = await AsyncStorage.getItem('userEmail') || 'default@example.com';
-      const data = await fetchUserProfile(userEmail);
-      setUser(data.user);
+      const profileUpdated = await AsyncStorage.getItem('PROFILE_UPDATED');
+      if (profileUpdated) {
+        // Clear the flag
+        await AsyncStorage.removeItem('PROFILE_UPDATED');
+        // Reload data
+        loadUserData();
+      }
+    } catch (error) {
+      console.warn('Error checking profile updates:', error);
+    }
+  };
+
+  // Load user data from API
+  const loadUserData = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Get user email
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      
+      if (!userEmail) {
+        setError('You need to be logged in to view your profile.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Load user profile
+      const profileData = await fetchUserProfile(userEmail);
+      setUserProfile(profileData.user);
+
+      // Load user listings
+      const listingsData = await getUserListings();
+      setUserListings(listingsData.active || []);
+
+      // Load user wishlist
+      const wishlistData = await getUserWishlist();
+      setUserWishlist(wishlistData.wishlist || []);
+    } catch (error) {
+      console.error('Error loading user data:', error);
+      setError('Failed to load profile data. Please try again later.');
+    } finally {
       setIsLoading(false);
-    } catch (err) {
-      setError('Failed to load profile. Please try again later.');
-      setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
-  const handleReviewsLoaded = (data) => {
-    if (data && typeof data === 'object') {
-      setRatingData({
-        average: data.averageRating || 0,
-        count: data.count || 0
-      });
-    }
+  // Handle refresh
+  const onRefresh = async () => {
+    setIsRefreshing(true);
+    await loadUserData();
   };
 
-  const renderEmptyState = (icon, message, buttonText, onPress) => (
-    <View style={styles.emptyStateContainer}>
-      <MaterialIcons name={icon} size={48} color="#ccc" />
-      <Text style={styles.emptyStateText}>{message}</Text>
-      {buttonText && (
-        <TouchableOpacity style={styles.actionButton} onPress={onPress}>
-          <Text style={styles.actionButtonText}>{buttonText}</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-
-  const renderPlantList = (plants) => (
-    <FlatList
-      data={plants}
-      renderItem={({ item }) => <PlantCard plant={item} showActions={false} />}
-      keyExtractor={item => item.id || `plant-${Math.random()}`}
-      numColumns={2}
-      contentContainerStyle={styles.plantGrid}
-    />
-  );
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'myPlants': {
-        const activePlants = user.listings?.filter(plant => plant.status === 'active') || [];
-        return activePlants.length ? renderPlantList(activePlants) : 
-          renderEmptyState('eco', 'You don\'t have any active listings', 'Add a Plant', () => navigation.navigate('AddPlant'));
-      }
-      case 'favorites': {
-        return user.favorites?.length ? renderPlantList(user.favorites) :
-          renderEmptyState('favorite-border', 'You don\'t have any saved plants', 'Browse Plants', () => navigation.navigate('MarketplaceHome'));
-      }
-      case 'sold': {
-        const soldPlants = user.listings?.filter(plant => plant.status === 'sold') || [];
-        return soldPlants.length ? renderPlantList(soldPlants) :
-          renderEmptyState('local-offer', 'You haven\'t sold any plants yet');
-      }
-      case 'reviews': {
-        return (
-          <ReviewsList
-            targetType="seller"
-            targetId={user.email || user.id}
-            onReviewsLoaded={handleReviewsLoaded}
-            autoLoad={true}
-          />
-        );
-      }
-      default:
-        return null;
-    }
+  // Navigate to edit profile
+  const handleEditProfile = () => {
+    navigation.navigate('EditProfile', { userProfile });
   };
 
-  if (isLoading && !user) {
+  // Sign out
+  const handleSignOut = async () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Clear authentication data
+              await AsyncStorage.removeItem('userEmail');
+              await AsyncStorage.removeItem('googleAuthToken');
+              
+              // Navigate to authentication screen or reload app
+              // This will depend on your app structure
+              Alert.alert('Signed Out', 'You have been signed out successfully.');
+            } catch (error) {
+              console.error('Error signing out:', error);
+              Alert.alert('Error', 'Failed to sign out. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Loading state
+  if (isLoading && !userProfile) {
     return (
-      <SafeAreaView style={styles.container}>
-        <MarketplaceHeader title="My Profile" showBackButton onBackPress={() => navigation.goBack()} onNotificationsPress={() => navigation.navigate('Messages')} />
-        <View style={styles.centerContainer}>
+      <View style={styles.container}>
+        <MarketplaceHeader
+          title="Profile"
+          showBackButton={false}
+          showNotifications={false}
+        />
+        <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
-  if (error && !user) {
+  // Error state
+  if (error && !userProfile) {
     return (
-      <SafeAreaView style={styles.container}>
-        <MarketplaceHeader title="My Profile" showBackButton onBackPress={() => navigation.goBack()} onNotificationsPress={() => navigation.navigate('Messages')} />
-        <View style={styles.centerContainer}>
+      <View style={styles.container}>
+        <MarketplaceHeader
+          title="Profile"
+          showBackButton={false}
+          showNotifications={false}
+        />
+        <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={loadUserData}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
+  // Calculate user location display
+  const userLocation = userProfile?.location?.city || 
+                      (userProfile?.location?.formattedAddress ? 
+                        userProfile.location.formattedAddress.split(',')[0] : 
+                        'Unknown location');
+
+  // Get user rating and review count
+  const userRating = userProfile?.stats?.rating || 0;
+  const reviewCount = userProfile?.stats?.reviewCount || 0;
+
   return (
-    <SafeAreaView style={styles.container}>
-      <MarketplaceHeader title="My Profile" showBackButton onBackPress={() => navigation.goBack()} onNotificationsPress={() => navigation.navigate('Messages')} />
-      
-      <View style={styles.profileCard}>
-        <Image source={{ uri: user.avatar }} style={styles.avatar} />
-        <Text style={styles.userName}>{user.name}</Text>
-        <Text style={styles.userEmail}>{user.email}</Text>
-        <Text style={styles.joinDate}>Joined {user.joinDate ? new Date(user.joinDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long' }) : 'N/A'}</Text>
-        {user.bio && <Text style={styles.bio}>{user.bio}</Text>}
+    <View style={styles.container}>
+      <MarketplaceHeader
+        title="Profile"
+        showBackButton={false}
+        showNotifications={false}
+      />
 
-        <TouchableOpacity style={styles.editProfileButton} onPress={() => navigation.navigate('EditProfile')}>
-          <Feather name="edit" size={16} color="#4CAF50" />
-          <Text style={styles.editProfileText}>Edit Profile</Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={['#4CAF50']} />
+        }
+      >
+        {/* Profile Header */}
+        <View style={styles.profileHeader}>
+          <View style={styles.profileImageContainer}>
+            {userProfile?.avatar ? (
+              <Image
+                source={{ uri: userProfile.avatar }}
+                style={styles.profileImage}
+              />
+            ) : (
+              <View style={styles.defaultAvatar}>
+                <Text style={styles.avatarInitial}>
+                  {userProfile?.name?.charAt(0)?.toUpperCase() || 'U'}
+                </Text>
+              </View>
+            )}
+          </View>
 
-      <View style={styles.statsRow}>
-        <View style={styles.statBox}>
-          <Text style={styles.statValue}>{user.stats?.plantsCount || 0}</Text>
-          <Text style={styles.statLabel}>Listings</Text>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{userProfile?.name || 'User'}</Text>
+            <Text style={styles.profileEmail}>{userProfile?.email || ''}</Text>
+            
+            {/* Display Location */}
+            <View style={styles.locationContainer}>
+              <MaterialIcons name="location-on" size={16} color="#666" />
+              <Text style={styles.locationText}>{userLocation}</Text>
+            </View>
+            
+            {/* Rating with Stars */}
+            <View style={styles.ratingContainer}>
+              <RatingStars 
+                rating={userRating} 
+                size={16} 
+                color="#FFD700"
+              />
+              <Text style={styles.ratingText}>
+                {userRating.toFixed(1)}
+                {reviewCount > 0 && ` (${reviewCount})`}
+              </Text>
+            </View>
+            
+            <View style={styles.statsContainer}>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{userProfile?.stats?.plantsCount || 0}</Text>
+                <Text style={styles.statLabel}>Plants</Text>
+              </View>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{userProfile?.stats?.salesCount || 0}</Text>
+                <Text style={styles.statLabel}>Sales</Text>
+              </View>
+            </View>
+          </View>
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statValue}>{user.stats?.salesCount || 0}</Text>
-          <Text style={styles.statLabel}>Sold</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statValue}>
-            {ratingData.average.toFixed(1) || user.stats?.rating?.toFixed?.(1) || '0.0'}
-          </Text>
-          <Text style={styles.statLabel}>Rating ({ratingData.count || 0})</Text>
-        </View>
-      </View>
 
-      <View style={styles.tabsContainer}>
-        {['myPlants', 'favorites', 'sold', 'reviews'].map(tab => (
+        {/* Action Buttons */}
+        <View style={styles.actionButtonsContainer}>
           <TouchableOpacity
-            key={tab}
-            style={[styles.tabButton, activeTab === tab && styles.activeTabButton]}
-            onPress={() => setActiveTab(tab)}
+            style={styles.editProfileButton}
+            onPress={handleEditProfile}
           >
-            <MaterialIcons
-              name={tab === 'myPlants' ? 'eco' : tab === 'favorites' ? 'favorite' : tab === 'sold' ? 'local-offer' : 'star'}
-              size={24}
-              color={activeTab === tab ? '#4CAF50' : '#666'}
-            />
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
-              {tab === 'myPlants' ? 'My Plants' : tab === 'reviews' ? 'Reviews' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            <MaterialIcons name="edit" size={18} color="#fff" />
+            <Text style={styles.editProfileButtonText}>Edit Profile</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.signOutButton}
+            onPress={handleSignOut}
+          >
+            <MaterialIcons name="logout" size={18} color="#666" />
+            <Text style={styles.signOutButtonText}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Tab Navigation */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[
+              styles.tabButton,
+              activeTab === 'listings' && styles.activeTabButton,
+            ]}
+            onPress={() => setActiveTab('listings')}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                activeTab === 'listings' && styles.activeTabText,
+              ]}
+            >
+              My Listings
             </Text>
           </TouchableOpacity>
-        ))}
-      </View>
 
-      <View style={styles.tabContent}>{renderTabContent()}</View>
+          <TouchableOpacity
+            style={[
+              styles.tabButton,
+              activeTab === 'wishlist' && styles.activeTabButton,
+            ]}
+            onPress={() => setActiveTab('wishlist')}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                activeTab === 'wishlist' && styles.activeTabText,
+              ]}
+            >
+              Wishlist
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-      <TouchableOpacity style={styles.addPlantButton} onPress={() => navigation.navigate('AddPlant')}>
-        <MaterialIcons name="add" size={24} color="#fff" />
-      </TouchableOpacity>
-    </SafeAreaView>
+        {/* Content based on active tab */}
+        {activeTab === 'listings' ? (
+          <View style={styles.contentContainer}>
+            {userListings.length > 0 ? (
+              userListings.map((plant) => (
+                <PlantCard key={plant.id} plant={plant} />
+              ))
+            ) : (
+              <View style={styles.emptyStateContainer}>
+                <MaterialCommunityIcons name="leaf-off" size={48} color="#ccc" />
+                <Text style={styles.emptyStateText}>
+                  You don't have any listings yet
+                </Text>
+                <TouchableOpacity
+                  style={styles.addPlantButton}
+                  onPress={() => navigation.navigate('AddPlant')}
+                >
+                  <Text style={styles.addPlantButtonText}>Add a Plant</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={styles.contentContainer}>
+            {userWishlist.length > 0 ? (
+              userWishlist.map((plant) => (
+                <PlantCard key={plant.id} plant={plant} />
+              ))
+            ) : (
+              <View style={styles.emptyStateContainer}>
+                <MaterialIcons name="favorite-border" size={48} color="#ccc" />
+                <Text style={styles.emptyStateText}>
+                  Your wishlist is empty
+                </Text>
+                <TouchableOpacity
+                  style={styles.browseButton}
+                  onPress={() => navigation.navigate('MarketplaceHome')}
+                >
+                  <Text style={styles.browseButtonText}>Browse Plants</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 10, color: '#666', fontSize: 16 },
-  errorText: { color: '#f44336', fontSize: 16, textAlign: 'center', marginTop: 10 },
-  profileCard: {
-    backgroundColor: '#f0f9f3', // Light green background
-    margin: 16, padding: 20, borderRadius: 16, alignItems: 'center',
-    shadowColor: '#000', shadowOpacity: 0.1, shadowOffset: { width: 0, height: 2 }, 
-    shadowRadius: 6, elevation: 4,
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
   },
-  avatar: { width: 90, height: 90, borderRadius: 45, marginBottom: 12 },
-  userName: { fontSize: 20, fontWeight: 'bold', color: '#333' },
-  userEmail: { fontSize: 14, color: '#666', marginTop: 2 },
-  joinDate: { fontSize: 12, color: '#999', marginTop: 2 },
-  bio: { marginTop: 10, fontSize: 14, color: '#555', textAlign: 'center' },
+  scrollView: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#f44336',
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: '#4CAF50',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: '500',
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  profileImageContainer: {
+    marginRight: 16,
+  },
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#f0f0f0',
+  },
+  defaultAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarInitial: {
+    color: '#fff',
+    fontSize: 36,
+    fontWeight: 'bold',
+  },
+  profileInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  profileName: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  profileEmail: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 6,
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  locationText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  ratingText: {
+    marginLeft: 6,
+    fontSize: 14,
+    color: '#666',
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  },
+  statItem: {
+    alignItems: 'center',
+    marginRight: 24,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
+  },
+  statDivider: {
+    width: 1,
+    height: '80%',
+    backgroundColor: '#e0e0e0',
+    marginRight: 24,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
   editProfileButton: {
-    flexDirection: 'row', alignItems: 'center', marginTop: 12,
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, 
-    borderColor: '#4CAF50', borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 10,
+    borderRadius: 4,
+    marginRight: 8,
   },
-  editProfileText: { color: '#4CAF50', marginLeft: 6, fontWeight: '500' },
-  statsRow: {
-    flexDirection: 'row', justifyContent: 'space-around', marginHorizontal: 16, 
-    marginTop: 8, marginBottom: 12, backgroundColor: '#fff', paddingVertical: 12, 
-    borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.05, 
-    shadowOffset: { width: 0, height: 1 }, shadowRadius: 3, elevation: 2,
+  editProfileButtonText: {
+    color: '#fff',
+    fontWeight: '500',
+    marginLeft: 8,
   },
-  statBox: { alignItems: 'center', flex: 1 },
-  statValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  statLabel: { fontSize: 12, color: '#888', marginTop: 2 },
-  tabsContainer: {
-    flexDirection: 'row', backgroundColor: '#fff', elevation: 2,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, 
-    shadowOpacity: 0.05, shadowRadius: 2,
+  signOutButton: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 10,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    marginLeft: 8,
   },
-  tabButton: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  activeTabButton: { borderBottomWidth: 2, borderBottomColor: '#4CAF50' },
-  tabText: { fontSize: 14, color: '#666', marginTop: 4 },
-  activeTabText: { color: '#4CAF50', fontWeight: 'bold' },
-  tabContent: { flex: 1, padding: 8 },
-  plantGrid: { paddingBottom: 80 },
-  emptyStateContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 40 },
-  emptyStateText: { fontSize: 16, color: '#888', textAlign: 'center', marginTop: 12 },
-  actionButton: {
-    marginTop: 16, backgroundColor: '#4CAF50', paddingHorizontal: 16, 
-    paddingVertical: 10, borderRadius: 6,
+  signOutButtonText: {
+    color: '#666',
+    fontWeight: '500',
+    marginLeft: 8,
   },
-  actionButtonText: { color: '#fff', fontWeight: '600' },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  activeTabButton: {
+    borderBottomColor: '#4CAF50',
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#666',
+  },
+  activeTabText: {
+    color: '#4CAF50',
+  },
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  emptyStateContainer: {
+    padding: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 16,
+  },
   addPlantButton: {
-    position: 'absolute', bottom: 16, right: 16, backgroundColor: '#4CAF50',
-    borderRadius: 30, padding: 16, elevation: 4, shadowColor: '#000', 
-    shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4,
+    backgroundColor: '#4CAF50',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+  },
+  addPlantButtonText: {
+    color: '#fff',
+    fontWeight: '500',
+  },
+  browseButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+  },
+  browseButtonText: {
+    color: '#fff',
+    fontWeight: '500',
   },
 });
 
