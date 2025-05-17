@@ -93,7 +93,17 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
     if (typeof plant.location === 'string') {
       return plant.location;
     } else if (plant.location && typeof plant.location === 'object') {
-      return plant.location.city || 'Local pickup';
+      // If we have a formatted city name, use it
+      if (plant.location.city) {
+        return plant.location.city;
+      }
+      
+      // If we have coordinates but no city, format them nicely
+      if (plant.location.latitude && plant.location.longitude) {
+        return `Near ${plant.location.latitude.toFixed(2)}, ${plant.location.longitude.toFixed(2)}`;
+      }
+      
+      return 'Local pickup';
     } else if (plant.city) {
       return plant.city;
     }
@@ -119,11 +129,6 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
           resizeMode="contain"
         />
         
-        <View style={styles.locationPill}>
-          <MaterialIcons name="location-on" size={12} color="#fff" />
-          <Text style={styles.locationText} numberOfLines={1}>{getLocationText()}</Text>
-        </View>
-        
         {isOffline && (
           <View style={styles.offlineIndicator}>
             <MaterialIcons name="cloud-off" size={12} color="#fff" />
@@ -145,6 +150,12 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
             {plant.title || plant.name}
           </Text>
           <Text style={styles.price}>${parseFloat(plant.price).toFixed(2)}</Text>
+        </View>
+        
+        {/* Location information */}
+        <View style={styles.locationRow}>
+          <MaterialIcons name="location-on" size={12} color="#666" />
+          <Text style={styles.locationText} numberOfLines={1}>{getLocationText()}</Text>
         </View>
         
         {!isList && <Text style={styles.category} numberOfLines={1}>{plant.category}</Text>}
@@ -194,7 +205,6 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
 };
 
 const styles = StyleSheet.create({
-  // Styles remain the same as before
   card: {
     backgroundColor: '#fff',
     borderRadius: 8,
@@ -247,24 +257,7 @@ const styles = StyleSheet.create({
   listImage: {
     height: 130,
     width: 130,
-    resizeMode: 'contain',
-  },
-  locationPill: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  locationText: {
-    color: '#fff',
-    fontSize: 10,
-    marginLeft: 3,
-    maxWidth: 90,
+    backgroundColor: '#f0f0f0',
   },
   offlineIndicator: {
     position: 'absolute',
@@ -312,6 +305,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#4CAF50',
+  },
+  // New location row styles
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  locationText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
+    flex: 1,
   },
   category: {
     fontSize: 14,
