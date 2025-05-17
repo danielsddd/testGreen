@@ -1,5 +1,3 @@
-# Backend: /backend/nearby-products/__init__.py - Updated for standardized format
-
 import logging
 import json
 import azure.functions as func

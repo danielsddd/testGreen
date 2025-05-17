@@ -1,128 +1,167 @@
-// components/AzureMapView.js - Updated with key fetching
-import React, { useState, useEffect } from 'react';
-import PropTypes from 'prop-types';
-import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+// services/azureMapsService.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import CrossPlatformAzureMapView from './CrossPlatformAzureMapView';
-import { getAzureMapsKey } from '../services/azureMapsService';
+const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
 
 /**
- * AzureMapView — wrapper around CrossPlatformAzureMapView 
- * that works on both web and mobile platforms
+ * Get Azure Maps API key from the server with authentication
+ * @returns {Promise<string>} Azure Maps API key
  */
-const AzureMapView = ({
-  products = [],
-  onSelectProduct,
-  initialRegion = { latitude: 32.0853, longitude: 34.7818, zoom: 10 },
-  showControls = true,
-  mapStyle = 'road',
-  onMapReady,
-  azureMapsKey, // optional — will use a fallback
-}) => {
-  const [key, setKey] = useState(azureMapsKey);
-  const [isLoading, setIsLoading] = useState(!azureMapsKey);
-  const [error, setError] = useState(null);
-
-  // Fetch the Azure Maps key if not provided
-  useEffect(() => {
-    if (!azureMapsKey) {
-      const fetchKey = async () => {
-        try {
-          setIsLoading(true);
-          const apiKey = await getAzureMapsKey();
-          setKey(apiKey);
-          setIsLoading(false);
-        } catch (err) {
-          console.error('Error fetching Azure Maps API key:', err);
-          setError('Could not load maps configuration. Please try again later.');
-          setIsLoading(false);
-        }
-      };
-      
-      fetchKey();
+export const getAzureMapsKey = async () => {
+  try {
+    // Get user email for authenticated requests
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    const token = await AsyncStorage.getItem('googleAuthToken');
+    
+    // Setup request headers
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    
+    // Add authentication headers if available
+    if (userEmail) {
+      headers['X-User-Email'] = userEmail;
     }
-  }, [azureMapsKey]);
-
-  // Show loading spinner while fetching the key
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Loading map configuration...</Text>
-      </View>
-    );
+    
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    // Get Azure Maps key from backend
+    const response = await fetch(`${API_BASE_URL}/marketplace/maps-config`, {
+      method: 'GET',
+      headers,
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get Azure Maps key: ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.azureMapsKey) {
+      throw new Error('No Azure Maps key returned from server');
+    }
+    
+    return data.azureMapsKey;
+  } catch (error) {
+    console.error('Error getting Azure Maps key:', error);
+    throw error;
   }
+};
 
-  // Show error message if key couldn't be fetched
-  if (error) {
-    return (
-      <View style={styles.errorContainer}>
-        <MaterialIcons name="error-outline" size={48} color="#f44336" />
-        <Text style={styles.errorText}>Map Error</Text>
-        <Text style={styles.errorDescription}>{error}</Text>
-      </View>
-    );
+/**
+ * Geocode an address to coordinates
+ * @param {string} address Address to geocode
+ * @returns {Promise<Object>} Geocoded location data
+ */
+export const geocodeAddress = async (address) => {
+  try {
+    if (!address || typeof address !== 'string') {
+      throw new Error('Invalid address provided');
+    }
+    
+    // Setup request headers
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    
+    // Make the geocode request
+    const response = await fetch(`${API_BASE_URL}/marketplace/geocode?address=${encodeURIComponent(address)}`, {
+      method: 'GET',
+      headers,
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Geocoding failed: ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    return {
+      latitude: data.latitude,
+      longitude: data.longitude,
+      formattedAddress: data.formattedAddress,
+      city: data.city,
+      country: data.country,
+      street: data.street,
+      houseNumber: data.houseNumber,
+      postalCode: data.postalCode
+    };
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    throw error;
   }
+};
+
+/**
+ * Reverse geocode coordinates to an address
+ * @param {number} latitude Latitude
+ * @param {number} longitude Longitude
+ * @returns {Promise<Object>} Address information
+ */
+export const reverseGeocode = async (latitude, longitude) => {
+  try {
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      throw new Error('Invalid coordinates provided');
+    }
+    
+    // Setup request headers
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    
+    // Make the reverse geocode request
+    const response = await fetch(`${API_BASE_URL}/marketplace/reverseGeocode?lat=${latitude}&lon=${longitude}`, {
+      method: 'GET',
+      headers,
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Reverse geocoding failed: ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    return {
+      formattedAddress: data.formattedAddress,
+      city: data.city,
+      country: data.country,
+      street: data.street,
+      houseNumber: data.houseNumber,
+      postalCode: data.postalCode,
+      latitude: data.latitude,
+      longitude: data.longitude
+    };
+  } catch (error) {
+    console.error('Reverse geocoding error:', error);
+    throw error;
+  }
+};
+
+/**
+ * Calculate distance between two coordinates in kilometers
+ * @param {number} lat1 First point latitude
+ * @param {number} lon1 First point longitude
+ * @param {number} lat2 Second point latitude
+ * @param {number} lon2 Second point longitude
+ * @returns {number} Distance in kilometers
+ */
+export const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const R = 6371; // Earth's radius in km
   
-  return (
-    <CrossPlatformAzureMapView
-      products={products}
-      onSelectProduct={onSelectProduct}
-      initialRegion={initialRegion}
-      showControls={showControls}
-      mapStyle={mapStyle}
-      onMapReady={onMapReady}
-      azureMapsKey={key}
-    />
-  );
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+    
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
 };
-
-AzureMapView.propTypes = {
-  products: PropTypes.arrayOf(PropTypes.object),
-  onSelectProduct: PropTypes.func,
-  initialRegion: PropTypes.shape({
-    latitude: PropTypes.number,
-    longitude: PropTypes.number,
-    zoom: PropTypes.number,
-  }),
-  showControls: PropTypes.bool,
-  mapStyle: PropTypes.string,
-  onMapReady: PropTypes.func,
-  azureMapsKey: PropTypes.string,
-};
-
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#4CAF50',
-    fontSize: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#fafafa',
-  },
-  errorText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginTop: 12,
-  },
-  errorDescription: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-});
-
-export default AzureMapView;

@@ -1,731 +1,579 @@
 // screens/SellerProfileScreen.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Image,
   TouchableOpacity,
-  ScrollView,
   ActivityIndicator,
   FlatList,
+  ScrollView,
+  SafeAreaView,
   Alert,
-  Dimensions,
+  Platform,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from '@react-navigation/native';
 
-// Import components
-import MarketplaceHeader from '../components/MarketplaceHeader';
 import PlantCard from '../components/PlantCard';
-import RatingStars from '../components/RatingStars';
 import ReviewsList from '../components/ReviewsList';
+import MarketplaceHeader from '../components/MarketplaceHeader';
 import ReviewForm from '../components/ReviewForm';
-
-// Import services
 import { fetchUserProfile } from '../services/marketplaceApi';
-import { checkForUpdate, clearUpdate, UPDATE_TYPES } from '../services/MarketplaceUpdates';
 
-const { width } = Dimensions.get('window');
+const SellerProfileScreen = () => {
+  const navigation = useNavigation();
+  const route = useRoute();
+  const sellerId = route.params?.sellerId || 'user123';
 
-/**
- * SellerProfileScreen - View a seller's profile with enhanced UI and reviews
- */
-const SellerProfileScreen = ({ navigation, route }) => {
-  // Get seller ID from params
-  const sellerId = route.params?.sellerId;
-  
-  // State
-  const [sellerData, setSellerData] = useState(null);
+  const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [currentTab, setCurrentTab] = useState('active');
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState('myPlants');
   const [showReviewForm, setShowReviewForm] = useState(false);
-  const [userEmail, setUserEmail] = useState('');
-  const [lastRefreshTime, setLastRefreshTime] = useState(Date.now());
+  const [sellerRating, setSellerRating] = useState({ average: 0, count: 0 });
+  const [avatarError, setAvatarError] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(Date.now());
 
-  // Check for updates when screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      // Check for global updates
-      const checkForGlobalUpdates = async () => {
-        const updateTypes = [
-          UPDATE_TYPES.REVIEW,
-          UPDATE_TYPES.PRODUCT
-        ];
-        
-        let needsRefresh = false;
-        
-        for (const updateType of updateTypes) {
-          const hasUpdate = await checkForUpdate(updateType, lastRefreshTime);
-          if (hasUpdate) {
-            needsRefresh = true;
-            await clearUpdate(updateType);
-          }
+  useEffect(() => { 
+    loadSellerProfile();
+    
+    // Check if favorites were updated
+    const checkUpdates = async () => {
+      try {
+        const favoritesUpdated = await AsyncStorage.getItem('FAVORITES_UPDATED') 
+                              || await AsyncStorage.getItem('WISHLIST_UPDATED');
+                              
+        if (favoritesUpdated) {
+          // Clear both flags
+          await AsyncStorage.removeItem('FAVORITES_UPDATED');
+          await AsyncStorage.removeItem('WISHLIST_UPDATED');
+          // Refresh data
+          setRefreshKey(Date.now());
         }
-        
-        if (needsRefresh) {
-          loadSellerData();
-          setLastRefreshTime(Date.now());
-        }
-      };
+      } catch (error) {
+        console.warn('Error checking updates:', error);
+      }
+    };
+    
+    checkUpdates();
+  }, [sellerId, refreshKey]);
+
+  const loadSellerProfile = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
       
-      checkForGlobalUpdates();
-    }, [lastRefreshTime])
-  );
-
-  // Load seller data on mount
-  useEffect(() => {
-    if (!sellerId) {
-      setError('Seller ID is missing');
+      // Make sure we have a valid seller ID
+      if (!sellerId) {
+        console.error("No seller ID provided");
+        setError('Unable to load seller profile. Missing seller ID.');
+        setIsLoading(false);
+        return;
+      }
+      
+      console.log("Loading seller profile for ID:", sellerId);
+      
+      // Attempt to fetch the user profile
+      const data = await fetchUserProfile(sellerId);
+      
+      if (data && data.user) {
+        console.log("Seller profile loaded successfully");
+        setUser(data.user);
+        
+        // Update seller info in listings for consistency
+        if (data.user.listings) {
+          data.user.listings.forEach(listing => {
+            if (!listing.seller) {
+              listing.seller = {
+                name: data.user.name,
+                _id: data.user.id || data.user.email,
+                email: data.user.email
+              };
+            }
+          });
+        }
+      } else {
+        // If the API returns empty data, use a fallback approach
+        console.warn("API returned empty user data, using fallback");
+        
+        // Try to construct a minimal seller object from product data if available
+        if (route.params?.sellerData) {
+          const sellerData = route.params.sellerData;
+          setUser({
+            id: sellerId,
+            name: sellerData.name || 'Unknown Seller',
+            email: sellerData.email || sellerId,
+            avatar: sellerData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(sellerData.name || 'S')}&background=4CAF50&color=fff`,
+            joinDate: sellerData.joinDate || new Date().toISOString(),
+            stats: {
+              plantsCount: sellerData.plantsCount || 0,
+              salesCount: sellerData.salesCount || 0,
+              rating: sellerData.rating || 0
+            },
+            listings: []
+          });
+        } else {
+          setError('Seller profile could not be loaded.');
+        }
+      }
+      
       setIsLoading(false);
-      return;
+    } catch (err) {
+      console.error('Error fetching seller profile:', err);
+      setError('Failed to load profile. Please try again later.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddReview = () => {
+    // Check if user is trying to review themselves
+    const checkSelfReview = async () => {
+      try {
+        const userEmail = await AsyncStorage.getItem('userEmail');
+        if (userEmail === sellerId) {
+          Alert.alert(
+            "Cannot Review Yourself", 
+            "You cannot leave a review for your own profile."
+          );
+          return;
+        }
+        setShowReviewForm(true);
+      } catch (err) {
+        console.error("Error checking user email:", err);
+        setShowReviewForm(true); // Allow review anyway
+      }
+    };
+    
+    checkSelfReview();
+  };
+
+  const handleReviewsLoaded = (ratingsData) => {
+    // Only update if we have rating data
+    if (ratingsData && typeof ratingsData.averageRating === 'number') {
+      setSellerRating({
+        average: ratingsData.averageRating || 0,
+        count: ratingsData.count || 0
+      });
+    }
+  };
+
+  const handleReviewSubmitted = () => {
+    // Refresh the reviews list after a new review is submitted
+    if (activeTab !== 'reviews') {
+      setActiveTab('reviews');
     }
     
-    // Get user email for comparison
-    AsyncStorage.getItem('userEmail').then(email => {
-      if (email) {
-        setUserEmail(email);
+    // Force a refresh of the data
+    setRefreshKey(Date.now());
+  };
+
+  // Generate a reliable avatar URL with name initials
+  const getAvatarUrl = (name, email) => {
+    // First try using the name for a nicer display
+    const displayName = name || 'Unknown';
+    const firstInitial = displayName.charAt(0).toUpperCase();
+    
+    // Use UI Avatars service for a reliable, colorful avatar with initials
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(firstInitial)}&background=4CAF50&color=fff&size=256`;
+  };
+
+  const renderTabContent = () => {
+    if (activeTab === 'reviews') {
+      return (
+        <ReviewsList
+          targetType="seller"
+          targetId={sellerId}
+          onAddReview={handleAddReview}
+          onReviewsLoaded={handleReviewsLoaded}
+          autoLoad={true}
+          key={`reviews-${refreshKey}`}
+        />
+      );
+    }
+
+    // Check if user has listings property
+    const listings = user?.listings || [];
+    
+    // Filter by status
+    const filtered = listings.filter(p => {
+      if (activeTab === 'myPlants') {
+        // Active listings have status 'active' or undefined/null status
+        return p.status === 'active' || !p.status;
+      } else if (activeTab === 'sold') {
+        return p.status === 'sold';
       }
+      return false;
     });
     
-    loadSellerData();
-  }, [sellerId]);
+    // Make sure each listing has the correct seller info
+    filtered.forEach(listing => {
+      if (!listing.seller || !listing.seller.name || listing.seller.name === 'Unknown Seller') {
+        listing.seller = {
+          name: user.name,
+          _id: user.id || user.email,
+          email: user.email
+        };
+      }
+    });
 
-  // Load seller data from API
-  const loadSellerData = async () => {
-    setIsLoading(true);
-    setError(null);
+    if (filtered.length === 0) {
+      return (
+        <View style={styles.emptyStateContainer}>
+          <MaterialIcons name={activeTab === 'myPlants' ? 'eco' : 'local-offer'} size={48} color="#ccc" />
+          <Text style={styles.emptyStateText}>
+            {activeTab === 'myPlants' ? 'This seller has no active listings' : 'No sold plants yet'}
+          </Text>
+        </View>
+      );
+    }
     
-    try {
-      const response = await fetchUserProfile(sellerId);
-      
-      if (response && response.user) {
-        setSellerData(response.user);
-      } else {
-        setError('Failed to load seller profile');
-      }
-    } catch (error) {
-      console.error('Error loading seller data:', error);
-      setError('Failed to load seller profile. Please try again.');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
+    return (
+      <FlatList
+        data={filtered}
+        renderItem={({ item }) => <PlantCard plant={item} showActions={false} />}
+        keyExtractor={item => item.id || item._id || `plant-${Math.random()}`}
+        numColumns={2}
+        contentContainerStyle={styles.plantGrid}
+      />
+    );
   };
 
-  // Handle refresh
-  const onRefresh = async () => {
-    setIsRefreshing(true);
-    await loadSellerData();
-    setLastRefreshTime(Date.now());
-  };
-
-  // Start a conversation with the seller
-  const startConversation = async () => {
-    try {
-      // Check if user is logged in
-      if (!userEmail) {
-        Alert.alert('Sign In Required', 'Please sign in to message sellers.');
-        return;
-      }
-      
-      // Don't allow messaging yourself
-      if (userEmail === sellerId) {
-        Alert.alert('Error', 'You cannot message yourself.');
-        return;
-      }
-      
-      // Navigate to Messages tab with seller info
-      navigation.navigate('Messages', { 
-        sellerId: sellerId,
-        sellerName: sellerData?.name || 'Seller',
-        sellerAvatar: sellerData?.avatar
-      });
-    } catch (error) {
-      console.error('Error starting conversation:', error);
-      Alert.alert('Error', 'Failed to start conversation. Please try again.');
-    }
-  };
-
-  // Handle back button press
-  const handleBackPress = () => {
-    navigation.goBack();
-  };
-  
-  // Handle review submitted
-  const handleReviewSubmitted = () => {
-    // Refresh seller data to update rating
-    loadSellerData();
-  };
-  
-  // Render plant item
-  const renderPlantItem = ({ item }) => (
-    <PlantCard 
-      plant={item} 
-      layout={width > 600 ? 'grid' : 'list'} 
-    />
-  );
-
-  // Loading state
   if (isLoading) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         <MarketplaceHeader
           title="Seller Profile"
           showBackButton={true}
-          onBackPress={handleBackPress}
-          showNotifications={false}
+          onBackPress={() => navigation.goBack()}
+          onNotificationsPress={() => navigation.navigate('Messages')}
         />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
-          <Text style={styles.loadingText}>Loading seller profile...</Text>
+          <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
-  // Error state
   if (error) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         <MarketplaceHeader
           title="Seller Profile"
           showBackButton={true}
-          onBackPress={handleBackPress}
-          showNotifications={false}
+          onBackPress={() => navigation.goBack()}
+          onNotificationsPress={() => navigation.navigate('Messages')}
         />
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={loadSellerData}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={loadSellerProfile}>
+            <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
-  // Calculate seller location display
-  const sellerLocation = sellerData?.location?.city || 
-                        (sellerData?.location?.formattedAddress ? 
-                          sellerData.location.formattedAddress.split(',')[0] : 
-                          'Unknown location');
+  // Generate avatar URL with fallback
+  const avatarUrl = user.avatar && !avatarError 
+    ? user.avatar 
+    : getAvatarUrl(user.name, user.email);
 
-  // Get active and sold listings
-  const activeListings = sellerData?.listings?.filter(listing => 
-    listing.status === 'active' || !listing.status
-  ) || [];
+  // Calculate rating to display (prefer the one from reviews component if available)
+  const displayRating = sellerRating.average > 0 
+    ? sellerRating.average 
+    : (user.stats?.rating || 0);
   
-  const soldListings = sellerData?.listings?.filter(listing => 
-    listing.status === 'sold'
-  ) || [];
+  // Format the rating to show only 1 decimal place
+  const formattedRating = typeof displayRating === 'number' 
+    ? displayRating.toFixed(1) 
+    : '0.0';
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <MarketplaceHeader
         title="Seller Profile"
         showBackButton={true}
-        onBackPress={handleBackPress}
-        showNotifications={false}
+        onBackPress={() => navigation.goBack()}
+        onNotificationsPress={() => navigation.navigate('Messages')}
       />
       
-      <ScrollView 
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl 
-            refreshing={isRefreshing} 
-            onRefresh={onRefresh} 
-            colors={['#4CAF50']} 
-            tintColor="#4CAF50" 
-          />
-        }
-      >
-        {/* Seller Profile Card */}
+      <ScrollView>
+        {/* Profile card similar to ProfileScreen */}
         <View style={styles.profileCard}>
-          <View style={styles.profileHeader}>
-            <View style={styles.profileImageContainer}>
-              {sellerData?.avatar ? (
-                <Image
-                  source={{ uri: sellerData.avatar }}
-                  style={styles.profileImage}
-                />
-              ) : (
-                <View style={styles.defaultAvatar}>
-                  <Text style={styles.avatarInitial}>
-                    {sellerData?.name?.charAt(0)?.toUpperCase() || 'S'}
-                  </Text>
-                </View>
-              )}
-            </View>
-            
-            <View style={styles.profileInfo}>
-              <Text style={styles.sellerName}>{sellerData?.name || 'Seller'}</Text>
-              
-              {/* Seller Rating */}
-              <View style={styles.ratingContainer}>
-                <RatingStars 
-                  rating={sellerData?.stats?.rating || 0} 
-                  size={18} 
-                  color="#FFD700"
-                />
-                <Text style={styles.ratingText}>
-                  {sellerData?.stats?.rating ? sellerData.stats.rating.toFixed(1) : '0.0'}
-                  {sellerData?.stats?.reviewCount ? ` (${sellerData.stats.reviewCount})` : ''}
-                </Text>
-              </View>
-              
-              {/* Seller Location */}
-              <View style={styles.locationContainer}>
-                <MaterialIcons name="location-on" size={16} color="#666" />
-                <Text style={styles.locationText}>{sellerLocation}</Text>
-              </View>
-              
-              {/* Seller Join Date */}
-              {sellerData?.joinDate && (
-                <Text style={styles.joinDateText}>
-                  Member since {new Date(sellerData.joinDate).toLocaleDateString()}
-                </Text>
-              )}
-            </View>
-          </View>
-          
-          {/* Seller Stats */}
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{sellerData?.stats?.plantsCount || 0}</Text>
-              <Text style={styles.statLabel}>Plants</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{sellerData?.stats?.salesCount || 0}</Text>
-              <Text style={styles.statLabel}>Sales</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {sellerData?.stats?.responseRate ? `${sellerData.stats.responseRate}%` : 'N/A'}
-              </Text>
-              <Text style={styles.statLabel}>Response</Text>
-            </View>
-          </View>
-          
-          {/* Contact Button */}
-          {userEmail !== sellerId && (
-            <TouchableOpacity
-              style={styles.contactButton}
-              onPress={startConversation}
-            >
-              <MaterialIcons name="chat" size={18} color="#fff" />
-              <Text style={styles.contactButtonText}>Message Seller</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        
-        {/* Seller Bio if available */}
-        {sellerData?.bio && (
-          <View style={styles.bioCard}>
-            <Text style={styles.bioTitle}>About</Text>
-            <Text style={styles.bioText}>{sellerData.bio}</Text>
-          </View>
-        )}
-        
-        {/* Reviews Section */}
-        <View style={styles.reviewsCard}>
-          <View style={styles.reviewsHeader}>
-            <Text style={styles.reviewsTitle}>Reviews</Text>
-            {userEmail && userEmail !== sellerId && (
-              <TouchableOpacity
-                style={styles.writeReviewButton}
-                onPress={() => setShowReviewForm(true)}
-              >
-                <MaterialIcons name="rate-review" size={16} color="#4CAF50" />
-                <Text style={styles.writeReviewText}>Write a Review</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          
-          <ReviewsList
-            targetType="seller"
-            targetId={sellerId}
-            onAddReview={() => setShowReviewForm(true)}
-            onReviewsLoaded={(data) => {
-              // Update seller stats if available
-              if (data && sellerData) {
-                setSellerData({
-                  ...sellerData,
-                  stats: {
-                    ...sellerData.stats,
-                    rating: data.averageRating,
-                    reviewCount: data.count
-                  }
-                });
-              }
+          <Image 
+            source={{ uri: avatarUrl }} 
+            style={styles.avatar}
+            resizeMode="cover"
+            onError={() => {
+              console.log('Avatar image failed to load');
+              setAvatarError(true);
             }}
           />
+          <Text style={styles.userName}>{user.name}</Text>
+          <Text style={styles.userEmail}>{user.email}</Text>
+          <Text style={styles.joinDate}>
+            Joined {new Date(user.joinDate || Date.now()).toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}
+          </Text>
+          {user.bio && <Text style={styles.bio}>{user.bio}</Text>}
+          
+          {/* Review button instead of edit profile */}
+          <TouchableOpacity 
+            style={styles.reviewButton} 
+            onPress={handleAddReview}
+          >
+            <MaterialIcons name="rate-review" size={16} color="#4CAF50" />
+            <Text style={styles.reviewButtonText}>Write a Review</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Listings Tabs */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[
-              styles.tabButton,
-              currentTab === 'active' && styles.activeTabButton,
-            ]}
-            onPress={() => setCurrentTab('active')}
+        {/* Stats row - identical to ProfileScreen */}
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{user.stats?.plantsCount || 0}</Text>
+            <Text style={styles.statLabel}>Listings</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{user.stats?.salesCount || 0}</Text>
+            <Text style={styles.statLabel}>Sold</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{formattedRating}</Text>
+            <Text style={styles.statLabel}>
+              Rating ({sellerRating.count || 0})
+            </Text>
+          </View>
+        </View>
+
+        {/* Tabs - similar to ProfileScreen */}
+        <View style={styles.tabsContainer}>
+          <TouchableOpacity 
+            style={[styles.tabButton, activeTab === 'myPlants' && styles.activeTabButton]} 
+            onPress={() => setActiveTab('myPlants')}
           >
-            <Text
-              style={[
-                styles.tabText,
-                currentTab === 'active' && styles.activeTabText,
-              ]}
-            >
-              Active Listings ({activeListings.length})
+            <MaterialIcons 
+              name="eco" 
+              size={24} 
+              color={activeTab === 'myPlants' ? '#4CAF50' : '#666'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'myPlants' && styles.activeTabText]}>
+              Active
             </Text>
           </TouchableOpacity>
           
-          <TouchableOpacity
-            style={[
-              styles.tabButton,
-              currentTab === 'sold' && styles.activeTabButton,
-            ]}
-            onPress={() => setCurrentTab('sold')}
+          <TouchableOpacity 
+            style={[styles.tabButton, activeTab === 'sold' && styles.activeTabButton]} 
+            onPress={() => setActiveTab('sold')}
           >
-            <Text
-              style={[
-                styles.tabText,
-                currentTab === 'sold' && styles.activeTabText,
-              ]}
-            >
-              Sold Items ({soldListings.length})
+            <MaterialIcons 
+              name="local-offer" 
+              size={24} 
+              color={activeTab === 'sold' ? '#4CAF50' : '#666'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'sold' && styles.activeTabText]}>
+              Sold
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.tabButton, activeTab === 'reviews' && styles.activeTabButton]} 
+            onPress={() => setActiveTab('reviews')}
+          >
+            <MaterialIcons 
+              name="star" 
+              size={24} 
+              color={activeTab === 'reviews' ? '#4CAF50' : '#666'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'reviews' && styles.activeTabText]}>
+              Reviews
             </Text>
           </TouchableOpacity>
         </View>
-        
-        {/* Listings Content */}
-        <View style={styles.listingsContainer}>
-          {currentTab === 'active' ? (
-            activeListings.length > 0 ? (
-              <FlatList
-                data={activeListings}
-                renderItem={renderPlantItem}
-                keyExtractor={item => item.id || item._id}
-                numColumns={width > 600 ? 2 : 1}
-                key={width > 600 ? 'grid' : 'list'}
-                scrollEnabled={false}
-                contentContainerStyle={styles.listContent}
-              />
-            ) : (
-              <View style={styles.emptyStateContainer}>
-                <Text style={styles.emptyStateText}>No active listings</Text>
-              </View>
-            )
-          ) : (
-            soldListings.length > 0 ? (
-              <FlatList
-                data={soldListings}
-                renderItem={renderPlantItem}
-                keyExtractor={item => item.id || item._id}
-                numColumns={width > 600 ? 2 : 1}
-                key={width > 600 ? 'grid-sold' : 'list-sold'}
-                scrollEnabled={false}
-                contentContainerStyle={styles.listContent}
-              />
-            ) : (
-              <View style={styles.emptyStateContainer}>
-                <Text style={styles.emptyStateText}>No sold items</Text>
-              </View>
-            )
-          )}
-        </View>
+
+        <View style={styles.tabContent}>{renderTabContent()}</View>
       </ScrollView>
       
       {/* Review Form Modal */}
       <ReviewForm
-        isVisible={showReviewForm}
-        targetType="seller"
         targetId={sellerId}
+        targetType="seller"
+        isVisible={showReviewForm}
         onClose={() => setShowReviewForm(false)}
         onReviewSubmitted={handleReviewSubmitted}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f8f8',
+  container: { 
+    flex: 1, 
+    backgroundColor: '#f5f5f5' 
   },
-  scrollView: {
-    flex: 1,
+  loadingContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  loadingText: { 
+    marginTop: 10, 
+    fontSize: 16, 
+    color: '#666' 
   },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
+  errorContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    padding: 20 
   },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+  errorText: { 
+    fontSize: 16, 
+    color: '#f44336', 
+    textAlign: 'center', 
+    marginVertical: 10 
   },
-  errorText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#f44336',
-    textAlign: 'center',
+  retryButton: { 
+    paddingVertical: 10, 
+    paddingHorizontal: 20, 
+    backgroundColor: '#4CAF50', 
+    borderRadius: 6 
   },
-  retryButton: {
-    marginTop: 16,
-    backgroundColor: '#4CAF50',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
+  retryText: { 
+    color: '#fff', 
+    fontWeight: '600' 
   },
   profileCard: {
-    backgroundColor: '#fff',
-    margin: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    backgroundColor: '#f0f9f3', // Light green background
+    margin: 16, 
+    padding: 20, 
+    borderRadius: 16, 
+    alignItems: 'center',
+    shadowColor: '#000', 
+    shadowOpacity: 0.1, 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowRadius: 6, 
     elevation: 4,
-    overflow: 'hidden',
   },
-  profileHeader: {
-    flexDirection: 'row',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  profileImageContainer: {
-    marginRight: 16,
-  },
-  profileImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#f0f0f0',
-  },
-  defaultAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#4CAF50',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarInitial: {
-    color: '#fff',
-    fontSize: 36,
-    fontWeight: 'bold',
-  },
-  profileInfo: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  sellerName: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  ratingText: {
-    marginLeft: 8,
-    fontSize: 15,
-    color: '#666',
-  },
-  locationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 6,
-  },
-  joinDateText: {
-    fontSize: 13,
-    color: '#888',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#4CAF50',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  statDivider: {
-    width: 1,
-    height: '80%',
-    backgroundColor: '#e0e0e0',
-    alignSelf: 'center',
-  },
-  contactButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#4CAF50',
-    margin: 16,
-    paddingVertical: 14,
-    borderRadius: 8,
-  },
-  contactButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    marginLeft: 8,
-    fontSize: 16,
-  },
-  bioCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  bioTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  bioText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
-  reviewsCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  reviewsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  avatar: { 
+    width: 90, 
+    height: 90, 
+    borderRadius: 45, 
     marginBottom: 12,
+    backgroundColor: '#4CAF50', // Placeholder background color
   },
-  reviewsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+  userName: { 
+    fontSize: 20, 
+    fontWeight: 'bold', 
+    color: '#333' 
   },
-  writeReviewButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
+  userEmail: { 
+    fontSize: 14, 
+    color: '#666', 
+    marginTop: 2 
   },
-  writeReviewText: {
-    color: '#4CAF50',
-    fontWeight: '500',
-    marginLeft: 4,
+  joinDate: { 
+    fontSize: 12, 
+    color: '#999', 
+    marginTop: 2 
   },
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 12,
-    overflow: 'hidden',
+  bio: { 
+    marginTop: 10, 
+    fontSize: 14, 
+    color: '#555', 
+    textAlign: 'center' 
+  },
+  reviewButton: {
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginTop: 12,
+    paddingHorizontal: 12, 
+    paddingVertical: 6, 
+    borderRadius: 20, 
+    borderColor: '#4CAF50', 
+    borderWidth: 1,
+  },
+  reviewButtonText: { 
+    color: '#4CAF50', 
+    marginLeft: 6, 
+    fontWeight: '500' 
+  },
+  statsRow: {
+    flexDirection: 'row', 
+    justifyContent: 'space-around', 
+    marginHorizontal: 16, 
+    marginTop: 8, 
+    marginBottom: 12, 
+    backgroundColor: '#fff', 
+    paddingVertical: 12, 
+    borderRadius: 12, 
+    shadowColor: '#000', 
+    shadowOpacity: 0.05, 
+    shadowOffset: { width: 0, height: 1 }, 
+    shadowRadius: 3, 
     elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
   },
-  tabButton: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 14,
-    backgroundColor: '#fff',
+  statBox: { 
+    alignItems: 'center', 
+    flex: 1 
   },
-  activeTabButton: {
-    backgroundColor: '#f0f9f0',
-    borderBottomWidth: 3,
-    borderBottomColor: '#4CAF50',
+  statValue: { 
+    fontSize: 18, 
+    fontWeight: 'bold', 
+    color: '#333' 
   },
-  tabText: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#666',
+  statLabel: { 
+    fontSize: 12, 
+    color: '#888', 
+    marginTop: 2 
   },
-  activeTabText: {
-    color: '#4CAF50',
-    fontWeight: '600',
-  },
-  listingsContainer: {
-    marginBottom: 20,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-  },
-  emptyStateContainer: {
-    padding: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginHorizontal: 16,
-    marginBottom: 16,
+  tabsContainer: {
+    flexDirection: 'row', 
+    backgroundColor: '#fff', 
     elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 1 }, 
+    shadowOpacity: 0.05, 
+    shadowRadius: 2,
   },
-  emptyStateText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
+  tabButton: { 
+    flex: 1, 
+    alignItems: 'center', 
+    paddingVertical: 12 
+  },
+  activeTabButton: { 
+    borderBottomWidth: 2, 
+    borderBottomColor: '#4CAF50' 
+  },
+  tabText: { 
+    fontSize: 14, 
+    color: '#666', 
+    marginTop: 4 
+  },
+  activeTabText: { 
+    color: '#4CAF50', 
+    fontWeight: 'bold' 
+  },
+  tabContent: { 
+    flex: 1, 
+    padding: 8 
+  },
+  emptyStateContainer: { 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    padding: 32 
+  },
+  emptyStateText: { 
+    fontSize: 16, 
+    color: '#888', 
+    textAlign: 'center', 
+    marginTop: 8 
+  },
+  plantGrid: { 
+    paddingBottom: 80 
   },
 });
 

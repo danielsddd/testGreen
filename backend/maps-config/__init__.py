@@ -1,3 +1,4 @@
+#maps-config:
 # Backend: /backend/maps-config/__init__.py
 import logging
 import json

@@ -1,11 +1,9 @@
-// navigation/MarketplaceNavigation.js
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 
-// Import all screens
-// Import all screens
+// Import all your screens
 import MarketplaceScreen from './screens/MarketplaceScreen';
 import PlantDetailScreen from './screens/PlantDetailScreen';
 import AddPlantScreen from './screens/AddPlantScreen';
@@ -13,7 +11,6 @@ import ProfileScreen from './screens/ProfileScreen';
 import EditProfileScreen from './screens/EditProfileScreen';
 import MessagesScreen from './screens/MessagesScreen';
 import SellerProfileScreen from './screens/SellerProfileScreen';
-
 
 // Create navigators
 const Stack = createNativeStackNavigator();
@@ -112,7 +109,6 @@ const MarketplaceNavigation = () => {
         name="SellerProfile" 
         component={SellerProfileScreen}
       />
-      
     </Stack.Navigator>
   );
 };
