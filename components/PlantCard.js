@@ -7,6 +7,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
+  Animated,
 } from 'react-native';
 import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -20,7 +21,10 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
   const navigation = useNavigation();
   const [isFavorite, setIsFavorite] = useState(plant.isFavorite || plant.isWished || false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
+  
+  // Animation for favorite button
+  const [scaleAnim] = useState(new Animated.Value(1));
+  
   // Update favorite state when plant prop changes
   useEffect(() => {
     setIsFavorite(plant.isFavorite || plant.isWished || false);
@@ -43,6 +47,21 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
 
     try {
       setIsSubmitting(true);
+      
+      // Animate heart icon when toggling
+      Animated.sequence([
+        Animated.timing(scaleAnim, {
+          toValue: 1.3,
+          duration: 150,
+          useNativeDriver: true
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true
+        })
+      ]).start();
+      
       // Optimistically update UI
       setIsFavorite(!isFavorite);
 
@@ -55,6 +74,9 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
         isFavorite: !isFavorite,
         timestamp: Date.now()
       });
+      
+      // Set flag for other screens to refresh
+      await AsyncStorage.setItem('FAVORITES_UPDATED', Date.now().toString());
     } catch (err) {
       // Revert on error
       setIsFavorite(isFavorite);
@@ -66,7 +88,12 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
 
   const handleShare = (e) => {
     e.stopPropagation();
-    // Implement sharing functionality
+    // Use the ShareService to share the plant
+    import('../services/ShareService').then(({ sharePlant }) => {
+      sharePlant(plant).catch(err => 
+        console.error('Error sharing plant:', err)
+      );
+    });
   };
 
   const handleContact = (e) => {
@@ -89,20 +116,19 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
     }
   };
 
+  // Extract just the city name from location
   const getLocationText = () => {
     if (typeof plant.location === 'string') {
-      return plant.location;
+      // If it's a string, try to extract just the city
+      const parts = plant.location.split(',');
+      return parts[0].trim();
     } else if (plant.location && typeof plant.location === 'object') {
-      // If we have a formatted city name, use it
+      // If it's an object with city property, use that
       if (plant.location.city) {
         return plant.location.city;
       }
       
-      // If we have coordinates but no city, format them nicely
-      if (plant.location.latitude && plant.location.longitude) {
-        return `Near ${plant.location.latitude.toFixed(2)}, ${plant.location.longitude.toFixed(2)}`;
-      }
-      
+      // If we have coordinates but no city, don't show them in UI
       return 'Local pickup';
     } else if (plant.city) {
       return plant.city;
@@ -120,13 +146,13 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
         isOffline && styles.offlineCard,
       ]}
       onPress={handlePress}
-      activeOpacity={0.8}
+      activeOpacity={0.7}
     >
       <View style={[styles.imageContainer, isList && styles.listImageContainer]}>
         <Image
           source={{ uri: plant.image || plant.imageUrl || 'https://via.placeholder.com/150?text=Plant' }}
           style={isList ? styles.listImage : styles.image}
-          resizeMode="contain"
+          resizeMode="cover"
         />
         
         {isOffline && (
@@ -136,11 +162,13 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
         )}
         
         <TouchableOpacity style={styles.favoriteButton} onPress={toggleFavorite}>
-          <MaterialIcons
-            name={isFavorite ? 'favorite' : 'favorite-border'}
-            size={18}
-            color={isFavorite ? '#f44336' : '#fff'}
-          />
+          <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+            <MaterialIcons
+              name={isFavorite ? 'favorite' : 'favorite-border'}
+              size={20}
+              color={isFavorite ? '#f44336' : '#fff'}
+            />
+          </Animated.View>
         </TouchableOpacity>
       </View>
       
@@ -152,7 +180,7 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
           <Text style={styles.price}>${parseFloat(plant.price).toFixed(2)}</Text>
         </View>
         
-        {/* Location information */}
+        {/* Location information - ONLY showing city now */}
         <View style={styles.locationRow}>
           <MaterialIcons name="location-on" size={12} color="#666" />
           <Text style={styles.locationText} numberOfLines={1}>{getLocationText()}</Text>
@@ -207,7 +235,7 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
 const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
-    borderRadius: 8,
+    borderRadius: 10,
     margin: 8,
     overflow: 'hidden',
     flex: 1,
@@ -220,17 +248,19 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
       },
       android: {
-        elevation: 2,
+        elevation: 3,
       },
       web: {
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        boxShadow: '0 3px 10px rgba(0,0,0,0.08)',
       },
     }),
+    transform: [{ scale: 1 }],
+    transition: 'transform 0.2s',
   },
   listCard: {
     flexDirection: 'row',
     maxWidth: '100%',
-    height: 130,
+    height: 140,
   },
   offlineCard: {
     opacity: 0.9,
@@ -245,19 +275,20 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     position: 'relative',
+    overflow: 'hidden',
   },
   listImageContainer: {
-    width: 130,
+    width: 140,
   },
   image: {
     height: 180,
     width: '100%',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#f3f3f3',
   },
   listImage: {
-    height: 130,
-    width: 130,
-    backgroundColor: '#f0f0f0',
+    height: 140,
+    width: 140,
+    backgroundColor: '#f3f3f3',
   },
   offlineIndicator: {
     position: 'absolute',
@@ -272,24 +303,25 @@ const styles = StyleSheet.create({
     top: 8,
     right: 8,
     backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 16,
-    width: 32,
-    height: 32,
+    borderRadius: 20,
+    width: 36,
+    height: 36,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 2,
   },
   infoContainer: {
-    padding: 12,
+    padding: 14,
   },
   listInfoContainer: {
     flex: 1,
-    padding: 12,
+    padding: 14,
   },
   titleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   name: {
     fontSize: 16,
@@ -306,7 +338,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#4CAF50',
   },
-  // New location row styles
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -363,13 +394,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f9f0',
     paddingVertical: 4,
     paddingHorizontal: 8,
-    borderRadius: 4,
+    borderRadius: 6,
     marginLeft: 8,
   },
   actionText: {
     fontSize: 12,
     color: '#4CAF50',
     marginLeft: 4,
+    fontWeight: '500',
   },
   disabledText: {
     color: '#aaa',
