@@ -411,28 +411,56 @@ export const markMessagesAsRead = async (conversationId, messageIds = []) => {
   }
 };
 
-// Clean fetchUserProfile implementation without mock data
-// For services/marketplaceApi.js
-
-export const fetchUserProfile = async (userId = null) => {
+/**
+ * Fetch user profile with improved error handling and cross-database support
+ * @param {string} userId User ID or email
+ * @returns {Promise<Object>} User profile data
+ */
+export const fetchUserProfile = async (userId) => {
   try {
-    // If no userId provided, use current user
-    if (!userId) {
-      userId = await AsyncStorage.getItem('userEmail');
+    console.log(`Fetching user profile for: ${userId}`);
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE_URL}/marketplace/users/${userId}`, { headers });
+    
+    // Handle response with proper error checking
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API Error (${response.status}): ${errorText}`);
     }
     
-    console.log(`Fetching user profile for ID: ${userId}`);
-
-    // Make the API request
-    const response = await apiRequest(`marketplace/users/${encodeURIComponent(userId)}`);
+    const data = await response.json();
     
-    // Add a log to see the response
-    console.log('User profile API response:', response);
+    // If we got the user but no listings, fetch their listings
+    if (data.user && (!data.user.listings || data.user.listings.length === 0)) {
+      try {
+        const listingsResponse = await fetch(
+          `${API_BASE_URL}/marketplace/users/${userId}/listings`, 
+          { headers }
+        );
+        
+        if (listingsResponse.ok) {
+          const listingsData = await listingsResponse.json();
+          
+          // Combine both active and sold listings
+          if (listingsData) {
+            const allListings = [
+              ...(listingsData.active || []),
+              ...(listingsData.sold || [])
+            ];
+            
+            data.user.listings = allListings;
+          }
+        }
+      } catch (listingsError) {
+        console.warn('Failed to fetch listings:', listingsError);
+        // Continue without listings
+      }
+    }
     
-    return response;
+    return data;
   } catch (error) {
     console.error('Error fetching user profile:', error);
-    throw error; // Rethrow the error to be handled by the component
+    throw error;
   }
 };
 
