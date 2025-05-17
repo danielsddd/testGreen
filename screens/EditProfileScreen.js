@@ -1,37 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Image,
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  Modal,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Image, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, SafeAreaView, Modal } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Animatable from 'react-native-animatable';
-
 import MarketplaceHeader from '../components/MarketplaceHeader';
 import { fetchUserProfile, updateUserProfile } from '../services/marketplaceApi';
 import config from '../services/config';
 
 const SAMPLE_USER = {
-  id: 'user123',
-  name: 'Plant Enthusiast',
-  email: 'plant.lover@example.com',
-  phoneNumber: '+1 (555) 123-4567',
-  avatar: 'https://via.placeholder.com/150?text=User',
-  bio: 'Passionate plant enthusiast with a love for tropical houseplants.',
+  id: 'user123', name: 'Plant Enthusiast', email: 'plant.lover@example.com', phoneNumber: '+1 (555) 123-4567',
+  avatar: 'https://via.placeholder.com/150?text=User', bio: 'Passionate plant enthusiast with a love for tropical houseplants.',
   location: 'Seattle, WA',
 };
 
@@ -42,12 +23,7 @@ const EditProfileScreen = () => {
   const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phoneNumber: '',
-    bio: '',
-    location: '',
-    avatar: null,
+    name: '', email: '', phoneNumber: '', bio: '', location: '', avatar: null,
   });
   const [formErrors, setFormErrors] = useState({});
   const [showSuccess, setShowSuccess] = useState(false);
@@ -67,16 +43,11 @@ const EditProfileScreen = () => {
         await new Promise(resolve => setTimeout(resolve, 500));
         data = { user: SAMPLE_USER };
       }
-
       const userData = data.user || SAMPLE_USER;
       setUser(userData);
       setFormData({
-        name: userData.name || '',
-        email: userData.email || '',
-        phoneNumber: userData.phoneNumber || '',
-        bio: userData.bio || '',
-        location: userData.location || '',
-        avatar: userData.avatar || null,
+        name: userData.name || '', email: userData.email || '', phoneNumber: userData.phoneNumber || '',
+        bio: userData.bio || '', location: userData.location || '', avatar: userData.avatar || null,
       });
       setIsLoading(false);
     } catch (err) {
@@ -118,15 +89,12 @@ const EditProfileScreen = () => {
     if (!formData.name.trim()) errors.name = 'Please enter your name';
     else if (formData.name.length < 3 || formData.name.length > 50)
       errors.name = 'Name should be between 3 and 50 characters';
-
     if (!formData.email.trim()) errors.email = 'Please enter your email';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email))
       errors.email = 'Invalid email format';
-
     if (!formData.phoneNumber.trim()) errors.phoneNumber = 'Enter your phone number';
     else if (formData.phoneNumber.length < 7)
       errors.phoneNumber = 'Enter a valid phone number';
-
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -136,16 +104,12 @@ const EditProfileScreen = () => {
     try {
       setIsSaving(true);
       const updatedUserData = {
-        name: formData.name,
-        email: formData.email,
-        phoneNumber: formData.phoneNumber,
-        bio: formData.bio,
-        location: formData.location,
+        name: formData.name, email: formData.email, phoneNumber: formData.phoneNumber,
+        bio: formData.bio, location: formData.location,
       };
       if (formData.avatar !== user.avatar) {
         updatedUserData.avatar = formData.avatar;
       }
-
       await updateUserProfile(user.id, updatedUserData);
       await AsyncStorage.setItem('userProfile', JSON.stringify({ ...user, ...updatedUserData }));
       setShowSuccess(true);
@@ -191,27 +155,18 @@ const EditProfileScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient colors={['#4CAF50', '#81C784']}>
-      <MarketplaceHeader 
-  title="Edit Profile" 
-  showBackButton 
-  onBackPress={() => navigation.goBack()}
-  showNotifications={false} 
-/>      </LinearGradient>
-
+      <MarketplaceHeader title="Edit Profile" showBackButton onBackPress={() => navigation.goBack()} showNotifications={false} />
+      </LinearGradient>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView style={styles.scrollView}>
           <Animatable.View animation="fadeInDown" delay={150} style={styles.avatarContainer}>
             <TouchableOpacity onPress={pickImage}>
-              <Image
-                source={{ uri: formData.avatar || 'https://via.placeholder.com/150?text=User' }}
-                style={styles.avatar}
-              />
+              <Image source={{ uri: formData.avatar || 'https://via.placeholder.com/150?text=User' }} style={styles.avatar} />
               <View style={styles.editAvatarButton}>
                 <Feather name="camera" size={16} color="#fff" />
               </View>
             </TouchableOpacity>
           </Animatable.View>
-
           <Animatable.View animation="fadeInUp" delay={300} style={styles.formContainer}>
             {['name', 'email', 'phoneNumber', 'location', 'bio'].map((field, index) => (
               <View key={field} style={styles.formGroup}>
@@ -229,51 +184,33 @@ const EditProfileScreen = () => {
               </View>
             ))}
           </Animatable.View>
-
           <View style={styles.actionButtons}>
             <TouchableOpacity style={[styles.button, styles.cancelButton]} onPress={handleCancel}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.button, styles.saveButton, isSaving && styles.disabledButton]}
-              onPress={handleSave}
-              disabled={isSaving}
-            >
+            <TouchableOpacity style={[styles.button, styles.saveButton, isSaving && styles.disabledButton]} onPress={handleSave} disabled={isSaving}>
               {isSaving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.saveButtonText}>Save</Text>}
             </TouchableOpacity>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
       {renderSuccessModal()}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  scrollView: { padding: 16 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 10, color: '#666' },
+  container: { flex: 1, backgroundColor: '#fff' }, scrollView: { padding: 16 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' }, loadingText: { marginTop: 10, color: '#666' },
   avatarContainer: { alignItems: 'center', marginTop: 20, marginBottom: 30 },
   avatar: { width: 120, height: 120, borderRadius: 60, backgroundColor: '#f0f0f0' },
-  editAvatarButton: {
-    position: 'absolute', bottom: 0, right: 0, width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center',
-    borderWidth: 2, borderColor: '#fff',
-  },
-  formContainer: { marginBottom: 20 },
-  formGroup: { marginBottom: 16 },
+  editAvatarButton: { position: 'absolute', bottom: 0, right: 0, width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff', },
+  formContainer: { marginBottom: 20 }, formGroup: { marginBottom: 16 },
   label: { fontSize: 16, fontWeight: '600', marginBottom: 6, color: '#333' },
-  input: {
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12,
-    paddingVertical: 10, fontSize: 16, backgroundColor: '#f9f9f9',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1, shadowRadius: 4, elevation: 2,
-  },
-  textArea: { height: 100, textAlignVertical: 'top' },
-  errorInput: { borderColor: '#f44336' },
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, backgroundColor: '#f9f9f9',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2, },
+  textArea: { height: 100, textAlignVertical: 'top' }, errorInput: { borderColor: '#f44336' },
   errorText: { color: '#f44336', fontSize: 14, marginTop: 2 },
   actionButtons: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 40 },
   button: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
