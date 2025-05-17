@@ -2,7 +2,6 @@
 import config from './config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { MOCK_USER, MOCK_PLANTS, getMockProducts, getMockProductById, getMockMessageData } from './mockData';
 import { Platform } from 'react-native';
 const API_BASE_URL = config.api.baseUrl;
 let authToken = null;

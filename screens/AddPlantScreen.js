@@ -1,9 +1,10 @@
+// screens/AddPlantScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, Image, Alert,
   ActivityIndicator, KeyboardAvoidingView, Platform, SafeAreaView, Modal, FlatList,
 } from 'react-native';
-import { MaterialIcons, Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -112,26 +113,66 @@ const AddPlantScreen = () => {
 
   const takePhoto = async () => {
     try {
+      // Special handling for web platform
+      if (Platform.OS === 'web') {
+        // Check if the browser supports the MediaDevices API
+        if (!navigator?.mediaDevices?.getUserMedia) {
+          Alert.alert('Not Supported', 'Your browser does not support camera access. Please use the gallery option instead.', [{ text: 'OK' }]);
+          return;
+        }
+        
+        try {
+          // Request camera permissions via browser API
+          await navigator.mediaDevices.getUserMedia({ video: true });
+          
+          // If we get here, permission was granted. Now use ImagePicker
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.8,
+          });
+          
+          if (result.canceled) return;
+          
+          const selectedAsset = result.assets?.[0] || { uri: result.uri };
+          if (selectedAsset?.uri) {
+            setImages([...images, selectedAsset.uri]);
+            if (formErrors.images) {
+              setFormErrors({ ...formErrors, images: '' });
+            }
+          }
+        } catch (err) {
+          console.error('Camera access error:', err);
+          Alert.alert('Camera Access Error', 'Could not access your camera. Please check your browser permissions or use the gallery option instead.', [{ text: 'OK' }]);
+        }
+        return;
+      }
+      
+      // Original code for native platforms
       const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
       if (!permissionResult.granted) {
         Alert.alert('Permission Required', 'We need camera permission to take photos', [{ text: 'OK' }]);
         return;
       }
+      
       if (images.length >= 5) {
         Alert.alert('Too Many Images', 'You can only upload up to 5 images', [{ text: 'OK' }]);
         return;
       }
+      
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
       });
-      if (result.canceled) {
-        return;
-      }
+      
+      if (result.canceled) return;
+      
       const selectedAsset = result.assets?.[0] || { uri: result.uri };
       if (selectedAsset?.uri) {
         const imageUri = selectedAsset.uri;
+        
         if (Platform.OS !== 'web') {
           try {
             const fileInfo = await FileSystem.getInfoAsync(imageUri);
@@ -143,6 +184,7 @@ const AddPlantScreen = () => {
             console.warn('Could not check image size:', e);
           }
         }
+        
         setImages([...images, imageUri]);
         if (formErrors.images) {
           setFormErrors({ ...formErrors, images: '' });

@@ -1,3 +1,4 @@
+// screens/MarketplaceScreen.js
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, FlatList, ActivityIndicator, StyleSheet, Text, TouchableOpacity,
@@ -11,7 +12,6 @@ import PlantCard from '../components/PlantCard';
 import SearchBar from '../components/SearchBar';
 import CategoryFilter from '../components/CategoryFilter';
 import FilterSection from '../components/FilterSection';
-import AzureMapView from '../components/AzureMapView';
 import { getAll, getNearbyProducts, geocodeAddress } from '../services/marketplaceApi';
 import syncService from '../services/SyncService';
 import { checkForUpdate, clearUpdate, UPDATE_TYPES, addUpdateListener, removeUpdateListener } from '../services/MarketplaceUpdates';
@@ -29,10 +29,8 @@ const useMarketplaceUpdates = (callback) => {
 const MarketplaceScreen = ({ navigation, route }) => {
   const [plants, setPlants] = useState([]);
   const [filteredPlants, setFilteredPlants] = useState([]);
-  const [mapProducts, setMapProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isMapLoading, setIsMapLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 });
@@ -236,12 +234,6 @@ const MarketplaceScreen = ({ navigation, route }) => {
   }, [searchQuery, selectedCategory, priceRange, plants, sortOption]);
 
   useEffect(() => {
-    if (viewMode === 'map') {
-      loadMapProducts();
-    }
-  }, [viewMode, filteredPlants]);
-
-  useEffect(() => {
     try {
       AsyncStorage.setItem('@ViewModePreference', viewMode);
     } catch (e) {
@@ -328,86 +320,6 @@ const MarketplaceScreen = ({ navigation, route }) => {
   }, []);
 
   useMarketplaceUpdates(handleMarketplaceUpdate);
-
-  const loadMapProducts = async () => {
-    try {
-      setIsMapLoading(true);
-      if (userLocation && userLocation.latitude && userLocation.longitude) {
-        try {
-          const nearbyData = await getNearbyProducts(
-            userLocation.latitude,
-            userLocation.longitude,
-            25,
-            selectedCategory === 'All' ? null : selectedCategory
-          );
-          if (nearbyData && nearbyData.products && nearbyData.products.length > 0) {
-            const normalizedData = normalizePlantSellerInfo(nearbyData.products);
-            setMapProducts(normalizedData);
-            setIsMapLoading(false);
-            return;
-          }
-        } catch (err) {
-          console.warn('Error getting nearby products:', err);
-        }
-      }
-      const productsWithLocation = [];
-      for (const plant of filteredPlants) {
-        if (!plant.city && (!plant.location || typeof plant.location === 'object' && !plant.location.city)) {
-          continue;
-        }
-        if (plant.location && 
-            typeof plant.location === 'object' && 
-            plant.location.latitude && 
-            plant.location.longitude) {
-          productsWithLocation.push(plant);
-          continue;
-        }
-        const cityToGeocode = plant.city || 
-          (typeof plant.location === 'string' ? plant.location : plant.location?.city);
-        if (cityToGeocode) {
-          try {
-            const cacheKey = `geocode_${cityToGeocode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-            const cachedLocation = await AsyncStorage.getItem(cacheKey);
-            if (cachedLocation) {
-              const locationData = JSON.parse(cachedLocation);
-              productsWithLocation.push({
-                ...plant,
-                location: {
-                  ...plant.location,
-                  latitude: locationData.latitude,
-                  longitude: locationData.longitude,
-                  city: cityToGeocode
-                }
-              });
-            } else if (isOnline) {
-              const locationData = await geocodeAddress(cityToGeocode);             
-              if (locationData && locationData.latitude && locationData.longitude) {
-                await AsyncStorage.setItem(cacheKey, JSON.stringify(locationData));
-                const locationData = JSON.parse(cachedLocation);
-                const formattedLocation = formatLocation(locationData);
-                productsWithLocation.push({
-                  ...plant,
-                  location: {
-                    ...plant.location,
-                    latitude: locationData.latitude,
-                    longitude: locationData.longitude,
-                    city: formattedLocation
-                  }
-                });
-              }
-            }
-          } catch (geocodeErr) {
-            console.warn(`Error geocoding "${cityToGeocode}":`, geocodeErr);
-          }
-        }
-      }
-      setMapProducts(productsWithLocation);
-      setIsMapLoading(false);
-    } catch (err) {
-      console.error('Error preparing map products:', err);
-      setIsMapLoading(false);
-    }
-  };
 
   const onRefresh = async () => {
     setIsRefreshing(true);
@@ -501,17 +413,21 @@ const MarketplaceScreen = ({ navigation, route }) => {
   };
 
   const handleViewModeChange = (mode) => {
-    setViewMode(mode);
+    if (mode === 'map') {
+      // Navigate to map screen instead of changing view mode locally
+      navigation.navigate('MapView', { 
+        products: filteredPlants,
+        initialLocation: userLocation
+      });
+    } else {
+      setViewMode(mode);
+    }
   };
 
   const handleLoadMore = () => {
     if (!isLoading && hasMorePages) {
       loadPlants(page + 1);
     }
-  };
-
-  const handleMapProductSelect = (productId) => {
-    navigation.navigate('PlantDetail', { plantId: productId });
   };
 
   const handleRemoveFilter = (filterId) => {
@@ -642,56 +558,27 @@ const MarketplaceScreen = ({ navigation, route }) => {
         onRemoveFilter={handleRemoveFilter}
         onResetFilters={handleResetFilters}
       />
-      {viewMode === 'map' ? (
-        <View style={styles.mapContainer}>
-          {isMapLoading ? (
-            <View style={styles.centerContainer}>
-              <ActivityIndicator size="large" color="#4CAF50" />
-              <Text style={styles.loadingText}>Preparing map view...</Text>
-            </View>
-          ) : mapProducts.length > 0 ? (
-            <AzureMapView
-              products={mapProducts}
-              onSelectProduct={handleMapProductSelect}
-              initialRegion={
-                userLocation
-                  ? { latitude: userLocation.latitude, longitude: userLocation.longitude, zoom: 10 }
-                  : undefined
-              }
-            />
-          ) : (
-            <View style={styles.centerContainer}>
-              <MaterialIcons name="map" size={48} color="#aaa" />
-              <Text style={styles.noResultsText}>No plants with location data found</Text>
-              <TouchableOpacity style={styles.resetButton} onPress={handleResetFilters}>
-                <Text style={styles.resetButtonText}>Reset Filters</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      ) : (
-        <FlatList
-          data={filteredPlants}
-          renderItem={({ item }) => (
-            <PlantCard plant={item} showActions={true} layout={viewMode} />
-          )}
-          numColumns={viewMode === 'grid' ? (Platform.OS === 'web' ? 3 : 2) : 1}
-          key={`${viewMode}-${Platform.OS}`}
-          keyExtractor={(item) => (item.id?.toString() || item._id?.toString() || Math.random().toString())}
-          contentContainerStyle={[
-            styles.listContainer,
-            filteredPlants.length === 0 && styles.emptyListContainer,
-            viewMode === 'list' && styles.listViewContainer
-          ]}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={renderFooter}
-          ListEmptyComponent={renderEmptyList}
-          refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={['#4CAF50']} tintColor="#4CAF50" />
-          }
-        />
-      )}
+      <FlatList
+        data={filteredPlants}
+        renderItem={({ item }) => (
+          <PlantCard plant={item} showActions={true} layout={viewMode} />
+        )}
+        numColumns={viewMode === 'grid' ? (Platform.OS === 'web' ? 3 : 2) : 1}
+        key={`${viewMode}-${Platform.OS}`}
+        keyExtractor={(item) => (item.id?.toString() || item._id?.toString() || Math.random().toString())}
+        contentContainerStyle={[
+          styles.listContainer,
+          filteredPlants.length === 0 && styles.emptyListContainer,
+          viewMode === 'list' && styles.listViewContainer
+        ]}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={renderFooter}
+        ListEmptyComponent={renderEmptyList}
+        refreshControl={
+          <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={['#4CAF50']} tintColor="#4CAF50" />
+        }
+      />
       <TouchableOpacity 
         style={styles.addButton} 
         onPress={() => navigation.navigate('AddPlant')}
@@ -722,7 +609,6 @@ const styles = StyleSheet.create({
   resetButtonText: { color: '#fff', fontWeight: '600' },
   footerContainer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: 16 },
   footerText: { marginLeft: 8, color: '#666' },
-  mapContainer: { flex: 1, backgroundColor: '#f0f0f0' },
   addButton: {
     position: 'absolute', right: 20, bottom: 20, width: 60, height: 60, borderRadius: 30,
     backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', elevation: 4,

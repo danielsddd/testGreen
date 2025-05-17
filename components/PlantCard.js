@@ -44,17 +44,28 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
     try {
       setIsSubmitting(true);
       // Optimistically update UI
-      setIsFavorite(!isFavorite);
+      const newFavoriteState = !isFavorite;
+      setIsFavorite(newFavoriteState);
 
       // Call API
       const result = await wishProduct(plant.id || plant._id);
       
-      // Trigger global update with associated data
-      await triggerUpdate(UPDATE_TYPES.WISHLIST, {
-        plantId: plant.id || plant._id,
-        isFavorite: !isFavorite,
-        timestamp: Date.now()
-      });
+      // If API returns specific wishlist state, use it
+      if (result && 'isWished' in result) {
+        setIsFavorite(result.isWished);
+      }
+      
+      // Store update notification for other components
+      AsyncStorage.setItem('WISHLIST_UPDATED', Date.now().toString())
+        .then(() => {
+          // Trigger global update with associated data
+          triggerUpdate(UPDATE_TYPES.WISHLIST, {
+            plantId: plant.id || plant._id,
+            isFavorite: newFavoriteState,
+            timestamp: Date.now()
+          }).catch(e => console.warn('Failed to trigger update:', e));
+        })
+        .catch(err => console.warn('Failed to set wishlist update flag:', err));
     } catch (err) {
       // Revert on error
       setIsFavorite(isFavorite);
