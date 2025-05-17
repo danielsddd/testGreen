@@ -30,6 +30,33 @@ def find_user(container, user_id):
     ]
     return list(container.query_items(query=query, parameters=params, enable_cross_partition_query=True))
 
+def get_user_listings(user_id):
+    try:
+        # Get the marketplace_plants container
+        plants_container = get_container("marketplace_plants")
+        
+        # Get active listings (must use cross-partition query since partitioned by category)
+        active_query = "SELECT * FROM c WHERE c.sellerId = @sellerId AND (c.status = 'active' OR NOT IS_DEFINED(c.status))"
+        sold_query = "SELECT * FROM c WHERE c.sellerId = @sellerId AND c.status = 'sold'"
+        parameters = [{"name": "@sellerId", "value": user_id}]
+        
+        active_listings = list(plants_container.query_items(
+            query=active_query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
+        
+        sold_listings = list(plants_container.query_items(
+            query=sold_query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
+        
+        return active_listings, sold_listings
+    except Exception as e:
+        logging.error(f"Error getting user listings: {str(e)}")
+        return [], []
+
 # ========== GET Handler ==========
 
 def handle_get_user(req: func.HttpRequest) -> func.HttpResponse:
@@ -38,39 +65,87 @@ def handle_get_user(req: func.HttpRequest) -> func.HttpResponse:
         if not user_id:
             return create_error_response("User ID is required", 400)
 
-        # Step 1: Try marketplace DB
-        try:
-            marketplace_container = get_marketplace_container("users")
-            marketplace_users = find_user(marketplace_container, user_id)
-            if marketplace_users:
-                logging.info(f"[MarketplaceDB] Found user: {user_id}")
-                return create_success_response({"user": marketplace_users[0]})
-        except Exception as e:
-            logging.warning(f"[MarketplaceDB] Failed to fetch user: {e}")
-
-        # Step 2: Try to copy from main DB
-        try:
-            main_container = get_main_container("Users")
-            main_users = find_user(main_container, user_id)
-            if main_users:
-                user = main_users[0]
-                user["copiedAt"] = datetime.utcnow().isoformat()
-
-                # Create in marketplace DB
-                marketplace_container = get_marketplace_container("users")
+        logging.info(f"Looking for user: {user_id}")
+        
+        # Step 1: Try marketplace DB first (correct container: "users")
+        marketplace_container = get_marketplace_container("users")
+        marketplace_users = find_user(marketplace_container, user_id)
+        
+        if marketplace_users:
+            # User exists in marketplace DB
+            user = marketplace_users[0]
+            logging.info(f"Found user in marketplace DB: {user_id}")
+            
+            # Get user's listings
+            active_listings, sold_listings = get_user_listings(user_id)
+            
+            # Add listings to user object
+            user['listings'] = active_listings + sold_listings
+            
+            # Ensure stats object exists
+            if 'stats' not in user:
+                user['stats'] = {}
+            
+            # Update stats with actual counts (but don't overwrite rating)
+            current_rating = user['stats'].get('rating', 0)
+            user['stats']['plantsCount'] = len(active_listings)
+            user['stats']['salesCount'] = len(sold_listings)
+            user['stats']['rating'] = current_rating
+            
+            return create_success_response({"user": user})
+        
+        # Step 2: If not found in marketplace DB, try to copy from main DB
+        logging.info(f"User not found in marketplace DB, checking main DB: {user_id}")
+        main_container = get_main_container("Users")
+        main_users = find_user(main_container, user_id)
+        
+        if main_users:
+            # User exists in main DB, copy to marketplace
+            user = main_users[0]
+            logging.info(f"Found user in main DB, copying to marketplace DB: {user_id}")
+            
+            # Ensure ID field exists
+            if 'id' not in user:
+                user['id'] = user_id
+            
+            # Initialize stats if not present
+            if 'stats' not in user:
+                user['stats'] = {
+                    'plantsCount': 0,
+                    'salesCount': 0,
+                    'rating': 0
+                }
+            
+            # Mark when copied
+            user["copiedAt"] = datetime.utcnow().isoformat()
+            
+            # Create in marketplace DB
+            try:
                 marketplace_container.create_item(body=user)
-
-                logging.info(f"[Sync] User copied from Main to Marketplace DB: {user_id}")
+                logging.info(f"User copied from main DB to marketplace DB: {user_id}")
+                
+                # Get user's listings
+                active_listings, sold_listings = get_user_listings(user_id)
+                
+                # Add listings to user object
+                user['listings'] = active_listings + sold_listings
+                
+                # Update stats with actual counts
+                user['stats']['plantsCount'] = len(active_listings)
+                user['stats']['salesCount'] = len(sold_listings)
+                
                 return create_success_response({"user": user})
-            else:
-                logging.info(f"[MainDB] No user found with id/email: {user_id}")
-        except Exception as e:
-            logging.error(f"[Main→Marketplace Sync] Failed: {e}")
-
+            except Exception as copy_error:
+                logging.error(f"Error copying user to marketplace DB: {str(copy_error)}")
+                # Return the user anyway
+                return create_success_response({"user": user})
+        
+        # Step 3: User not found in either database
+        logging.info(f"User not found in any database: {user_id}")
         return create_error_response("User not found", 404)
 
     except Exception as e:
-        logging.error(f"[GET] Fatal error: {e}")
+        logging.error(f"Error in GET handler: {str(e)}")
         return create_error_response(str(e), 500)
 
 # ========== PATCH Handler ==========
@@ -89,29 +164,108 @@ def handle_patch_user(req: func.HttpRequest) -> func.HttpResponse:
         if not isinstance(update_data, dict):
             return create_error_response("Update data must be a JSON object", 400)
 
-        try:
-            container = get_marketplace_container("users")
-            users = find_user(container, user_id)
-
-            if users:
-                user = users[0]
+        # Get user from marketplace DB
+        marketplace_container = get_marketplace_container("users")
+        marketplace_users = find_user(marketplace_container, user_id)
+        
+        if marketplace_users:
+            # User exists in marketplace DB, update
+            user = marketplace_users[0]
+            logging.info(f"Updating existing user in marketplace DB: {user_id}")
+            
+            # Update user fields
+            for key, value in update_data.items():
+                if key not in ['id', 'email']:
+                    user[key] = value
+            
+            # Update the user
+            marketplace_container.replace_item(item=user['id'], body=user)
+            
+            # Get updated listings
+            active_listings, sold_listings = get_user_listings(user_id)
+            
+            # Add listings to response object but don't store them in DB
+            user['listings'] = active_listings + sold_listings
+            
+            return create_success_response({
+                "message": "User profile updated successfully",
+                "user": user
+            })
+        else:
+            # User doesn't exist in marketplace DB, try to find in main DB first
+            main_container = get_main_container("Users")
+            main_users = find_user(main_container, user_id)
+            
+            if main_users:
+                # User exists in main DB, copy and update
+                user = main_users[0]
+                logging.info(f"User found in main DB, copying to marketplace DB with updates: {user_id}")
+                
+                # Ensure ID field exists
+                if 'id' not in user:
+                    user['id'] = user_id
+                
+                # Initialize stats if not present
+                if 'stats' not in user:
+                    user['stats'] = {
+                        'plantsCount': 0,
+                        'salesCount': 0,
+                        'rating': 0
+                    }
+                
+                # Apply updates
                 for key, value in update_data.items():
                     if key not in ['id', 'email']:
                         user[key] = value
-
-                container.replace_item(item=user['id'], body=user)
-                logging.info(f"[PATCH] User updated: {user_id}")
+                
+                # Mark when copied
+                user["copiedAt"] = datetime.utcnow().isoformat()
+                
+                # Create in marketplace DB
+                marketplace_container.create_item(body=user)
+                logging.info(f"User copied from main DB to marketplace DB with updates: {user_id}")
+                
+                # Get listings
+                active_listings, sold_listings = get_user_listings(user_id)
+                
+                # Add listings to response object
+                user['listings'] = active_listings + sold_listings
+                
                 return create_success_response({
-                    "message": "User profile updated successfully",
+                    "message": "User profile created and updated successfully",
                     "user": user
                 })
-
-            return create_error_response("User not found in marketplace DB", 404)
-
-        except Exception as e:
-            logging.error(f"[PATCH] Error updating user: {e}")
-            return create_error_response("Failed to update user profile", 500)
+            else:
+                # User doesn't exist in either DB, create minimal profile
+                logging.info(f"Creating new user in marketplace DB: {user_id}")
+                
+                # Create minimal user
+                new_user = {
+                    "id": user_id,
+                    "email": user_id,
+                    "name": update_data.get("name", user_id.split('@')[0] if '@' in user_id else user_id),
+                    "joinDate": datetime.utcnow().isoformat(),
+                    "stats": {
+                        "plantsCount": 0,
+                        "salesCount": 0,
+                        "rating": 0
+                    }
+                }
+                
+                # Apply updates
+                for key, value in update_data.items():
+                    if key not in ['id', 'email']:
+                        new_user[key] = value
+                
+                # Create in marketplace DB
+                marketplace_container.create_item(body=new_user)
+                logging.info(f"New user created in marketplace DB: {user_id}")
+                
+                return create_success_response({
+                    "message": "User profile created successfully",
+                    "user": new_user
+                })
 
     except Exception as e:
-        logging.error(f"[PATCH] Fatal error: {e}")
+        logging.error(f"Error in PATCH handler: {str(e)}")
         return create_error_response(str(e), 500)

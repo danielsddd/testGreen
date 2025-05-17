@@ -10,16 +10,17 @@ import {
   FlatList,
   ScrollView,
   SafeAreaView,
+  Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import PlantCard from '../components/PlantCard';
 import ReviewsList from '../components/ReviewsList';
 import MarketplaceHeader from '../components/MarketplaceHeader';
-import { fetchUserProfile } from '../services/marketplaceApi';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import ReviewForm from '../components/ReviewForm';
-
+import { fetchUserProfile } from '../services/marketplaceApi';
 
 const SellerProfileScreen = () => {
   const navigation = useNavigation();
@@ -34,35 +35,36 @@ const SellerProfileScreen = () => {
   const [sellerRating, setSellerRating] = useState({ average: 0, count: 0 });
   const [avatarError, setAvatarError] = useState(false);
   const [bannerError, setBannerError] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(Date.now());
 
   useEffect(() => { 
     loadSellerProfile();
     
     // Check if favorites were updated
-    const checkFavoritesUpdates = async () => {
+    const checkUpdates = async () => {
       try {
-        // Check both old and new keys for backward compatibility
         const favoritesUpdated = await AsyncStorage.getItem('FAVORITES_UPDATED') 
-                            || await AsyncStorage.getItem('WISHLIST_UPDATED');
-                            
+                              || await AsyncStorage.getItem('WISHLIST_UPDATED');
+                              
         if (favoritesUpdated) {
           // Clear both flags
           await AsyncStorage.removeItem('FAVORITES_UPDATED');
           await AsyncStorage.removeItem('WISHLIST_UPDATED');
           // Refresh data
-          loadSellerProfile();
+          setRefreshKey(Date.now());
         }
       } catch (error) {
-        console.warn('Error checking favorites updates:', error);
+        console.warn('Error checking updates:', error);
       }
     };
     
-    checkFavoritesUpdates();
-  }, [sellerId]);
+    checkUpdates();
+  }, [sellerId, refreshKey]);
 
   const loadSellerProfile = async () => {
     try {
       setIsLoading(true);
+      setError(null);
       
       // Make sure we have a valid seller ID
       if (!sellerId) {
@@ -114,7 +116,25 @@ const SellerProfileScreen = () => {
   };
 
   const handleAddReview = () => {
-    setShowReviewForm(true);
+    // Check if user is trying to review themselves
+    const checkSelfReview = async () => {
+      try {
+        const userEmail = await AsyncStorage.getItem('userEmail');
+        if (userEmail === sellerId) {
+          Alert.alert(
+            "Cannot Review Yourself", 
+            "You cannot leave a review for your own profile."
+          );
+          return;
+        }
+        setShowReviewForm(true);
+      } catch (err) {
+        console.error("Error checking user email:", err);
+        setShowReviewForm(true); // Allow review anyway
+      }
+    };
+    
+    checkSelfReview();
   };
 
   const handleReviewsLoaded = (ratingsData) => {
@@ -126,6 +146,9 @@ const SellerProfileScreen = () => {
     if (activeTab !== 'reviews') {
       setActiveTab('reviews');
     }
+    
+    // Force a refresh of the data
+    setRefreshKey(Date.now());
   };
 
   // Get a safe image URI with fallback
@@ -147,12 +170,25 @@ const SellerProfileScreen = () => {
           onAddReview={handleAddReview}
           onReviewsLoaded={handleReviewsLoaded}
           autoLoad={true}
+          key={`reviews-${refreshKey}`}
         />
       );
     }
 
+    // Check if user has listings property
     const listings = user?.listings || [];
-    const filtered = listings.filter(p => (activeTab === 'myPlants' ? p.status === 'active' : p.status === 'sold'));
+    
+    // Filter by status
+    const filtered = listings.filter(p => {
+      if (activeTab === 'myPlants') {
+        // Active listings have status 'active' or undefined/null status
+        return p.status === 'active' || !p.status;
+      } else if (activeTab === 'sold') {
+        return p.status === 'sold';
+      }
+      return false;
+    });
+
     if (filtered.length === 0) {
       return (
         <View style={styles.emptyStateContainer}>
@@ -163,11 +199,12 @@ const SellerProfileScreen = () => {
         </View>
       );
     }
+    
     return (
       <FlatList
         data={filtered}
         renderItem={({ item }) => <PlantCard plant={item} showActions={false} />}
-        keyExtractor={item => item.id || `plant-${item._id || Math.random()}`}
+        keyExtractor={item => item.id || item._id || `plant-${Math.random()}`}
         numColumns={2}
         contentContainerStyle={styles.plantGrid}
       />
@@ -214,11 +251,21 @@ const SellerProfileScreen = () => {
   // Prepare safe image URLs
   const bannerUrl = bannerError 
     ? 'https://placehold.co/600x150/4CAF50/FFFFFF?text=SellerBanner'
-    : getImageSafely('https://placehold.co/600x150/4CAF50/FFFFFF?text=SellerBanner', 'SellerBanner');
+    : getImageSafely(user.bannerImage || 'https://placehold.co/600x150/4CAF50/FFFFFF?text=SellerBanner', 'SellerBanner');
   
   const avatarUrl = avatarError
-    ? 'https://placehold.co/150x150/4CAF50/FFFFFF?text=User'
-    : getImageSafely(user.avatar, 'User');
+    ? `https://placehold.co/150x150/4CAF50/FFFFFF?text=${user.name?.[0] || 'S'}`
+    : getImageSafely(user.avatar, user.name?.[0] || 'S');
+
+  // Calculate rating to display (prefer the one from reviews component if available)
+  const displayRating = activeTab === 'reviews' && sellerRating.average > 0 
+    ? sellerRating.average 
+    : (user.stats?.rating || 0);
+  
+  // Format the rating to show only 1 decimal place
+  const formattedRating = typeof displayRating === 'number' 
+    ? displayRating.toFixed(1) 
+    : '0.0';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -272,9 +319,7 @@ const SellerProfileScreen = () => {
             <Text style={styles.statLabel}>Sold</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={styles.statNum}>
-              {(activeTab === 'reviews' ? sellerRating.average : user.stats?.rating) || 0}
-            </Text>
+            <Text style={styles.statNum}>{formattedRating}</Text>
             <Text style={styles.statLabel}>
               Rating ({activeTab === 'reviews' ? sellerRating.count : 0})
             </Text>
