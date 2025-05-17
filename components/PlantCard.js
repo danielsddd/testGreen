@@ -14,16 +14,17 @@ import { formatDistanceToNow } from 'date-fns';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { wishProduct } from '../services/marketplaceApi';
+import { triggerUpdate, UPDATE_TYPES } from '../services/MarketplaceUpdates';
 
 const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = false }) => {
   const navigation = useNavigation();
-  const [isFavorite, setIsFavorite] = useState(plant.isFavorite || false);
+  const [isFavorite, setIsFavorite] = useState(plant.isFavorite || plant.isWished || false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Update favorite state when plant prop changes
   useEffect(() => {
-    setIsFavorite(plant.isFavorite || false);
-  }, [plant.isFavorite]);
+    setIsFavorite(plant.isFavorite || plant.isWished || false);
+  }, [plant.isFavorite, plant.isWished]);
 
   const handlePress = () => {
     navigation.navigate('PlantDetail', { plantId: plant.id || plant._id });
@@ -46,11 +47,14 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
       setIsFavorite(!isFavorite);
 
       // Call API
-      await wishProduct(plant.id || plant._id); // API function to toggle favorites status
+      const result = await wishProduct(plant.id || plant._id);
       
-      // Set a global refresh flag with a standardized name
-      AsyncStorage.setItem('FAVORITES_UPDATED', Date.now().toString())
-        .catch(err => console.warn('Failed to set favorites update flag:', err));
+      // Trigger global update with associated data
+      await triggerUpdate(UPDATE_TYPES.WISHLIST, {
+        plantId: plant.id || plant._id,
+        isFavorite: !isFavorite,
+        timestamp: Date.now()
+      });
     } catch (err) {
       // Revert on error
       setIsFavorite(isFavorite);
@@ -190,13 +194,14 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
 };
 
 const styles = StyleSheet.create({
+  // Styles remain the same as before
   card: {
     backgroundColor: '#fff',
     borderRadius: 8,
     margin: 8,
     overflow: 'hidden',
     flex: 1,
-    maxWidth: Platform.OS === 'web' ? '31%' : '47%', // Changed to 31% for web (3 columns)
+    maxWidth: Platform.OS === 'web' ? '31%' : '47%',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -235,7 +240,7 @@ const styles = StyleSheet.create({
     width: 130,
   },
   image: {
-    height: 180, // Increased from 160px to 180px
+    height: 180,
     width: '100%',
     backgroundColor: '#f0f0f0',
   },

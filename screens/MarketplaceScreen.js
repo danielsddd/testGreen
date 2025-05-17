@@ -14,8 +14,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av';
-import { uploadImage, speechToText } from '../services/marketplaceApi'; 
+
 // Import components
 import MarketplaceHeader from '../components/MarketplaceHeader';
 import PlantCard from '../components/PlantCard';
@@ -27,11 +26,12 @@ import AzureMapView from '../components/AzureMapView';
 // Import services
 import { getAll, getNearbyProducts, geocodeAddress } from '../services/marketplaceApi';
 import syncService from '../services/SyncService';
+import { checkForUpdate, clearUpdate, UPDATE_TYPES, addUpdateListener, removeUpdateListener } from '../services/MarketplaceUpdates';
 
 /**
  * Enhanced MarketplaceScreen with map integration and improved filtering
  */
-const MarketplaceScreen = ({ navigation }) => {
+const MarketplaceScreen = ({ navigation, route }) => {
   // State
   const [plants, setPlants] = useState([]);
   const [filteredPlants, setFilteredPlants] = useState([]);
@@ -50,7 +50,7 @@ const MarketplaceScreen = ({ navigation }) => {
   const [userLocation, setUserLocation] = useState(null);
   const [activeFilters, setActiveFilters] = useState([]);
   const [isOnline, setIsOnline] = useState(true);
-  const [recording, setRecording] = useState(null);
+  const [lastRefreshTime, setLastRefreshTime] = useState(Date.now());
 
   // Handler for back button press - navigate to Home screen
   const handleBackPress = () => {
@@ -72,6 +72,56 @@ const MarketplaceScreen = ({ navigation }) => {
     return unsubscribe;
   }, []);
 
+  // Set up update listeners
+  useEffect(() => {
+    // Generate a unique ID for this listener
+    const listenerId = 'marketplace-screen';
+    
+    // Define handler function
+    const handleUpdate = (updateType, data) => {
+      console.log(`[MarketplaceScreen] Received update: ${updateType}`, data);
+      
+      // Refresh data based on update type
+      if (updateType === UPDATE_TYPES.WISHLIST) {
+        // Update a specific item if we can identify it
+        if (data && data.plantId) {
+          setPlants(prevPlants => {
+            const updatedPlants = [...prevPlants];
+            const plantIndex = updatedPlants.findIndex(
+              p => p.id === data.plantId || p._id === data.plantId
+            );
+            
+            if (plantIndex >= 0) {
+              updatedPlants[plantIndex] = {
+                ...updatedPlants[plantIndex],
+                isFavorite: data.isFavorite,
+                isWished: data.isFavorite
+              };
+            }
+            
+            return updatedPlants;
+          });
+        } else {
+          // If we can't identify the specific plant, reload all
+          loadPlants(1, true);
+        }
+      } else if (updateType === UPDATE_TYPES.PRODUCT || updateType === UPDATE_TYPES.REVIEW) {
+        // Full reload for product or review updates
+        loadPlants(1, true);
+      }
+      
+      setLastRefreshTime(Date.now());
+    };
+    
+    // Add web event listener
+    addUpdateListener(listenerId, handleUpdate);
+    
+    // Clean up listener on unmount
+    return () => {
+      removeUpdateListener(listenerId);
+    };
+  }, []);
+
   // Load plants when the screen comes into focus
   useFocusEffect(
     useCallback(() => {
@@ -88,7 +138,40 @@ const MarketplaceScreen = ({ navigation }) => {
           console.warn('Error loading cached location:', e);
         }
       })();
-    }, [])
+      
+      // Check for updates from AsyncStorage
+      const checkUpdates = async () => {
+        try {
+          // Check each update type
+          const updateTypes = Object.values(UPDATE_TYPES);
+          let needsRefresh = false;
+          
+          for (const updateType of updateTypes) {
+            const hasUpdate = await checkForUpdate(updateType, lastRefreshTime);
+            if (hasUpdate) {
+              needsRefresh = true;
+              // Clear the update flag
+              await clearUpdate(updateType);
+            }
+          }
+          
+          // Also check route params for refresh flag
+          if (needsRefresh || route.params?.refresh) {
+            loadPlants(1, true);
+            setLastRefreshTime(Date.now());
+            
+            // Clear route params
+            if (route.params?.refresh) {
+              navigation.setParams({ refresh: undefined });
+            }
+          }
+        } catch (error) {
+          console.error('Error checking for updates:', error);
+        }
+      };
+      
+      checkUpdates();
+    }, [lastRefreshTime])
   );
 
   // Apply filters when any filter criteria changes
@@ -165,6 +248,67 @@ useEffect(() => {
       console.warn('Error checking favorites updates:', error);
     }
   };
+
+  const handleMarketplaceUpdate = useCallback((updateType, data) => {
+    console.log(`[MarketplaceScreen] Received update: ${updateType}`, data);
+    // Refresh data based on update type
+    if (updateType === UPDATE_TYPES.WISHLIST) {
+      // Maybe just update a specific item in the list
+      const updatedPlant = plants.find(p => p.id === data.plantId || p._id === data.plantId);
+      if (updatedPlant) {
+        updatedPlant.isFavorite = data.isFavorite;
+        setPlants([...plants]);
+      } else {
+        // If we can't find the plant, do a full refresh
+        loadPlants(1, true);
+      }
+    } else if (updateType === UPDATE_TYPES.PRODUCT) {
+      // New product added or product updated - do a full refresh
+      loadPlants(1, true);
+    } else {
+      // For other updates, just refresh if needed
+      loadPlants(1, true);
+    }
+    
+    setLastRefreshTime(Date.now());
+  }, [plants, loadPlants]);
+  
+  // Use our custom hook to listen for updates
+  useMarketplaceUpdates(handleMarketplaceUpdate);
+  
+  // Also check for updates on focus
+  useFocusEffect(
+    useCallback(() => {
+      // Check for any updates that happened while screen was not focused
+      const checkUpdates = async () => {
+        try {
+          // Check each update type
+          const updateTypes = Object.values(UPDATE_TYPES);
+          let needsRefresh = false;
+          
+          for (const updateType of updateTypes) {
+            const hasUpdate = await checkForUpdate(updateType, lastRefreshTime);
+            if (hasUpdate) {
+              needsRefresh = true;
+              // Clear the update so we don't process it again
+              await clearUpdate(updateType);
+            }
+          }
+          
+          if (needsRefresh) {
+            console.log('[MarketplaceScreen] Updates detected, refreshing data...');
+            loadPlants(1, true);
+            setLastRefreshTime(Date.now());
+          }
+        } catch (error) {
+          console.error('[MarketplaceScreen] Error checking updates:', error);
+        }
+      };
+      
+      loadPlants(1, true);
+      checkUpdates();
+    }, [loadPlants, lastRefreshTime])
+  );
   
   checkFavoritesUpdates();
 }, []);
