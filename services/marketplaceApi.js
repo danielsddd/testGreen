@@ -77,6 +77,7 @@ const apiRequest = async (endpoint, method = 'GET', body = null) => {
     throw error;
   }
 };
+
 const getMockProductData = (endpoint) => {
   if (endpoint.includes('specific')) {
     const id = endpoint.split('/').pop();
@@ -142,6 +143,8 @@ export const wishProduct = async (id) => {
     throw error;
   }
 };
+
+
 export const deleteProduct = async (productId) => {
   try {
     return await apiRequest(`marketplace/products/${productId}`, 'DELETE');
@@ -305,28 +308,20 @@ export const fetchUserProfile = async (userId) => {
     throw error;
   }
 };
-export const updateUserProfile = async (userId, userData) => {
-  try {
-    const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
-    const userEmail = await AsyncStorage.getItem('userEmail');
-    const url = `${API_BASE_URL}/marketplace/users/${userId}`;
-    const response = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Email': userEmail || userId
-      },
-      body: JSON.stringify(userData)
-    });
-    if (!response.ok) {
-      throw new Error(`Error updating user profile: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error('Error in updateUserProfile:', error);
-    throw error;
-  }
+/**
+ * Update user profile
+ * @param {string} userId User ID or email
+ * @param {Object} profileData Updated profile data
+ * @returns {Promise<Object>} Updated user data
+ */
+export const updateUserProfile = async (userId, profileData) => {
+  return await apiRequest(`marketplace/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(profileData),
+  });
 };
+
+
 export const getUserWishlist = async () => {
   try {
     const userEmail = await AsyncStorage.getItem('userEmail');
