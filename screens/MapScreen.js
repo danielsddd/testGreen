@@ -1,5 +1,4 @@
-// screens/MapScreen.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -10,9 +9,10 @@ import {
   Alert,
   FlatList,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRoute, useNavigation } from '@react-navigation/native';
+import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 
 import MarketplaceHeader from '../components/MarketplaceHeader';
@@ -24,11 +24,16 @@ import { getNearbyProducts, getAzureMapsKey, reverseGeocode } from '../services/
 
 const { width, height } = Dimensions.get('window');
 
+/**
+ * Enhanced MapScreen component with improved Azure Maps integration
+ * Shows plants on a map with search, radius and location features
+ */
 const MapScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { products = [], initialLocation } = route.params || {};
 
+  // State variables
   const [mapProducts, setMapProducts] = useState(products);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -40,6 +45,13 @@ const MapScreen = () => {
   const [sortOrder, setSortOrder] = useState('nearest'); // 'nearest' or 'farthest'
   const [viewMode, setViewMode] = useState('map'); // 'map' or 'list'
   const [showResults, setShowResults] = useState(false);
+  const [searchingLocation, setSearchingLocation] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [radiusVisible, setRadiusVisible] = useState(true);
+  
+  // Refs
+  const mapRef = useRef(null);
+  const listRef = useRef(null);
 
   // Load Azure Maps key when component mounts
   useEffect(() => {
@@ -60,14 +72,37 @@ const MapScreen = () => {
   }, []);
 
   // Initialize map with products if provided
-  useEffect(() => {
-    if (products.length > 0) {
-      setMapProducts(products);
-      if (initialLocation) {
-        setSelectedLocation(initialLocation);
+  useFocusEffect(
+    useCallback(() => {
+      if (products.length > 0) {
+        setMapProducts(products);
+        // If we have products but no selected location, try to calculate center
+        if (products.length > 0 && !selectedLocation) {
+          const locationsWithCoords = products.filter(
+            p => p.location?.latitude && p.location?.longitude
+          );
+          
+          if (locationsWithCoords.length > 0) {
+            // Use first product's location
+            setSelectedLocation({
+              latitude: locationsWithCoords[0].location.latitude,
+              longitude: locationsWithCoords[0].location.longitude,
+              city: locationsWithCoords[0].location?.city || locationsWithCoords[0].city || 'Unknown location'
+            });
+          }
+        }
       }
-    }
-  }, [products, initialLocation]);
+      
+      // If initial location is provided, set it and search nearby products
+      if (initialLocation?.latitude && initialLocation?.longitude) {
+        setSelectedLocation(initialLocation);
+        if (products.length === 0) {
+          // Only load nearby products if no products were passed in
+          loadNearbyProducts(initialLocation, searchRadius);
+        }
+      }
+    }, [products, initialLocation])
+  );
 
   // Handle location selection
   const handleLocationSelect = (location) => {
@@ -80,6 +115,10 @@ const MapScreen = () => {
   // Handle radius change
   const handleRadiusChange = (radius) => {
     setSearchRadius(radius);
+  };
+  
+  // Apply radius change and reload products
+  const handleApplyRadius = (radius) => {
     if (selectedLocation?.latitude && selectedLocation?.longitude) {
       loadNearbyProducts(selectedLocation, radius);
     }
@@ -92,6 +131,7 @@ const MapScreen = () => {
     try {
       setIsLoading(true);
       setError(null);
+      setSearchingLocation(true);
 
       const result = await getNearbyProducts(
         location.latitude,
@@ -111,6 +151,15 @@ const MapScreen = () => {
         setMapProducts(sortedProducts);
         setNearbyProducts(sortedProducts);
         setShowResults(true);
+        
+        // Show message if no products found
+        if (sortedProducts.length === 0) {
+          Alert.alert(
+            'No Plants Found',
+            `No plants found within ${radius}km of this location. Try increasing the search radius.`,
+            [{ text: 'OK' }]
+          );
+        }
       } else {
         setMapProducts([]);
         setNearbyProducts([]);
@@ -118,27 +167,40 @@ const MapScreen = () => {
       }
 
       setIsLoading(false);
+      setSearchingLocation(false);
     } catch (err) {
       console.error('Error loading nearby products:', err);
       setError('Failed to load products. Please try again.');
       setIsLoading(false);
+      setSearchingLocation(false);
     }
   };
 
   // Handle product selection
   const handleProductSelect = (productId) => {
-    navigation.navigate('PlantDetail', { plantId: productId });
+    // Find selected product
+    const product = mapProducts.find(p => p.id === productId || p._id === productId);
+    
+    if (product) {
+      // Set selected product for highlighting
+      setSelectedProduct(product);
+      
+      // Navigate to plant detail
+      navigation.navigate('PlantDetail', { plantId: productId });
+    }
   };
 
   // Get current location
   const handleGetCurrentLocation = async () => {
     try {
       setIsLoading(true);
+      setSearchingLocation(true);
 
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission Denied', 'Location permission is required to use this feature.');
         setIsLoading(false);
+        setSearchingLocation(false);
         return;
       }
 
@@ -156,7 +218,7 @@ const MapScreen = () => {
           latitude,
           longitude,
           formattedAddress: addressData.formattedAddress,
-          city: addressData.city || 'Unknown Location',
+          city: addressData.city || 'Current Location',
         };
 
         setSelectedLocation(locationData);
@@ -177,8 +239,8 @@ const MapScreen = () => {
     } catch (err) {
       console.error('Error getting current location:', err);
       Alert.alert('Location Error', 'Could not get your current location. Please try again later.');
-    } finally {
       setIsLoading(false);
+      setSearchingLocation(false);
     }
   };
 
@@ -207,20 +269,19 @@ const MapScreen = () => {
     });
   };
 
-  // Get current location button styles based on view mode
-  const getCurrentLocationButtonStyle = () => {
-    return [
-      styles.currentLocationButton,
-      { bottom: viewMode === 'map' ? 120 : 20 }
-    ];
-  };
-
-  // Get view toggle button styles based on view mode
-  const getViewToggleButtonStyle = () => {
-    return [
-      styles.viewToggleButton,
-      { bottom: viewMode === 'map' ? 120 : 20 }
-    ];
+  // Handle map click
+  const handleMapPress = (coordinates) => {
+    if (coordinates?.latitude && coordinates?.longitude) {
+      setSelectedLocation({
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        formattedAddress: `${coordinates.latitude.toFixed(6)}, ${coordinates.longitude.toFixed(6)}`,
+        city: 'Selected Location',
+      });
+      
+      // Load nearby products with the new location
+      loadNearbyProducts(coordinates, searchRadius);
+    }
   };
 
   // Render loading state
@@ -244,7 +305,7 @@ const MapScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <MarketplaceHeader
-        title="Map View"
+        title={selectedLocation?.city ? `Plants near ${selectedLocation.city}` : "Map View"}
         showBackButton={true}
         onBackPress={() => navigation.goBack()}
         onNotificationsPress={() => navigation.navigate('Messages')}
@@ -254,10 +315,10 @@ const MapScreen = () => {
         {/* Map View */}
         {viewMode === 'map' && (
           <>
-            {isLoading ? (
+            {isLoading && searchingLocation ? (
               <View style={styles.centerContainer}>
                 <ActivityIndicator size="large" color="#4CAF50" />
-                <Text style={styles.loadingText}>Loading...</Text>
+                <Text style={styles.loadingText}>Finding plants nearby...</Text>
               </View>
             ) : error ? (
               <View style={styles.centerContainer}>
@@ -272,6 +333,7 @@ const MapScreen = () => {
               </View>
             ) : (
               <CrossPlatformAzureMapView
+                ref={mapRef}
                 products={mapProducts}
                 onSelectProduct={handleProductSelect}
                 initialRegion={
@@ -285,6 +347,8 @@ const MapScreen = () => {
                 }
                 showControls={true}
                 azureMapsKey={azureMapsKey}
+                searchRadius={searchRadius}
+                onMapPress={handleMapPress}
               />
             )}
           </>
@@ -293,6 +357,7 @@ const MapScreen = () => {
         {/* List View */}
         {viewMode === 'list' && (
           <FlatList
+            ref={listRef}
             data={nearbyProducts}
             renderItem={({ item }) => (
               <PlantCard 
@@ -304,23 +369,33 @@ const MapScreen = () => {
             keyExtractor={(item) => item.id || item._id}
             contentContainerStyle={styles.listContainer}
             ListEmptyComponent={
-              <View style={styles.emptyListContainer}>
-                <MaterialIcons name="eco" size={48} color="#ccc" />
-                <Text style={styles.emptyListText}>
-                  No plants found in this area
-                </Text>
-              </View>
+              isLoading ? (
+                <View style={styles.emptyListContainer}>
+                  <ActivityIndicator size="large" color="#4CAF50" />
+                  <Text style={styles.loadingText}>Loading plants...</Text>
+                </View>
+              ) : (
+                <View style={styles.emptyListContainer}>
+                  <MaterialIcons name="eco" size={48} color="#ccc" />
+                  <Text style={styles.emptyListText}>
+                    No plants found in this area
+                  </Text>
+                </View>
+              )
             }
           />
         )}
 
         {/* Search Box */}
-        <MapSearchBox onLocationSelect={handleLocationSelect} />
+        <MapSearchBox 
+          onLocationSelect={handleLocationSelect} 
+          azureMapsKey={azureMapsKey}
+        />
 
         {/* View Toggle */}
         {showResults && nearbyProducts.length > 0 && (
           <TouchableOpacity
-            style={getViewToggleButtonStyle()}
+            style={styles.viewToggleButton}
             onPress={toggleViewMode}
           >
             <MaterialIcons 
@@ -335,12 +410,12 @@ const MapScreen = () => {
         )}
 
         {/* Radius Control */}
-        {selectedLocation && viewMode === 'map' && (
+        {selectedLocation && viewMode === 'map' && radiusVisible && (
           <View style={styles.radiusControlContainer}>
             <RadiusControl
               radius={searchRadius}
               onRadiusChange={handleRadiusChange}
-              onApply={(radius) => handleRadiusChange(radius)}
+              onApply={handleApplyRadius}
             />
 
             {/* Sorting and Results Count */}
@@ -364,15 +439,39 @@ const MapScreen = () => {
                 </TouchableOpacity>
               </View>
             )}
+            
+            {/* Hide radius control button */}
+            <TouchableOpacity 
+              style={styles.hideButton}
+              onPress={() => setRadiusVisible(false)}
+            >
+              <MaterialIcons name="keyboard-arrow-down" size={24} color="#666" />
+            </TouchableOpacity>
           </View>
+        )}
+        
+        {/* Show radius control button when hidden */}
+        {selectedLocation && viewMode === 'map' && !radiusVisible && (
+          <TouchableOpacity 
+            style={styles.showRadiusButton}
+            onPress={() => setRadiusVisible(true)}
+          >
+            <MaterialIcons name="tune" size={20} color="#fff" />
+            <Text style={styles.showRadiusText}>Radius: {searchRadius}km</Text>
+          </TouchableOpacity>
         )}
 
         {/* Use Current Location button */}
         <TouchableOpacity
-          style={getCurrentLocationButtonStyle()}
+          style={styles.currentLocationButton}
           onPress={handleGetCurrentLocation}
+          disabled={isLoading}
         >
-          <MaterialIcons name="my-location" size={24} color="#fff" />
+          {isLoading && !searchingLocation ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <MaterialIcons name="my-location" size={24} color="#fff" />
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -392,6 +491,13 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
   },
   loadingText: {
     marginTop: 10,
@@ -462,6 +568,7 @@ const styles = StyleSheet.create({
   currentLocationButton: {
     position: 'absolute',
     right: 10,
+    bottom: 120,
     backgroundColor: '#4CAF50',
     width: 50,
     height: 50,
@@ -477,6 +584,7 @@ const styles = StyleSheet.create({
   viewToggleButton: {
     position: 'absolute',
     right: 70,
+    bottom: 120,
     backgroundColor: '#4CAF50',
     flexDirection: 'row',
     alignItems: 'center',
@@ -510,6 +618,33 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 16,
     textAlign: 'center',
+  },
+  hideButton: {
+    position: 'absolute',
+    top: 0,
+    right: 16,
+    padding: 5,
+  },
+  showRadiusButton: {
+    position: 'absolute',
+    bottom: 70,
+    left: 10,
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  showRadiusText: {
+    color: '#fff',
+    marginLeft: 4,
+    fontWeight: '500',
   },
 });
 

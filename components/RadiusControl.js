@@ -1,5 +1,4 @@
-// components/RadiusControl.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +13,7 @@ import Slider from '@react-native-community/slider';
 
 /**
  * Enhanced RadiusControl component for setting search radius
+ * Includes improved visualization and animation
  * 
  * @param {Object} props Component props
  * @param {number} props.radius Current radius in km
@@ -26,16 +26,40 @@ const RadiusControl = ({ radius = 10, onRadiusChange, onApply, style }) => {
   const [sliderValue, setSliderValue] = useState(radius || 10);
   const [error, setError] = useState('');
   
-  // Animation for pulse effect on apply
+  // Animation values
   const [scaleAnim] = useState(new Animated.Value(1));
+  const circleSize = useRef(new Animated.Value(50)).current;
+  const circleOpacity = useRef(new Animated.Value(0.7)).current;
   
   // Update input when radius prop changes
   useEffect(() => {
     setInputValue(radius?.toString() || '10');
     setSliderValue(radius || 10);
-  }, [radius]);
+    
+    // Animate circle size based on radius
+    const size = Math.min(160, 50 + radius * 2);
+    Animated.timing(circleSize, {
+      toValue: size,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+    
+    // Briefly increase opacity when radius changes
+    Animated.sequence([
+      Animated.timing(circleOpacity, {
+        toValue: 0.9,
+        duration: 150,
+        useNativeDriver: false,
+      }),
+      Animated.timing(circleOpacity, {
+        toValue: 0.7,
+        duration: 300,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [radius, circleSize, circleOpacity]);
 
-  // Animate pulse effect
+  // Animate pulse effect on apply
   const animatePulse = () => {
     Animated.sequence([
       Animated.timing(scaleAnim, {
@@ -170,13 +194,36 @@ const RadiusControl = ({ radius = 10, onRadiusChange, onApply, style }) => {
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       
       <View style={styles.radiusDisplay}>
-        <View style={styles.radiusCircle}>
-          <Text style={styles.radiusValue}>{sliderValue}</Text>
-          <Text style={styles.radiusUnit}>km</Text>
+        <View style={styles.radiusVisual}>
+          {/* Concentric circles to visualize radius */}
+          <View style={styles.centerDot} />
+          <Animated.View 
+            style={[
+              styles.radiusCircle1,
+              {
+                width: circleSize,
+                height: circleSize,
+                borderRadius: circleSize.interpolate({
+                  inputRange: [0, 200],
+                  outputRange: [0, 100],
+                }),
+                opacity: circleOpacity,
+                transform: [
+                  { scale: circleSize.interpolate({
+                    inputRange: [50, 160],
+                    outputRange: [0.8, 1],
+                  })},
+                ],
+              }
+            ]}
+          />
         </View>
-        <Text style={styles.helperText}>
-          Set radius to find plants nearby
-        </Text>
+        <View style={styles.radiusInfo}>
+          <Text style={styles.radiusValue}>{sliderValue} km</Text>
+          <Text style={styles.helperText}>
+            Set radius to find plants nearby
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -281,28 +328,37 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#f0f0f0',
   },
-  radiusCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#f0f9f0',
+  radiusVisual: {
+    position: 'relative',
+    width: 80,
+    height: 80,
+    marginRight: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
-    borderWidth: 2,
-    borderColor: '#4CAF50',
+  },
+  radiusCircle1: {
+    position: 'absolute',
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 175, 80, 0.3)',
+  },
+  centerDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#4CAF50',
+    zIndex: 2,
+  },
+  radiusInfo: {
+    flex: 1,
   },
   radiusValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#4CAF50',
-  },
-  radiusUnit: {
-    fontSize: 12,
-    color: '#4CAF50',
+    marginBottom: 4,
   },
   helperText: {
-    flex: 1,
     fontSize: 14,
     color: '#666',
     lineHeight: 20,
