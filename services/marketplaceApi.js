@@ -1,5 +1,9 @@
 // services/marketplaceApi.js
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import config from './config';
+import * as FileSystem from 'expo-file-system';
+import { Platform } from 'react-native';
+import * as Location from 'expo-location';
 
 const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
 
@@ -622,6 +626,326 @@ export const getNegotiateToken = async () => {
     return await response.json();
   } catch (error) {
     console.error('Error getting SignalR negotiate token:', error);
+    throw error;
+  }
+};
+
+export const deleteProduct = async (productId) => {
+  try {
+    return await fetch(`${API_BASE_URL}/marketplace/products/${productId}`, {
+      method: 'DELETE',
+    });
+  } catch (error) {
+    console.error(`Error deleting product ${productId}:`, error);
+    throw error;
+  }
+};
+
+export const submitReview = async (targetId, targetType = 'seller', reviewData) => {
+  try {
+    if (!targetId) {
+      throw new Error('Target ID is required');
+    }
+    if (!reviewData || !reviewData.rating || !reviewData.text) {
+      throw new Error('Review must include both rating and text');
+    }
+    const endpoint = `submitreview/${targetType}/${encodeURIComponent(targetId)}`;
+    const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reviewData),
+    });
+    if (!response.ok) throw new Error(`Failed to submit review: ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    console.error(`Error submitting ${targetType} review:`, error);
+    throw error;
+  }
+};
+
+export const startConversation = async (receiver, plantId, message) => {
+  try {
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    return await fetch(`${API_BASE_URL}/marketplace/messages/createChatRoom`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ receiver, plantId, message, sender: userEmail }),
+    });
+  } catch (error) {
+    console.error('Error starting conversation:', error);
+    throw error;
+  }
+};
+
+export const speechToText = async (audioUrl, language = 'en-US') => {
+  try {
+    if (!audioUrl) {
+      throw new Error('Audio URL is required');
+    }
+    const response = await fetch(`${API_BASE_URL}/marketplace/speechToText`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ audioUrl, language }),
+    });
+    if (!response.ok) {
+      throw new Error(`Speech recognition failed: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data || typeof data.text !== 'string') {
+      throw new Error('Invalid response format from speech service');
+    }
+    return data.text
+      .replace(/[.,!?;:'"()\[\]{}]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  } catch (error) {
+    console.error('Speech-to-text error:', error);
+    throw error;
+  }
+};
+
+export const getUserPlantsByLocation = async (location) => {
+  try {
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    return await fetch(`${API_BASE_URL}/getUserPlantsByLocation?email=${encodeURIComponent(userEmail)}&location=${encodeURIComponent(location)}`);
+  } catch (error) {
+    console.error('Error getting user plants by location:', error);
+    throw error;
+  }
+};
+
+
+export const getUserLocations = async () => {
+  try {
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    return await fetch(`${API_BASE_URL}/getUserLocations?email=${encodeURIComponent(userEmail)}`);
+  } catch (error) {
+    console.error('Error getting user locations:', error);
+    throw error;
+  }
+};
+
+export const identifyPlantPhoto = async (photoFormData) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/identifyPlantPhoto`, {
+      method: 'POST',
+      body: photoFormData,
+    });
+    if (!response.ok) {
+      throw new Error(`Plant identification failed: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error identifying plant photo:', error);
+    throw error;
+  }
+};
+
+
+export const createImageFormData = async (uri, name = 'image', type = 'image/jpeg') => {
+  const formData = new FormData();
+  formData.append('image', {
+    uri,
+    name,
+    type,
+  });
+  return formData;
+};
+
+
+export const fetchConversations = async () => {
+  try {
+    return await fetch(`${API_BASE_URL}/marketplace/messages/getUserConversations`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }).then(res => res.json());
+  } catch (error) {
+    console.error('Error fetching conversations:', error);
+    throw error;
+  }
+};
+
+export const fetchMessages = async (conversationId) => {
+  try {
+    return await fetch(`${API_BASE_URL}/marketplace/messages/getMessages/${conversationId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }).then(res => res.json());
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    throw error;
+  }
+};
+export const sendMessage = async (chatId, message) => {
+  try {
+    return await fetch(`${API_BASE_URL}/marketplace/messages/sendMessage`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ chatId, message }),
+    }).then(res => res.json());
+  } catch (error) {
+    console.error('Error sending message:', error);
+    throw error;
+  }
+};
+export const sendTypingIndicator = async (conversationId, isTyping) => {
+  try {
+    return await fetch(`${API_BASE_URL}/marketplace/messages/typing`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ conversationId, isTyping }),
+    }).then(res => res.json());
+  } catch (error) {
+    console.error('Error sending typing indicator:', error);
+    return { success: false };
+  }
+};
+export const markMessagesAsRead = async (conversationId, messageIds = []) => {
+  try {
+    return await fetch(`${API_BASE_URL}/marketplace/messages/markAsRead`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ conversationId, messageIds }),
+    }).then(res => res.json());
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+    return { success: false };
+  }
+};
+export const setAuthToken = async (token) => {
+  try {
+    authToken = token;
+    global.googleAuthToken = token;
+    await AsyncStorage.setItem('googleAuthToken', token);
+    console.log('Auth token set successfully');
+    return true;
+  } catch (error) {
+    console.error('Error setting auth token:', error);
+    return false;
+  }
+};
+export const initializeAuthToken = async () => {
+  try {
+    const token = await AsyncStorage.getItem('googleAuthToken');
+    if (token) {
+      authToken = token;
+      global.googleAuthToken = token;
+      console.log('Auth token initialized from storage');
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error initializing auth token:', error);
+    return false;
+  }
+};
+export const markProductAsSold = async (productId, transactionInfo = {}) => {
+  try {
+    return await apiRequest(`marketplace/products/${productId}/sold`, 'POST', transactionInfo);
+  } catch (error) {
+    console.error(`Error marking product ${productId} as sold:`, error);
+    if (config.features.useMockOnError || (config.isDevelopment && !config.features.useRealApi)) {
+      return { success: true, message: 'Product marked as sold successfully (mock)', productId };
+    }
+    throw error;
+  }
+};
+export const fetchReviews = async (targetType, targetId) => {
+  try {
+    if (!targetId || !targetType) {
+      throw new Error('Target ID and type are required');
+    }
+    const encodedTargetId = encodeURIComponent(targetId);
+    const endpoint = `marketplace/reviews/${targetType}/${encodedTargetId}`;
+    console.log(`Fetching reviews for ${targetType} ${targetId}...`);
+    console.log(`Using endpoint: ${endpoint}`);
+    return await apiRequest(endpoint);
+  } catch (error) {
+    console.error(`Error fetching ${targetType} reviews:`, error);
+    if (config.features.useMockOnError) {
+      return {
+        reviews: [
+          {
+            id: '1',
+            rating: 5,
+            text: 'Great seller! Plants arrived in perfect condition.',
+            userName: 'Plant Lover',
+            userId: 'user1@example.com',
+            createdAt: new Date().toISOString(),
+            isOwnReview: Math.random() > 0.5,
+          },
+          {
+            id: '2',
+            rating: 4,
+            text: 'Good communication and nice plants.',
+            userName: 'Green Thumb',
+            userId: 'user2@example.com',
+            createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+            isOwnReview: false,
+          },
+        ],
+        averageRating: 4.5,
+        count: 2
+      };
+    }
+    throw error;
+  }
+};
+export const deleteReview = async (reviewId, targetType, targetId) => {
+  console.log('[API] deleteReview API function is called but not used, using direct fetch instead');
+  console.log('[API] Parameters:', { reviewId, targetType, targetId });
+  try {
+    if (!reviewId) {
+      throw new Error('Review ID is required');
+    }
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    const token = await AsyncStorage.getItem('googleAuthToken');
+    const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
+    const encodedTargetType = encodeURIComponent(targetType);
+    const encodedTargetId = encodeURIComponent(targetId);
+    const encodedReviewId = encodeURIComponent(reviewId);
+    const endpoint = `marketplace/reviews/${encodedTargetType}/${encodedTargetId}/${encodedReviewId}`;
+    const fullUrl = `${API_BASE_URL}/${endpoint}`;
+    console.log(`[API] DELETE request URL: ${fullUrl}`);
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    headers['X-User-Email'] = userEmail;
+    const response = await fetch(fullUrl, {
+      method: 'DELETE',
+      headers
+    });
+    let responseData;
+    try {
+      responseData = await response.json();
+    } catch (e) {
+      const textResponse = await response.text();
+      responseData = { 
+        success: response.ok, 
+        message: response.ok ? 'Review deleted successfully' : textResponse 
+      };
+    }
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}: ${responseData?.message || 'Unknown error'}`);
+    }
+    return responseData;
+  } catch (error) {
+    console.error('[API] Error deleting review:', error);
     throw error;
   }
 };
