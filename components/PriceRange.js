@@ -1,12 +1,8 @@
-// components/PriceRange.js
+// frontend/components/PriceRange.js
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput } from 'react-native';
 import Slider from '@react-native-community/slider';
 
-/**
- * PriceRange component for filtering products by price
- * Fixed to prevent undefined value issues
- */
 const PriceRange = ({ 
   initialMin = 0, 
   initialMax = 1000, 
@@ -15,18 +11,16 @@ const PriceRange = ({
   hideTitle = false,
   max = 1000
 }) => {
-  const [minValue, setMinValue] = useState(initialMin || 0);
-  const [maxValue, setMaxValue] = useState(initialMax || max);
-  const [sliderValue, setSliderValue] = useState([initialMin || 0, initialMax || max]);
+  const [minValue, setMinValue] = useState(initialMin !== undefined ? initialMin : 0);
+  const [maxValue, setMaxValue] = useState(initialMax !== undefined ? initialMax : max);
   
   // Update local state when props change - with safety checks
   useEffect(() => {
-    const safeMin = initialMin !== undefined ? initialMin : 0;
-    const safeMax = initialMax !== undefined ? initialMax : max;
+    const safeMin = initialMin !== undefined && !isNaN(initialMin) ? Number(initialMin) : 0;
+    const safeMax = initialMax !== undefined && !isNaN(initialMax) ? Number(initialMax) : max;
     
     setMinValue(safeMin);
     setMaxValue(safeMax);
-    setSliderValue([safeMin, safeMax]);
   }, [initialMin, initialMax, max]);
   
   // Handle min input change
@@ -44,7 +38,6 @@ const PriceRange = ({
     value = Math.min(value, maxValue);
     
     setMinValue(value);
-    setSliderValue([value, maxValue]);
     
     if (onPriceChange) {
       onPriceChange([value, maxValue]);
@@ -67,7 +60,6 @@ const PriceRange = ({
     value = Math.min(value, max);
     
     setMaxValue(value);
-    setSliderValue([minValue, value]);
     
     if (onPriceChange) {
       onPriceChange([minValue, value]);
@@ -77,17 +69,18 @@ const PriceRange = ({
   // Handle slider change
   const handleSliderChange = (values) => {
     if (!Array.isArray(values) || values.length !== 2) {
-      console.warn('Invalid slider values:', values);
       return;
     }
     
-    const [min, max] = values;
+    const [min, max] = values.map(Math.round);
     
     setMinValue(min);
     setMaxValue(max);
-    
+  };
+  
+  const handleSliderComplete = () => {
     if (onPriceChange) {
-      onPriceChange([min, max]);
+      onPriceChange([minValue, maxValue]);
     }
   };
   
@@ -100,12 +93,13 @@ const PriceRange = ({
           style={styles.slider}
           minimumValue={0}
           maximumValue={max}
+          step={1}
           minimumTrackTintColor="#4CAF50"
           maximumTrackTintColor="#E0E0E0"
           thumbTintColor="#4CAF50"
-          value={sliderValue}
-          onValueChange={setSliderValue}
-          onSlidingComplete={handleSliderChange}
+          value={[minValue, maxValue]}
+          onValueChange={handleSliderChange}
+          onSlidingComplete={handleSliderComplete}
         />
       </View>
       
