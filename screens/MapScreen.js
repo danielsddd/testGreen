@@ -1,4 +1,4 @@
-// Updated screens/MapScreen.js with Fixed MapScreen Component
+// screens/MapScreen.js
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
