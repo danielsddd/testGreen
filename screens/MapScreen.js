@@ -1,3 +1,4 @@
+// Updated screens/MapScreen.js with Fixed MapScreen Component
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -7,8 +8,6 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Alert,
-  FlatList,
-  Dimensions,
   Platform,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -19,14 +18,13 @@ import MarketplaceHeader from '../components/MarketplaceHeader';
 import CrossPlatformAzureMapView from '../components/CrossPlatformAzureMapView';
 import MapSearchBox from '../components/MapSearchBox';
 import RadiusControl from '../components/RadiusControl';
-import PlantCard from '../components/PlantCard';
 import { getNearbyProducts, getAzureMapsKey, reverseGeocode } from '../services/marketplaceApi';
 
-const { width, height } = Dimensions.get('window');
-
 /**
- * Enhanced MapScreen component with improved Azure Maps integration
- * Shows plants on a map with search, radius and location features
+ * Fixed MapScreen component with:
+ * 1. Radius controls remaining visible when using "My Location"
+ * 2. Integrated product list in the radius control
+ * 3. Better error handling and state management
  */
 const MapScreen = () => {
   const navigation = useNavigation();
@@ -108,6 +106,8 @@ const MapScreen = () => {
   const handleLocationSelect = (location) => {
     setSelectedLocation(location);
     if (location?.latitude && location?.longitude) {
+      // Make sure radius controls stay visible
+      setRadiusVisible(true);
       loadNearbyProducts(location, searchRadius);
     }
   };
@@ -132,6 +132,9 @@ const MapScreen = () => {
       setIsLoading(true);
       setError(null);
       setSearchingLocation(true);
+      
+      // IMPORTANT: Make sure radius control stays visible during search
+      setRadiusVisible(true);
 
       const result = await getNearbyProducts(
         location.latitude,
@@ -151,26 +154,16 @@ const MapScreen = () => {
         setMapProducts(sortedProducts);
         setNearbyProducts(sortedProducts);
         setShowResults(true);
-        
-        // Show message if no products found
-        if (sortedProducts.length === 0) {
-          Alert.alert(
-            'No Plants Found',
-            `No plants found within ${radius}km of this location. Try increasing the search radius.`,
-            [{ text: 'OK' }]
-          );
-        }
       } else {
         setMapProducts([]);
         setNearbyProducts([]);
         setShowResults(true);
       }
-
-      setIsLoading(false);
-      setSearchingLocation(false);
     } catch (err) {
       console.error('Error loading nearby products:', err);
       setError('Failed to load products. Please try again.');
+    } finally {
+      // Always reset these states, even if there's an error
       setIsLoading(false);
       setSearchingLocation(false);
     }
@@ -190,11 +183,14 @@ const MapScreen = () => {
     }
   };
 
-  // Get current location
+  // FIXED: Get current location - Now properly preserves radius control visibility
   const handleGetCurrentLocation = async () => {
     try {
       setIsLoading(true);
       setSearchingLocation(true);
+      
+      // IMPORTANT: Make sure radius control stays visible
+      setRadiusVisible(true);
 
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -239,6 +235,8 @@ const MapScreen = () => {
     } catch (err) {
       console.error('Error getting current location:', err);
       Alert.alert('Location Error', 'Could not get your current location. Please try again later.');
+    } finally {
+      // CRITICAL FIX: Always reset these states, even if there's an error
       setIsLoading(false);
       setSearchingLocation(false);
     }
@@ -279,6 +277,9 @@ const MapScreen = () => {
         city: 'Selected Location',
       });
       
+      // IMPORTANT: Make sure radius control stays visible when clicking on map
+      setRadiusVisible(true);
+      
       // Load nearby products with the new location
       loadNearbyProducts(coordinates, searchRadius);
     }
@@ -316,12 +317,12 @@ const MapScreen = () => {
         {viewMode === 'map' && (
           <>
             {isLoading && searchingLocation ? (
-              <View style={styles.centerContainer}>
+              <View style={styles.searchingOverlay}>
                 <ActivityIndicator size="large" color="#4CAF50" />
-                <Text style={styles.loadingText}>Finding plants nearby...</Text>
+                <Text style={styles.searchingText}>Finding plants nearby...</Text>
               </View>
             ) : error ? (
-              <View style={styles.centerContainer}>
+              <View style={styles.errorOverlay}>
                 <MaterialIcons name="error-outline" size={48} color="#f44336" />
                 <Text style={styles.errorText}>{error}</Text>
                 <TouchableOpacity 
@@ -331,59 +332,27 @@ const MapScreen = () => {
                   <Text style={styles.retryButtonText}>Retry</Text>
                 </TouchableOpacity>
               </View>
-            ) : (
-              <CrossPlatformAzureMapView
-                ref={mapRef}
-                products={mapProducts}
-                onSelectProduct={handleProductSelect}
-                initialRegion={
-                  selectedLocation
-                    ? {
-                        latitude: selectedLocation.latitude,
-                        longitude: selectedLocation.longitude,
-                        zoom: 12,
-                      }
-                    : undefined
-                }
-                showControls={true}
-                azureMapsKey={azureMapsKey}
-                searchRadius={searchRadius}
-                onMapPress={handleMapPress}
-              />
-            )}
+            ) : null}
+            
+            <CrossPlatformAzureMapView
+              ref={mapRef}
+              products={mapProducts}
+              onSelectProduct={handleProductSelect}
+              initialRegion={
+                selectedLocation
+                  ? {
+                      latitude: selectedLocation.latitude,
+                      longitude: selectedLocation.longitude,
+                      zoom: 12,
+                    }
+                  : undefined
+              }
+              showControls={true}
+              azureMapsKey={azureMapsKey}
+              searchRadius={searchRadius}
+              onMapPress={handleMapPress}
+            />
           </>
-        )}
-
-        {/* List View */}
-        {viewMode === 'list' && (
-          <FlatList
-            ref={listRef}
-            data={nearbyProducts}
-            renderItem={({ item }) => (
-              <PlantCard 
-                plant={item} 
-                showActions={true} 
-                layout="list"
-              />
-            )}
-            keyExtractor={(item) => item.id || item._id}
-            contentContainerStyle={styles.listContainer}
-            ListEmptyComponent={
-              isLoading ? (
-                <View style={styles.emptyListContainer}>
-                  <ActivityIndicator size="large" color="#4CAF50" />
-                  <Text style={styles.loadingText}>Loading plants...</Text>
-                </View>
-              ) : (
-                <View style={styles.emptyListContainer}>
-                  <MaterialIcons name="eco" size={48} color="#ccc" />
-                  <Text style={styles.emptyListText}>
-                    No plants found in this area
-                  </Text>
-                </View>
-              )
-            }
-          />
         )}
 
         {/* Search Box */}
@@ -392,76 +361,7 @@ const MapScreen = () => {
           azureMapsKey={azureMapsKey}
         />
 
-        {/* View Toggle */}
-        {showResults && nearbyProducts.length > 0 && (
-          <TouchableOpacity
-            style={styles.viewToggleButton}
-            onPress={toggleViewMode}
-          >
-            <MaterialIcons 
-              name={viewMode === 'map' ? 'view-list' : 'map'} 
-              size={22} 
-              color="#fff" 
-            />
-            <Text style={styles.viewToggleText}>
-              {viewMode === 'map' ? 'List View' : 'Map View'}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Radius Control */}
-        {selectedLocation && viewMode === 'map' && radiusVisible && (
-          <View style={styles.radiusControlContainer}>
-            <RadiusControl
-              radius={searchRadius}
-              onRadiusChange={handleRadiusChange}
-              onApply={handleApplyRadius}
-            />
-
-            {/* Sorting and Results Count */}
-            {nearbyProducts.length > 0 && (
-              <View style={styles.resultsContainer}>
-                <Text style={styles.resultsText}>
-                  Found {nearbyProducts.length} plants within {searchRadius} km
-                </Text>
-                <TouchableOpacity
-                  style={styles.sortButton}
-                  onPress={toggleSortOrder}
-                >
-                  <MaterialIcons 
-                    name={sortOrder === 'nearest' ? 'arrow-upward' : 'arrow-downward'} 
-                    size={16} 
-                    color="#fff" 
-                  />
-                  <Text style={styles.sortButtonText}>
-                    {sortOrder === 'nearest' ? 'Nearest First' : 'Farthest First'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            
-            {/* Hide radius control button */}
-            <TouchableOpacity 
-              style={styles.hideButton}
-              onPress={() => setRadiusVisible(false)}
-            >
-              <MaterialIcons name="keyboard-arrow-down" size={24} color="#666" />
-            </TouchableOpacity>
-          </View>
-        )}
-        
-        {/* Show radius control button when hidden */}
-        {selectedLocation && viewMode === 'map' && !radiusVisible && (
-          <TouchableOpacity 
-            style={styles.showRadiusButton}
-            onPress={() => setRadiusVisible(true)}
-          >
-            <MaterialIcons name="tune" size={20} color="#fff" />
-            <Text style={styles.showRadiusText}>Radius: {searchRadius}km</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Use Current Location button */}
+        {/* Current Location Button */}
         <TouchableOpacity
           style={styles.currentLocationButton}
           onPress={handleGetCurrentLocation}
@@ -473,6 +373,20 @@ const MapScreen = () => {
             <MaterialIcons name="my-location" size={24} color="#fff" />
           )}
         </TouchableOpacity>
+
+        {/* Enhanced Radius Control with Integrated Product List */}
+        {selectedLocation && viewMode === 'map' && radiusVisible && (
+          <RadiusControl
+            radius={searchRadius}
+            onRadiusChange={handleRadiusChange}
+            onApply={handleApplyRadius}
+            products={nearbyProducts}
+            isLoading={isLoading}
+            error={error}
+            onProductSelect={handleProductSelect}
+            onToggleViewMode={toggleViewMode}
+          />
+        )}
       </View>
     </SafeAreaView>
   );
@@ -491,27 +405,51 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 5,
   },
   loadingText: {
-    marginTop: 10,
+    marginTop: 12,
     fontSize: 16,
     color: '#555',
+  },
+  searchingOverlay: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    padding: 16,
+    alignItems: 'center',
+    zIndex: 5,
+    borderRadius: 8,
+    margin: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  searchingText: {
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#555',
+  },
+  errorOverlay: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    padding: 16,
+    alignItems: 'center',
+    zIndex: 5,
+    borderRadius: 8,
+    margin: 16,
   },
   errorText: {
     color: '#f44336',
     textAlign: 'center',
-    padding: 20,
+    padding: 12,
     fontSize: 16,
   },
   retryButton: {
-    marginTop: 16,
+    marginTop: 8,
     backgroundColor: '#4CAF50',
     paddingVertical: 8,
     paddingHorizontal: 16,
@@ -521,54 +459,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
-  radiusControlContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'white',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    maxHeight: height * 0.5, // Maximum 50% of screen height
-  },
-  resultsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    marginTop: 8,
-  },
-  resultsText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4CAF50',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-  },
-  sortButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    marginLeft: 4,
-  },
   currentLocationButton: {
     position: 'absolute',
     right: 10,
-    bottom: 120,
+    bottom: Platform.OS === 'ios' ? 450 : 420, // Position above the radius control
     backgroundColor: '#4CAF50',
     width: 50,
     height: 50,
@@ -580,71 +474,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
-  },
-  viewToggleButton: {
-    position: 'absolute',
-    right: 70,
-    bottom: 120,
-    backgroundColor: '#4CAF50',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 25,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  viewToggleText: {
-    color: '#fff',
-    marginLeft: 4,
-    fontWeight: '500',
-  },
-  listContainer: {
-    padding: 16,
-    paddingBottom: 80,
-  },
-  emptyListContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-    minHeight: 300,
-  },
-  emptyListText: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 16,
-    textAlign: 'center',
-  },
-  hideButton: {
-    position: 'absolute',
-    top: 0,
-    right: 16,
-    padding: 5,
-  },
-  showRadiusButton: {
-    position: 'absolute',
-    bottom: 70,
-    left: 10,
-    backgroundColor: '#4CAF50',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  showRadiusText: {
-    color: '#fff',
-    marginLeft: 4,
-    fontWeight: '500',
   },
 });
 
