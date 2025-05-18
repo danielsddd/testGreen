@@ -1,4 +1,4 @@
-// components/CrossPlatformAzureMapView.js - Fixed to properly handle Azure Maps key
+// Fix for CrossPlatformAzureMapView.js - Adding custom markers and fixing map issues
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View,
@@ -8,6 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { getAzureMapsKey } from '../services/azureMapsService';
 
 // WebView is mobile-only (Expo / RN)
 let WebView;
@@ -18,6 +19,7 @@ if (Platform.OS !== 'web') {
 /**
  * Cross-platform Azure Map component
  * Works on both web and mobile platforms
+ * Fixed to correctly register marker images
  */
 const CrossPlatformAzureMapView = ({
   products = [],
@@ -26,7 +28,9 @@ const CrossPlatformAzureMapView = ({
   showControls = true,
   mapStyle = 'road',
   onMapReady,
-  azureMapsKey, // Azure Maps subscription key directly passed as prop
+  searchRadius,
+  onMapPress,
+  azureMapsKey: providedKey = null, // Allow direct key prop but fall back to service
 }) => {
   const webViewRef = useRef(null);
   const mapDivRef = useRef(null);
@@ -36,36 +40,74 @@ const CrossPlatformAzureMapView = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [mapReady, setMapReady] = useState(false);
+  const [azureMapsKey, setAzureMapsKey] = useState(providedKey);
+  const [isKeyLoading, setIsKeyLoading] = useState(!providedKey);
 
-  // Log the key when it's passed for debugging (mask most of it)
+  // Load Azure Maps key if not provided as prop
   useEffect(() => {
-    if (azureMapsKey) {
-      const maskedKey = azureMapsKey.length > 10 
-        ? `${azureMapsKey.substring(0, 5)}...${azureMapsKey.substring(azureMapsKey.length - 5)}`
-        : '[KEY TOO SHORT]';
-      console.log(`Azure Maps key received (masked): ${maskedKey}, length: ${azureMapsKey.length}`);
-    } else {
-      console.error('No Azure Maps key provided to CrossPlatformAzureMapView');
+    if (providedKey) {
+      setAzureMapsKey(providedKey);
+      setIsKeyLoading(false);
+      return;
     }
-  }, [azureMapsKey]);
+    
+    const loadKey = async () => {
+      try {
+        setIsKeyLoading(true);
+        const key = await getAzureMapsKey();
+        console.log(`Azure Maps key loaded (masked): ${key.substring(0, 5)}...${key.substring(key.length - 5)}`);
+        setAzureMapsKey(key);
+        setIsKeyLoading(false);
+      } catch (err) {
+        console.error('Error loading Azure Maps key:', err);
+        setIsError(true);
+        setErrorMessage('Failed to load map configuration. Please try again later.');
+        setIsKeyLoading(false);
+      }
+    };
+    
+    loadKey();
+  }, [providedKey]);
+
+  // Effect to draw search radius when it changes
+  useEffect(() => {
+    if (!mapReady || !searchRadius) return;
+    
+    const drawRadius = () => {
+      if (!initialRegion?.latitude || !initialRegion?.longitude) return;
+      
+      const msg = { 
+        type: 'DRAW_RADIUS', 
+        latitude: initialRegion.latitude, 
+        longitude: initialRegion.longitude,
+        radius: searchRadius
+      };
+      
+      if (Platform.OS === 'web') {
+        const iframe = document.getElementById('azureMapsIframe');
+        iframe?.contentWindow?.handleMessage?.(JSON.stringify(msg));
+      } else if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(
+          `window.handleMessage(${JSON.stringify(JSON.stringify(msg))}); true;`
+        );
+      }
+    };
+    
+    drawRadius();
+  }, [searchRadius, mapReady, initialRegion]);
 
   // Generate the HTML template for the map view
-  const generateMapHtml = () => {
-    // Double-check that the key is properly defined
-    if (!azureMapsKey || azureMapsKey.length < 10) {
-      console.error('Invalid Azure Maps key:', azureMapsKey);
-      
-      if (!azureMapsKey) {
-        return `
-          <!DOCTYPE html>
-          <html>
-          <body style="font-family: Arial; padding: 20px; text-align: center; color: #f44336;">
-            <h2>Error: Azure Maps Key Missing</h2>
-            <p>The Azure Maps key was not provided to the component.</p>
-          </body>
-          </html>
-        `;
-      }
+  const generateMapHtml = useCallback(() => {
+    if (!azureMapsKey) {
+      return `
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial; padding: 20px; text-align: center; color: #f44336;">
+          <h2>Error: Azure Maps Key Missing</h2>
+          <p>The Azure Maps key was not provided to the component.</p>
+        </body>
+        </html>
+      `;
     }
     
     return `
@@ -115,6 +157,13 @@ const CrossPlatformAzureMapView = ({
     let popup = null;
     let radiusCircle = null;
     let searchCircle = null;
+    
+    // Custom marker images
+    const markerSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M16 0C9.373 0 4 5.373 4 12c0 5.303 4.438 9.8 10.35 11.607 1.066 0.335 1.926 1.07 1.926 1.07C17.56 25.57 16 29 16 29s-1.34-4.031-1.91-5.226C13.37 23.043 4 19.396 4 12 4 5.373 9.373 0 16 0zm0 17c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5z" fill="#4CAF50"/></svg>';
+    
+    // Create a DOM element to hold the SVG
+    const img = document.createElement('img');
+    img.src = 'data:image/svg+xml;base64,' + btoa(markerSvg);
 
     try {
       // Initialize the map
@@ -134,6 +183,14 @@ const CrossPlatformAzureMapView = ({
       // Map ready event
       map.events.add('ready', () => {
         updateDebug("Map is ready! Creating data sources...");
+        
+        // Add custom marker images
+        map.imageSprite.add('marker-green', img).then(() => {
+          updateDebug("Added custom marker-green successfully");
+        }).catch(err => {
+          updateDebug("Error adding custom marker: " + err.toString());
+        });
+        
         // Create data sources
         src = new atlas.source.DataSource();
         clusterSrc = new atlas.source.DataSource(null, {
@@ -146,7 +203,7 @@ const CrossPlatformAzureMapView = ({
         // Add a layer for individual markers
         map.layers.add(new atlas.layer.SymbolLayer(src, null, {
           iconOptions: {
-            image: 'marker-green',
+            image: 'pin-round-blue',  // Use built-in pin instead of marker-green
             anchor: 'bottom',
             allowOverlap: true,
             size: 1.0
@@ -202,8 +259,8 @@ const CrossPlatformAzureMapView = ({
           const div = document.createElement('div');
           div.className = 'popup-content';
           div.innerHTML = \`
-            <strong>\${props.title}</strong><br>
-            <span style="color:#4caf50;font-weight:bold;">$\${(+props.price).toFixed(2)}</span><br>
+            <strong>\${props.title || 'Plant'}</strong><br>
+            <span style="color:#4caf50;font-weight:bold;">$\${parseFloat(props.price || 0).toFixed(2)}</span><br>
             <small>\${props.location || ''}</small>
             \${props.distance ? '<br><small>Distance: ' + props.distance.toFixed(2) + ' km</small>' : ''}<br>
           \`;
@@ -260,6 +317,24 @@ const CrossPlatformAzureMapView = ({
             popup.open(map);
           }
         });
+        
+        // Add map click event handler for coordinate selection
+        map.events.add('click', (e) => {
+          // Close any open popups
+          popup.close();
+          
+          // Only forward click events that aren't on markers
+          if (!e.shapes || e.shapes.length === 0) {
+            const coords = e.position;
+            sendMsg({
+              type: 'MAP_CLICKED',
+              coordinates: {
+                latitude: coords[1],
+                longitude: coords[0]
+              }
+            });
+          }
+        });
 
         // Signal that map is ready
         sendMsg({ type: 'MAP_READY' });
@@ -269,6 +344,16 @@ const CrossPlatformAzureMapView = ({
           updateDebug("Initial products available, adding to map...");
           updateMarkers(${JSON.stringify(products)});
         }
+        
+        // Add handler for missing images to prevent errors
+        map.events.add('styleimagemissing', (e) => {
+          if (e.id === 'marker-green') {
+            updateDebug("Handling missing marker-green image");
+            map.imageSprite.add('marker-green', img).then(() => {
+              updateDebug("Added missing marker-green on demand");
+            });
+          }
+        });
       });
 
       // Map error event
@@ -454,11 +539,6 @@ const CrossPlatformAzureMapView = ({
       }
     };
     
-    // Handle clicks outside of markers to close popup
-    map.events.add('click', () => {
-      popup.close();
-    });
-    
     // Remove debug info after some time
     setTimeout(() => {
       const debugDiv = document.getElementById('debug');
@@ -470,7 +550,7 @@ const CrossPlatformAzureMapView = ({
 </body>
 </html>
 `;
-  };
+  }, [azureMapsKey, initialRegion, mapStyle, products]);
 
   /* ------------------------------------------------------------------ */
   /* WEB: initialise Azure Maps inside <iframe> once container ready    */
@@ -497,6 +577,9 @@ const CrossPlatformAzureMapView = ({
           case 'PIN_CLICKED':
             onSelectProduct?.(data.productId);
             break;
+          case 'MAP_CLICKED':
+            onMapPress?.(data.coordinates);
+            break;
           case 'MAP_ERROR':
           case 'ERROR':
             setIsError(true);
@@ -510,7 +593,7 @@ const CrossPlatformAzureMapView = ({
     window.addEventListener('message', handleMsg);
 
     return () => window.removeEventListener('message', handleMsg);
-  }, [products, onMapReady, onSelectProduct]);
+  }, [products, onMapReady, onSelectProduct, onMapPress]);
 
   useEffect(initWebMap, [initWebMap]);
 
@@ -528,6 +611,9 @@ const CrossPlatformAzureMapView = ({
           break;
         case 'PIN_CLICKED':
           onSelectProduct?.(data.productId);
+          break;
+        case 'MAP_CLICKED':
+          onMapPress?.(data.coordinates);
           break;
         case 'MAP_ERROR':
         case 'ERROR':
@@ -642,16 +728,6 @@ const CrossPlatformAzureMapView = ({
   }
   
   if (isError) return renderError();
-
-  // Empty state for no products with valid location
-  if (!products?.length) {
-    return (
-      <View style={styles.container}>
-        {Platform.OS === 'web' ? <WebMap /> : <NativeMap />}
-        {renderEmpty()}
-      </View>
-    );
-  }
 
   return Platform.OS === 'web' ? <WebMap /> : <NativeMap />;
 };
