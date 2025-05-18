@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+// components/FilterSection.js
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +17,7 @@ import SortOptions from './SortOptions';
 
 /**
  * Enhanced FilterSection component with improved UI and functionality
+ * Fixed to prevent undefined values and slider issues
  * 
  * @param {Object} props Component props
  * @param {string} props.sortOption Current sort option
@@ -47,10 +49,19 @@ const FilterSection = ({
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [modalAnimation] = useState(new Animated.Value(0));
   
+  // Ensure price range values are valid numbers
+  const safeMinPrice = priceRange && priceRange.min !== undefined ? priceRange.min : 0;
+  const safeMaxPrice = priceRange && priceRange.max !== undefined ? priceRange.max : 1000;
+  const safePriceRange = { min: safeMinPrice, max: safeMaxPrice };
+  
   // Handle price range change
   const handlePriceRangeChange = (range) => {
-    if (onPriceChange) {
-      onPriceChange({ min: range[0], max: range[1] });
+    if (onPriceChange && Array.isArray(range) && range.length === 2) {
+      // Ensure we're passing valid numbers
+      onPriceChange({ 
+        min: typeof range[0] === 'number' ? range[0] : 0, 
+        max: typeof range[1] === 'number' ? range[1] : 1000 
+      });
     }
   };
 
@@ -75,7 +86,8 @@ const FilterSection = ({
   };
 
   // Count active filters
-  const activeFilterCount = activeFilters.length + (priceRange.min > 0 || priceRange.max < 1000 ? 1 : 0);
+  const activeFilterCount = activeFilters.length + 
+    ((safePriceRange.min > 0 || safePriceRange.max < 1000) ? 1 : 0);
 
   // Modal slide-in animation
   const slideAnimation = {
@@ -112,10 +124,10 @@ const FilterSection = ({
           contentContainerStyle={styles.activeFiltersContent}
         >
           {/* Price Range Filter Pill (if active) */}
-          {(priceRange.min > 0 || priceRange.max < 1000) && (
+          {(safePriceRange.min > 0 || safePriceRange.max < 1000) && (
             <View style={styles.filterPill}>
               <Text style={styles.filterPillText}>
-                ${priceRange.min} - ${priceRange.max}
+                ${safePriceRange.min} - ${safePriceRange.max}
               </Text>
               <TouchableOpacity 
                 onPress={() => onPriceChange({ min: 0, max: 1000 })}
@@ -128,7 +140,7 @@ const FilterSection = ({
           
           {/* Custom Active Filters */}
           {activeFilters.map((filter, index) => (
-            <View key={index} style={styles.filterPill}>
+            <View key={`filter-${index}-${filter.id || 'unknown'}`} style={styles.filterPill}>
               <Text style={styles.filterPillText}>
                 {filter.label}
               </Text>
@@ -212,16 +224,16 @@ const FilterSection = ({
                 <ScrollView>
                   {/* Price Range in Modal */}
                   <View style={styles.modalSection}>
-  <Text style={styles.sectionTitle}>Price Range</Text>
-  <PriceRange
-    onPriceChange={handlePriceRangeChange}
-    initialMin={priceRange.min}
-    initialMax={priceRange.max}
-    style={styles.priceRange}
-    hideTitle={true} // Hide the component title since we have a section title
-    max={1000} // Set maximum price limit
-  />
-</View>
+                    <Text style={styles.sectionTitle}>Price Range</Text>
+                    <PriceRange
+                      onPriceChange={handlePriceRangeChange}
+                      initialMin={safePriceRange.min}
+                      initialMax={safePriceRange.max}
+                      style={styles.priceRange}
+                      hideTitle={true} // Hide the component title since we have a section title
+                      max={1000} // Set maximum price limit
+                    />
+                  </View>
                   
                   {/* Action Buttons */}
                   <View style={styles.modalActions}>

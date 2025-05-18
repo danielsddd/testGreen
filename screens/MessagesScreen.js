@@ -230,9 +230,12 @@ const MessagesScreen = () => {
 
   // Get avatar URL with fallback to ui-avatars service
   const getAvatarUrl = (user) => {
-    if (user.avatar) return user.avatar;
+    // If the user has a valid avatar URL, use it
+    if (user.avatar && typeof user.avatar === 'string' && user.avatar.startsWith('http')) {
+      return user.avatar;
+    }
     
-    // Create avatar URL from user's name
+    // Create avatar URL from user's name with better fallback
     const name = user.otherUserName || user.name || 'User';
     const initial = name.charAt(0).toUpperCase();
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(initial)}&background=4CAF50&color=fff&size=100`;

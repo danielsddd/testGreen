@@ -1,11 +1,11 @@
-// components/PriceRange.js (updated version)
-
+// components/PriceRange.js
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput } from 'react-native';
 import Slider from '@react-native-community/slider';
 
 /**
  * PriceRange component for filtering products by price
+ * Fixed to prevent undefined value issues
  */
 const PriceRange = ({ 
   initialMin = 0, 
@@ -15,16 +15,19 @@ const PriceRange = ({
   hideTitle = false,
   max = 1000
 }) => {
-  const [minValue, setMinValue] = useState(initialMin);
-  const [maxValue, setMaxValue] = useState(initialMax);
-  const [sliderValue, setSliderValue] = useState([initialMin, initialMax]);
+  const [minValue, setMinValue] = useState(initialMin || 0);
+  const [maxValue, setMaxValue] = useState(initialMax || max);
+  const [sliderValue, setSliderValue] = useState([initialMin || 0, initialMax || max]);
   
-  // Update local state when props change
+  // Update local state when props change - with safety checks
   useEffect(() => {
-    setMinValue(initialMin);
-    setMaxValue(initialMax);
-    setSliderValue([initialMin, initialMax]);
-  }, [initialMin, initialMax]);
+    const safeMin = initialMin !== undefined ? initialMin : 0;
+    const safeMax = initialMax !== undefined ? initialMax : max;
+    
+    setMinValue(safeMin);
+    setMaxValue(safeMax);
+    setSliderValue([safeMin, safeMax]);
+  }, [initialMin, initialMax, max]);
   
   // Handle min input change
   const handleMinChange = (text) => {
@@ -73,6 +76,11 @@ const PriceRange = ({
   
   // Handle slider change
   const handleSliderChange = (values) => {
+    if (!Array.isArray(values) || values.length !== 2) {
+      console.warn('Invalid slider values:', values);
+      return;
+    }
+    
     const [min, max] = values;
     
     setMinValue(min);
@@ -108,7 +116,7 @@ const PriceRange = ({
             <Text style={styles.currencySymbol}>$</Text>
             <TextInput
               style={styles.input}
-              value={minValue.toString()}
+              value={String(minValue)}
               onChangeText={handleMinChange}
               keyboardType="numeric"
               maxLength={5}
@@ -124,7 +132,7 @@ const PriceRange = ({
             <Text style={styles.currencySymbol}>$</Text>
             <TextInput
               style={styles.input}
-              value={maxValue.toString()}
+              value={String(maxValue)}
               onChangeText={handleMaxChange}
               keyboardType="numeric"
               maxLength={5}
