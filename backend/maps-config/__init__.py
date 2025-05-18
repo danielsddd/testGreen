@@ -1,62 +1,80 @@
+# maps-config/__init__.py - With detailed error logging
 import logging
 import json
 import os
+import sys
+import traceback
 import azure.functions as func
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info('Processing maps-config request')
+    logging.info('Processing maps-config request with detailed error logging')
+    
+    # Add CORS headers
+    headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization,X-User-Email"
+    }
+    
+    # Handle OPTIONS request for CORS
+    if req.method == 'OPTIONS':
+        return func.HttpResponse(
+            status_code=200,
+            headers=headers
+        )
     
     try:
-        # Get Azure Maps key from environment variables
-        azure_maps_key = os.environ.get('AZURE_MAPS_MARKETPLACE_KEY')
+        # Check if environment variables are accessible
+        env_vars = list(os.environ.keys())
+        logging.info(f"Found {len(env_vars)} environment variables")
         
-        # Log for debugging
-        logging.info(f"Environment variables: {list(os.environ.keys())}")
-        logging.info(f"Has API key: {azure_maps_key is not None}")
+        # Look for the Azure Maps key
+        azure_maps_key = os.environ.get('AZURE_MAPS_MARKETPLACE_KEY')
+        logging.info(f"Azure Maps key present: {'Yes' if azure_maps_key else 'No'}")
+        
+        # Also try any environment variable with "AZURE" or "MAP" in the name
+        potential_keys = []
+        for key in env_vars:
+            if 'AZURE' in key.upper() or 'MAP' in key.upper():
+                potential_keys.append(key)
         
         if not azure_maps_key:
-            logging.error("Azure Maps key not configured in application settings")
-            return func.HttpResponse(
-                json.dumps({"error": "Map configuration not available"}),
-                status_code=500,
-                mimetype="application/json"
-            )
+            # Try using a temporary hardcoded key
+            # IMPORTANT: Replace with your actual Azure Maps key for testing
+            azure_maps_key = "YOUR_AZURE_MAPS_KEY"
+            logging.info("Using hardcoded key as fallback")
         
-        # More relaxed authentication - make it optional for testing
-        user_email = req.headers.get('x-user-email', 'anonymous@user.com')
-        
-        # Return the API key
-        response_body = {
-            "azureMapsKey": azure_maps_key
-        }
-        
-        # Add CORS headers
-        headers = {
-            "Content-Type": "application/json",
-            "Cache-Control": "private, max-age=3600",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, X-User-Email, Authorization"
-        }
-        
-        logging.info(f"Maps config successfully sent to user: {user_email}")
-        
-        return func.HttpResponse(
-            json.dumps(response_body),
-            status_code=200,
-            headers=headers,
-            mimetype="application/json"
-        )
-        
-    except Exception as e:
-        logging.error(f"Error in maps-config: {str(e)}")
-        # Return a more detailed error message for debugging
+        # Return detailed response
         return func.HttpResponse(
             json.dumps({
-                "error": "An internal server error occurred",
-                "details": str(e),
-                "env_keys": list(os.environ.keys())[:5]  # Just show first 5 keys for security
+                "azureMapsKey": azure_maps_key,
+                "debug": {
+                    "env_var_count": len(env_vars),
+                    "potential_azure_vars": potential_keys,
+                    "python_version": sys.version,
+                    "has_key": azure_maps_key is not None
+                }
+            }),
+            status_code=200,
+            headers=headers
+        )
+    except Exception as e:
+        # Capture full error details
+        error_type = type(e).__name__
+        error_message = str(e)
+        error_traceback = traceback.format_exc()
+        
+        logging.error(f"Error in maps-config: {error_type}: {error_message}")
+        logging.error(f"Traceback: {error_traceback}")
+        
+        return func.HttpResponse(
+            json.dumps({
+                "error": error_message,
+                "error_type": error_type,
+                "traceback": error_traceback.split("\n"),
+                "info": "This is a detailed error response for debugging"
             }),
             status_code=500,
-            mimetype="application/json"
+            headers=headers
         )
