@@ -1,15 +1,7 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Text } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import { View, StyleSheet } from 'react-native';
+import ToggleButton from './MapToggle-parts/ToggleButton';
 
-/**
- * MapToggle component for switching between map and list views
- * 
- * @param {Object} props Component props
- * @param {string} props.viewMode Current view mode ('grid', 'list', or 'map')
- * @param {Function} props.onViewModeChange Callback when view mode changes
- * @param {Object} props.style Additional styles for the container
- */
 const MapToggle = ({ viewMode, onViewModeChange, style }) => {
   // Function to handle view mode change
   const handleViewChange = (mode) => {
@@ -20,69 +12,34 @@ const MapToggle = ({ viewMode, onViewModeChange, style }) => {
 
   return (
     <View style={[styles.container, style]}>
-      {/* List view toggle */}
+      {/* List view toggles */}
       <View style={styles.viewToggles}>
-        <TouchableOpacity
-          style={[styles.toggleButton, viewMode === 'grid' && styles.activeToggle]}
+        <ToggleButton
+          isActive={viewMode === 'grid'}
           onPress={() => handleViewChange('grid')}
+          icon="grid-view"
+          label="Grid"
           accessibilityLabel="Grid View"
-          accessibilityRole="button"
-          accessibilityState={{ selected: viewMode === 'grid' }}
-        >
-          <MaterialIcons 
-            name="grid-view" 
-            size={20} 
-            color={viewMode === 'grid' ? '#4CAF50' : '#999'} 
-          />
-          <Text style={[
-            styles.toggleText, 
-            viewMode === 'grid' && styles.activeToggleText
-          ]}>
-            Grid
-          </Text>
-        </TouchableOpacity>
+        />
 
-        <TouchableOpacity
-          style={[styles.toggleButton, viewMode === 'list' && styles.activeToggle]}
+        <ToggleButton
+          isActive={viewMode === 'list'}
           onPress={() => handleViewChange('list')}
+          icon="view-list"
+          label="List"
           accessibilityLabel="List View"
-          accessibilityRole="button"
-          accessibilityState={{ selected: viewMode === 'list' }}
-        >
-          <MaterialIcons 
-            name="view-list" 
-            size={20} 
-            color={viewMode === 'list' ? '#4CAF50' : '#999'} 
-          />
-          <Text style={[
-            styles.toggleText, 
-            viewMode === 'list' && styles.activeToggleText
-          ]}>
-            List
-          </Text>
-        </TouchableOpacity>
+        />
       </View>
 
       {/* Map toggle */}
-      <TouchableOpacity
-        style={[styles.mapButton, viewMode === 'map' && styles.activeToggle]}
+      <ToggleButton
+        isActive={viewMode === 'map'}
         onPress={() => handleViewChange('map')}
+        icon="map"
+        label="Map"
         accessibilityLabel="Map View"
-        accessibilityRole="button"
-        accessibilityState={{ selected: viewMode === 'map' }}
-      >
-        <MaterialIcons 
-          name="map" 
-          size={20} 
-          color={viewMode === 'map' ? '#4CAF50' : '#999'} 
-        />
-        <Text style={[
-          styles.toggleText, 
-          viewMode === 'map' && styles.activeToggleText
-        ]}>
-          Map
-        </Text>
-      </TouchableOpacity>
+        style={styles.mapButton}
+      />
     </View>
   );
 };
@@ -103,34 +60,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginRight: 12,
   },
-  toggleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#f5f5f5',
-  },
   mapButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#f5f5f5',
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-  },
-  activeToggle: {
-    backgroundColor: '#e6f7e6',
-  },
-  toggleText: {
-    fontSize: 14,
-    color: '#999',
-    marginLeft: 6,
-  },
-  activeToggleText: {
-    color: '#4CAF50',
-    fontWeight: '600',
   },
 });
 

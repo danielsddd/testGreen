@@ -2,16 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  TextInput,
   StyleSheet,
-  TouchableOpacity,
-  ActivityIndicator,
   FlatList,
-  Platform,
   Animated,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { getAzureMapsKey, geocodeAddress } from '../services/azureMapsService';
+import AddressInput from './LocationPicker-parts/AddressInput';
+import SuggestionItem from './LocationPicker-parts/SuggestionItem';
+import SelectedLocation from './LocationPicker-parts/SelectedLocation';
+import ConfirmButton from './LocationPicker-parts/ConfirmButton';
 
 /**
  * Enhanced LocationPicker component with Azure Maps integration
@@ -306,60 +307,44 @@ const LocationPicker = ({
       </Text>
       
       {/* City Input */}
-      <View style={styles.inputRow}>
-        <Text style={styles.fieldLabel}>City <Text style={styles.requiredAsterisk}>*</Text></Text>
-        <View style={styles.inputContainer}>
-          <MaterialIcons name="location-city" size={20} color="#4CAF50" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            value={city}
-            onChangeText={handleCityChange}
-            placeholder="Enter city in Israel"
-            onFocus={() => {
-              if (city.length >= 3) {
-                fetchSuggestions(city);
-              }
-            }}
-          />
-          {isLoading && (
-            <ActivityIndicator size="small" color="#4CAF50" style={styles.loadingIndicator} />
-          )}
-        </View>
-      </View>
+      <AddressInput
+        label="City"
+        value={city}
+        onChangeText={handleCityChange}
+        placeholder="Enter city in Israel"
+        icon="location-city"
+        isLoading={isLoading}
+        required={true}
+        onFocus={() => {
+          if (city.length >= 3) {
+            fetchSuggestions(city);
+          }
+        }}
+      />
       
       {/* Street Input */}
-      <View style={styles.inputRow}>
-        <Text style={styles.fieldLabel}>Street</Text>
-        <View style={styles.inputContainer}>
-          <MaterialIcons name="edit-road" size={20} color="#4CAF50" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            value={street}
-            onChangeText={handleStreetChange}
-            placeholder="Enter street name"
-            onFocus={() => {
-              if (street.length >= 3 && city) {
-                fetchSuggestions(`${street}, ${city}`);
-              }
-            }}
-          />
-        </View>
-      </View>
+      <AddressInput
+        label="Street"
+        value={street}
+        onChangeText={handleStreetChange}
+        placeholder="Enter street name"
+        icon="edit-road"
+        onFocus={() => {
+          if (street.length >= 3 && city) {
+            fetchSuggestions(`${street}, ${city}`);
+          }
+        }}
+      />
       
       {/* House Number Input */}
-      <View style={styles.inputRow}>
-        <Text style={styles.fieldLabel}>House Number (Optional)</Text>
-        <View style={styles.inputContainer}>
-          <MaterialIcons name="home" size={20} color="#4CAF50" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            value={houseNumber}
-            onChangeText={handleHouseNumberChange}
-            placeholder="Enter house number"
-            keyboardType="numeric"
-          />
-        </View>
-      </View>
+      <AddressInput
+        label="House Number (Optional)"
+        value={houseNumber}
+        onChangeText={handleHouseNumberChange}
+        placeholder="Enter house number"
+        icon="home"
+        keyboardType="numeric"
+      />
       
       {/* Suggestions Panel */}
       <Animated.View style={[
@@ -374,20 +359,7 @@ const LocationPicker = ({
           data={suggestions}
           keyExtractor={(item, index) => `suggestion-${index}-${item.id || ''}`}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.suggestionItem}
-              onPress={() => handleSelectSuggestion(item)}
-            >
-              <MaterialIcons name="place" size={20} color="#4CAF50" style={styles.suggestionIcon} />
-              <View style={styles.suggestionTextContainer}>
-                <Text style={styles.suggestionText} numberOfLines={1}>
-                  {item.address?.freeformAddress || 'Address'}
-                </Text>
-                <Text style={styles.suggestionSubtext} numberOfLines={1}>
-                  {item.address?.municipality}, {item.address?.country}
-                </Text>
-              </View>
-            </TouchableOpacity>
+            <SuggestionItem item={item} onPress={handleSelectSuggestion} />
           )}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
@@ -404,34 +376,15 @@ const LocationPicker = ({
       ) : null}
       
       {/* Selected Location Display */}
-      {address ? (
-        <View style={styles.selectedLocationContainer}>
-          <MaterialIcons name="check-circle" size={16} color="#4CAF50" />
-          <Text style={styles.selectedLocationText} numberOfLines={2}>
-            {address}
-          </Text>
-        </View>
-      ) : null}
+      <SelectedLocation address={address} />
       
       {/* Confirm Button */}
       {showConfirmButton && (
-        <TouchableOpacity
-          style={[
-            styles.confirmButton,
-            (!city) && styles.disabledButton
-          ]}
+        <ConfirmButton
           onPress={handleConfirmAddress}
-          disabled={!city || isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <>
-              <MaterialIcons name="pin-drop" size={18} color="#fff" />
-              <Text style={styles.confirmButtonText}>Confirm Location</Text>
-            </>
-          )}
-        </TouchableOpacity>
+          isLoading={isLoading}
+          disabled={!city}
+        />
       )}
     </View>
   );
@@ -474,34 +427,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ffcdd2',
   },
-  inputRow: {
-    marginBottom: 12,
-  },
-  fieldLabel: {
-    fontSize: 14,
-    color: '#555',
-    marginBottom: 4,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    backgroundColor: '#f9f9f9',
-    paddingHorizontal: 12,
-  },
-  inputIcon: {
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: '#333',
-  },
-  loadingIndicator: {
-    marginLeft: 8,
+  errorText: {
+    color: '#f44336',
+    fontSize: 13,
+    marginTop: 4,
   },
   suggestionsContainer: {
     backgroundColor: '#fff',
@@ -511,25 +440,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
     overflow: 'hidden',
-  },
-  suggestionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-  },
-  suggestionIcon: {
-    marginRight: 12,
-  },
-  suggestionTextContainer: {
-    flex: 1,
-  },
-  suggestionText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  suggestionSubtext: {
-    fontSize: 12,
-    color: '#999',
   },
   separator: {
     height: 1,
@@ -543,43 +453,6 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: '#999',
-  },
-  errorText: {
-    color: '#f44336',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  selectedLocationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f9f0',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
-  },
-  selectedLocationText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#333',
-    marginLeft: 8,
-  },
-  confirmButton: {
-    marginTop: 10,
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  confirmButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-    marginLeft: 8,
-  },
-  disabledButton: {
-    backgroundColor: '#bdbdbd',
   },
 });
 
