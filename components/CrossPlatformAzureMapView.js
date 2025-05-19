@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import { getAzureMapsKey } from '../services/azureMapsService';
@@ -127,7 +126,6 @@ const CrossPlatformAzureMapView = ({
           azureMapsKey={azureMapsKey}
           initialRegion={initialRegion}
           mapStyle={mapStyle}
-          products={products}
           onMapReady={onMapReady}
           onSelectProduct={onSelectProduct}
           onMapPress={onMapPress}

@@ -8,7 +8,6 @@ const WebMap = ({
   azureMapsKey, 
   initialRegion, 
   mapStyle, 
-  products,
   onMapReady,
   onSelectProduct,
   onMapPress,
@@ -55,25 +54,6 @@ const WebMap = ({
             setIsLoading(false);
             setMapReady(true);
             onMapReady?.();
-            if (products?.length) {
-              const iframe = document.getElementById('azureMapsIframe');
-              if (iframe?.contentWindow?.handleMessage) {
-                iframe.contentWindow.handleMessage(
-                  JSON.stringify({ type: 'UPDATE_PRODUCTS', products })
-                );
-              } else {
-                console.warn('Iframe not ready for product update');
-                // Try again after a short delay
-                setTimeout(() => {
-                  const iframe = document.getElementById('azureMapsIframe');
-                  if (iframe?.contentWindow?.handleMessage) {
-                    iframe.contentWindow.handleMessage(
-                      JSON.stringify({ type: 'UPDATE_PRODUCTS', products })
-                    );
-                  }
-                }, 500);
-              }
-            }
             break;
           case 'PIN_CLICKED':
             console.log('Pin clicked:', data.productId);
@@ -113,7 +93,6 @@ const WebMap = ({
       document.removeEventListener('pinclicked', pinClickedHandler);
     };
   }, [
-    products, 
     onMapReady, 
     onSelectProduct, 
     onMapPress, 
