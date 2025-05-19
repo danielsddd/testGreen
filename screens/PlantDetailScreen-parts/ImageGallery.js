@@ -1,25 +1,17 @@
-// screens/PlantDetailScreen-parts/ImageGallery.js
+// components/PlantDetailScreen-parts/ImageGallery.js
 import React, { useState } from 'react';
-import {
-  View,
-  Image,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Dimensions,
-  Text,
-} from 'react-native';
+import { View, Image, ScrollView, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
-const ImageGallery = ({ 
-  images, 
-  onToggleFavorite, 
-  onShareListing, 
-  isFavorite 
-}) => {
+const ImageGallery = ({ images, onFavoritePress, onSharePress, isFavorite }) => {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  
+  // Use placeholder if no images are provided
+  const imageUrls = images && images.length > 0 
+    ? images 
+    : ['https://via.placeholder.com/400?text=Plant'];
 
   return (
     <View style={styles.imageContainer}>
@@ -32,13 +24,14 @@ const ImageGallery = ({
           setActiveImageIndex(slideIndex);
         }}
       >
-        {images.map((image, index) => (
+        {imageUrls.map((image, index) => (
           <Image key={index} source={{ uri: image }} style={styles.image} resizeMode="contain" />
         ))}
       </ScrollView>
-      {images.length > 1 && (
+      
+      {imageUrls.length > 1 && (
         <View style={styles.pagination}>
-          {images.map((_, index) => (
+          {imageUrls.map((_, index) => (
             <View
               key={index}
               style={[styles.paginationDot, activeImageIndex === index && styles.paginationDotActive]}
@@ -46,14 +39,16 @@ const ImageGallery = ({
           ))}
         </View>
       )}
-      <TouchableOpacity style={styles.favoriteButton} onPress={onToggleFavorite}>
+      
+      <TouchableOpacity style={styles.favoriteButton} onPress={onFavoritePress}>
         <MaterialIcons 
           name={isFavorite ? "favorite" : "favorite-border"} 
           size={28} 
           color={isFavorite ? "#f44336" : "#fff"} 
         />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.shareButton} onPress={onShareListing}>
+      
+      <TouchableOpacity style={styles.shareButton} onPress={onSharePress}>
         <MaterialIcons name="share" size={24} color="#fff" />
       </TouchableOpacity>
     </View>
