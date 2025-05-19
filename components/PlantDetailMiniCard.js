@@ -1,3 +1,4 @@
+// components/PlantDetailMiniCard.js
 import React from 'react';
 import {
   View,
