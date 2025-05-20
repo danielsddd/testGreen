@@ -23,6 +23,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import SpeechToTextComponent from '../../marketplace/components/SpeechToTextComponent';
 
 const { width, height } = Dimensions.get('window');
+const [editMode, setEditMode] = useState(false);
+const [editingItemId, setEditingItemId] = useState(null);
 
 export default function AddInventoryScreen({ navigation, route }) {
   const { businessId, showInventory: initialShowInventory = false } = route.params || {};
@@ -485,34 +487,128 @@ export default function AddInventoryScreen({ navigation, route }) {
     setNetworkStatus('loading');
     
     try {
-      const inventoryItem = {
-        productType: 'plant',
-        plantData: {
-          id: selectedPlant.id,
-          common_name: selectedPlant.common_name,
-          scientific_name: selectedPlant.scientific_name,
-          origin: selectedPlant.origin,
-          water_days: selectedPlant.water_days,
-          light: selectedPlant.light,
-          humidity: selectedPlant.humidity,
-          temperature: selectedPlant.temperature,
-          pets: selectedPlant.pets,
-          difficulty: selectedPlant.difficulty,
-          repot: selectedPlant.repot,
-          feed: selectedPlant.feed,
-          common_problems: selectedPlant.common_problems,
-        },
-        quantity: parseInt(formData.quantity),
-        price: parseFloat(formData.price),
-        minThreshold: parseInt(formData.minThreshold) || 5,
-        discount: parseFloat(formData.discount) || 0,
-        notes: formData.notes,
-        status: 'active',
-      };
-      
-      console.log('Creating inventory item:', inventoryItem);
-      const result = await createInventoryItem(inventoryItem);
-      console.log('Item created successfully:', result);
+      if (editMode && editingItemId) {
+        // UPDATE existing item
+        const updateData = {
+          quantity: parseInt(formData.quantity),
+          price: parseFloat(formData.price),
+          minThreshold: parseInt(formData.minThreshold) || 5,
+          discount: parseFloat(formData.discount) || 0,
+          notes: formData.notes,
+          status: 'active',
+        };
+        
+        console.log('Updating inventory item:', editingItemId, updateData);
+        const result = await updateInventoryItem(editingItemId, updateData);
+        console.log('Item updated successfully:', result);
+        
+        // Show success message
+        Alert.alert(
+          '✅ Updated Successfully!',
+          `${selectedPlant?.common_name || 'Item'} has been updated!\n\nQuantity: ${formData.quantity}\nPrice: $${formData.price}`,
+          [
+            {
+              text: 'View Inventory',
+              style: 'default',
+              onPress: () => {
+                const resetForm = () => {
+                  setSelectedItems([]);
+                  setSelectedPlant(null);
+                  setSearchQuery('');
+                  setFormData({
+                    quantity: '',
+                    price: '',
+                    minThreshold: '5',
+                    discount: '0',
+                    notes: '',
+                  });
+                  setErrors({});
+                  setEditMode(false);
+                  setEditingItemId(null);
+                  setShowSearchHistory(false);
+                  
+                  // Reset animations
+                  Animated.parallel([
+                    Animated.timing(slideAnim, {
+                      toValue: 0,
+                      duration: 300,
+                      useNativeDriver: Platform.OS !== 'web',
+                    }),
+                    Animated.timing(headerHeightAnim, {
+                      toValue: 100,
+                      duration: 300,
+                      useNativeDriver: false,
+                    }),
+                  ]).start();
+                };
+                setShowInventory(true);
+              },
+            },
+            {
+              text: 'Continue Editing',
+              style: 'default',
+              onPress: () => {
+                // Stay in edit mode
+              },
+            },
+          ]
+        );
+      } else {
+        // CREATE new item (existing logic)
+        const inventoryItem = {
+          productType: 'plant',
+          plantData: {
+            id: selectedPlant.id,
+            common_name: selectedPlant.common_name,
+            scientific_name: selectedPlant.scientific_name,
+            origin: selectedPlant.origin,
+            water_days: selectedPlant.water_days,
+            light: selectedPlant.light,
+            humidity: selectedPlant.humidity,
+            temperature: selectedPlant.temperature,
+            pets: selectedPlant.pets,
+            difficulty: selectedPlant.difficulty,
+            repot: selectedPlant.repot,
+            feed: selectedPlant.feed,
+            common_problems: selectedPlant.common_problems,
+          },
+          quantity: parseInt(formData.quantity),
+          price: parseFloat(formData.price),
+          minThreshold: parseInt(formData.minThreshold) || 5,
+          discount: parseFloat(formData.discount) || 0,
+          notes: formData.notes,
+          status: 'active',
+        };
+        
+        console.log('Creating inventory item:', inventoryItem);
+        const result = await createInventoryItem(inventoryItem);
+        console.log('Item created successfully:', result);
+        
+        // Show success message for creation
+        Alert.alert(
+          '🌱 Success!',
+          `${selectedPlant?.common_name || 'Plant'} has been added to your inventory!\n\nQuantity: ${formData.quantity}\nPrice: $${formData.price}`,
+          [
+            {
+              text: 'Add Another Plant',
+              style: 'default',
+              onPress: () => {
+                resetForm();
+                setShowInventory(false);
+                searchInputRef.current?.focus();
+              },
+            },
+            {
+              text: 'View My Inventory',
+              style: 'default',
+              onPress: () => {
+                resetForm();
+                setShowInventory(true);
+              },
+            },
+          ]
+        );
+      }
       
       // Enhanced success animation
       setShowSuccessAnimation(true);
@@ -546,125 +642,23 @@ export default function AddInventoryScreen({ navigation, route }) {
       
       // Store last saved item for reference
       setLastSavedItem({
-        name: selectedPlant.common_name,
+        name: selectedPlant?.common_name || 'Item',
         quantity: formData.quantity,
         price: formData.price,
-      });
-      
-      // Reset form with smooth animation
-      const resetFormData = {
-        quantity: '',
-        price: '',
-        minThreshold: '5',
-        discount: '0',
-        notes: '',
-      };
-      
-      // Animate form reset
-      Animated.timing(fadeAnim, {
-        toValue: 0.5,
-        duration: 200,
-        useNativeDriver: Platform.OS !== 'web',
-      }).start(() => {
-        setSelectedPlant(null);
-        setSearchQuery('');
-        setFormData(resetFormData);
-        setErrors({});
-        
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: Platform.OS !== 'web',
-        }).start();
-        
-        // Reset header height
-        Animated.timing(headerHeightAnim, {
-          toValue: 100,
-          duration: 300,
-          useNativeDriver: false,
-        }).start();
+        action: editMode ? 'updated' : 'added'
       });
       
       // Auto-reload inventory
       await loadCurrentInventory();
       
-      // Show enhanced success alert
-      Alert.alert(
-        '🌱 Success!',
-        `${selectedPlant?.common_name || 'Plant'} has been added to your inventory!\n\nQuantity: ${formData.quantity}\nPrice: $${formData.price}`,
-        [
-          {
-            text: 'Add Another Plant',
-            style: 'default',
-            onPress: () => {
-              setShowInventory(false);
-              searchInputRef.current?.focus();
-            },
-          },
-          {
-            text: 'View My Inventory',
-            style: 'default',
-            onPress: () => {
-              setShowInventory(true);
-              Animated.timing(slideAnim, {
-                toValue: 1,
-                duration: 300,
-                useNativeDriver: Platform.OS !== 'web',
-              }).start();
-            },
-          },
-        ]
-      );
-      
       setNetworkStatus('online');
     } catch (error) {
       console.error('Save error:', error);
       setNetworkStatus('error');
-      Alert.alert('Error', `Failed to add plant to inventory: ${error.message}`);
+      Alert.alert('Error', `Failed to ${editMode ? 'update' : 'add'} item: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Handle search history selection
-  const handleSearchHistorySelect = (historyItem) => {
-    setSearchQuery(historyItem);
-    setShowSearchHistory(false);
-    searchInputRef.current?.focus();
-  };
-
-  // Clear search and reset state
-  const handleClearSearch = () => {
-    setSearchQuery('');
-    setSelectedPlant(null);
-    setSearchResults([]);
-    setActualSearchCount(0);
-    setShowInventory(false);
-    setShowSearchHistory(false);
-    setErrors({});
-    
-    // Reset form data as well
-    setFormData({
-      quantity: '',
-      price: '',
-      minThreshold: '5',
-      discount: '0',
-      notes: '',
-    });
-    
-    // Reset animations
-    Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-      Animated.timing(headerHeightAnim, {
-        toValue: 100,
-        duration: 300,
-        useNativeDriver: false,
-      }),
-    ]).start();
   };
 
   // FIXED: Navigate to Business Home with proper navigation
@@ -727,19 +721,51 @@ export default function AddInventoryScreen({ navigation, route }) {
   // FIXED: Handle inventory item edit
   const handleEditInventoryItem = (item) => {
     console.log('Editing inventory item:', item.id);
+    
+    // Set the item as selected for editing
+    setSelectedPlant({
+      id: item.id,
+      common_name: item.name || item.common_name || item.productName,
+      scientific_name: item.scientific_name || '',
+      productType: item.productType,
+      // Include all the plant data if it's a plant
+      ...(item.plantInfo || {})
+    });
+    
+    // Pre-fill the form with current values
+    setFormData({
+      quantity: item.quantity?.toString() || '',
+      price: item.price?.toString() || '',
+      minThreshold: item.minThreshold?.toString() || '5',
+      discount: item.discount?.toString() || '0',
+      notes: item.notes || '',
+    });
+    
+    // Set edit mode
+    setEditMode(true);
+    setEditingItemId(item.id);
+    
+    // Switch to form view
+    setShowInventory(false);
+    
+    // Animate to form
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
+    
+    // Animate header height
+    Animated.timing(headerHeightAnim, {
+      toValue: 85,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+    
     Alert.alert(
-      'Edit Item',
-      `Edit ${item.name || item.common_name || 'this item'}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Edit', 
-          onPress: () => {
-            // For now, just show a coming soon message
-            Alert.alert('Coming Soon', 'Edit functionality will be available in the next update!');
-          }
-        }
-      ]
+      'Edit Mode',
+      `Now editing: ${item.name || item.common_name || item.productName}\n\nUpdate the fields below and save your changes.`,
+      [{ text: 'OK' }]
     );
   };
 
@@ -923,9 +949,14 @@ export default function AddInventoryScreen({ navigation, route }) {
             </TouchableOpacity>
             
             <View style={styles.headerCenter}>
-              <Text style={styles.headerTitle}>
-                {showInventory ? 'My Plant Inventory' : 'Add Plant to Inventory'}
-              </Text>
+            <Text style={styles.headerTitle}>
+  {showInventory 
+    ? 'My Plant Inventory' 
+    : editMode 
+      ? `Edit: ${selectedPlant?.common_name || 'Item'}` 
+      : 'Add Plant to Inventory'
+  }
+</Text>
               <View style={styles.networkStatusContainer}>
                 {networkStatus === 'loading' && (
                   <ActivityIndicator size="small" color="#216a94" />
@@ -1389,20 +1420,26 @@ export default function AddInventoryScreen({ navigation, route }) {
             ]}
           >
             <TouchableOpacity 
-              style={[styles.saveButton, isLoading && styles.saveButtonDisabled]} 
-              onPress={handleSave}
-              disabled={isLoading}
-              activeOpacity={0.8}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <MaterialCommunityIcons name="plus-circle" size={20} color="#fff" />
-                  <Text style={styles.saveButtonText}>Add to Inventory</Text>
-                </>
-              )}
-            </TouchableOpacity>
+  style={[styles.saveButton, isLoading && styles.saveButtonDisabled]} 
+  onPress={handleSave}
+  disabled={isLoading}
+  activeOpacity={0.8}
+>
+  {isLoading ? (
+    <ActivityIndicator size="small" color="#fff" />
+  ) : (
+    <>
+      <MaterialCommunityIcons 
+        name={editMode ? "content-save" : "plus-circle"} 
+        size={20} 
+        color="#fff" 
+      />
+      <Text style={styles.saveButtonText}>
+        {editMode ? 'Update Item' : 'Add to Inventory'}
+      </Text>
+    </>
+  )}
+</TouchableOpacity>
           </Animated.View>
         )}
 
