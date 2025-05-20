@@ -1,13 +1,14 @@
+// components/MapSearchBox.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   TouchableOpacity,
   Animated,
   Platform,
   ActivityIndicator,
-  TextInput,
   FlatList,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -177,24 +178,6 @@ const MapSearchBox = ({ onLocationSelect, style, azureMapsKey }) => {
     }
   };
 
-  // Render suggestion item
-  const renderSuggestionItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.suggestionItem}
-      onPress={() => handleSelectSuggestion(item)}
-    >
-      <MaterialIcons name="place" size={20} color="#4CAF50" style={styles.suggestionIcon} />
-      <View style={styles.suggestionTextContainer}>
-        <Text style={styles.suggestionText} numberOfLines={1}>
-          {item.address?.freeformAddress || 'Address'}
-        </Text>
-        <Text style={styles.suggestionSubtext} numberOfLines={1}>
-          {item.address?.municipality}, {item.address?.country}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
-
   return (
     <Animated.View
       style={[
@@ -242,7 +225,22 @@ const MapSearchBox = ({ onLocationSelect, style, azureMapsKey }) => {
               data={suggestions}
               keyExtractor={(item, index) => `suggestion-${index}-${item.id || ''}`}
               style={styles.suggestionsList}
-              renderItem={renderSuggestionItem}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.suggestionItem} 
+                  onPress={() => handleSelectSuggestion(item)}
+                >
+                  <MaterialIcons name="place" size={20} color="#4CAF50" style={styles.suggestionIcon} />
+                  <View style={styles.suggestionTextContainer}>
+                    <Text style={styles.suggestionText} numberOfLines={1}>
+                      {item.address?.freeformAddress || 'Address'}
+                    </Text>
+                    <Text style={styles.suggestionSubtext} numberOfLines={1}>
+                      {item.address?.municipality}, {item.address?.country}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
             />
           ) : !isLoading && query.length >= 3 ? (
@@ -290,7 +288,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     right: 10,
-    backgroundColor: 'white',
+    backgroundColor: '#fff',
     borderRadius: 8,
     elevation: 4,
     shadowColor: '#000',

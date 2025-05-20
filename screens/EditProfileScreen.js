@@ -1,35 +1,27 @@
-// screens/EditProfileScreen.js (fixed imports)
+// screens/EditProfileScreen.js (enhanced version)
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
+  TouchableOpacity,
+  Image,
   ScrollView,
+  ActivityIndicator,
   Alert,
   Platform,
   KeyboardAvoidingView,
   SafeAreaView,
-  ActivityIndicator, // Added missing import
-  TouchableOpacity, // Added missing import
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons'; // Added missing import
+import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Import components
+import { updateUserProfile, fetchUserProfile } from '../services/marketplaceApi';
 import MarketplaceHeader from '../components/MarketplaceHeader';
 import LocationPicker from '../components/LocationPicker';
-
-// Import extracted components
-import ProfileForm from './EditProfileScreen-parts/ProfileForm';
-import AvatarPicker from './EditProfileScreen-parts/AvatarPicker';
-import SaveButton from './EditProfileScreen-parts/SaveButton';
-
-// Import services
-import { updateUserProfile, fetchUserProfile } from '../services/marketplaceApi';
-
-// Rest of the component remains the same...
 
 const EditProfileScreen = () => {
   const navigation = useNavigation();
@@ -236,24 +228,6 @@ const EditProfileScreen = () => {
     }
   };
   
-  // Define form sections
-  const publicInfoFields = [
-    { name: 'name', label: 'Name', required: true },
-    { name: 'email', label: 'Email', disabled: true },
-    { name: 'bio', label: 'Bio', multiline: true, placeholder: 'Tell others about yourself...' },
-    { name: 'languages', label: 'Languages', placeholder: 'Hebrew, English, Arabic, etc.' },
-    // Social media fields moved to public section
-    { name: 'socialMedia.instagram', label: 'Instagram', placeholder: 'Your Instagram username' },
-    { name: 'socialMedia.facebook', label: 'Facebook', placeholder: 'Your Facebook profile' }
-  ];
-  
-  const privateInfoFields = [
-    { name: 'phone', label: 'Phone Number', keyboardType: 'phone-pad', placeholder: 'Your phone number' },
-    { name: 'fullAddress', label: 'Full Address', multiline: true, placeholder: 'Your complete address' },
-    { name: 'birthDate', label: 'Birth Date', placeholder: 'YYYY-MM-DD' }
-  ];
-  
-  // Loading state
   if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -262,7 +236,7 @@ const EditProfileScreen = () => {
           showBackButton={true}
           onBackPress={() => navigation.goBack()}
         />
-        <View style={styles.centerContainer}>
+        <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
@@ -270,7 +244,6 @@ const EditProfileScreen = () => {
     );
   }
   
-  // Error state
   if (error) {
     return (
       <SafeAreaView style={styles.container}>
@@ -279,7 +252,7 @@ const EditProfileScreen = () => {
           showBackButton={true}
           onBackPress={() => navigation.goBack()}
         />
-        <View style={styles.centerContainer}>
+        <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={loadUserProfile}>
@@ -302,40 +275,124 @@ const EditProfileScreen = () => {
         style={styles.keyboardAvoidContainer}
       >
         <ScrollView style={styles.scrollView}>
-          <AvatarPicker 
-            imageUrl={profile.avatar}
-            onPickImage={pickAvatar}
-            userName={profile.name}
-          />
-          
-          <ProfileForm 
-            title="Public Information"
-            subtitle="This information will be visible to other users"
-            fields={publicInfoFields}
-            values={profile}
-            onChangeValue={handleChange}
-          />
+          <View style={styles.avatarSection}>
+            <Image
+              source={{
+                uri: profile.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.name || 'U')}&background=4CAF50&color=fff&size=256`
+              }}
+              style={styles.avatar}
+            />
+            <TouchableOpacity style={styles.changeAvatarButton} onPress={pickAvatar}>
+              <MaterialIcons name="photo-camera" size={18} color="#fff" />
+              <Text style={styles.changeAvatarText}>Change Photo</Text>
+            </TouchableOpacity>
+          </View>
           
           <View style={styles.formSection}>
-            <Text style={styles.sectionTitle}>Location</Text>
+            <Text style={styles.sectionTitle}>Public Information</Text>
+            <Text style={styles.sectionSubtitle}>This information will be visible to other users</Text>
+            
+            <Text style={styles.label}>Name <Text style={styles.requiredText}>*</Text></Text>
+            <TextInput
+              style={styles.input}
+              value={profile.name}
+              onChangeText={(text) => handleChange('name', text)}
+              placeholder="Your name"
+            />
+            
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={[styles.input, styles.disabledInput]}
+              value={profile.email}
+              editable={false}
+            />
+            
+            <Text style={styles.label}>Bio</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={profile.bio}
+              onChangeText={(text) => handleChange('bio', text)}
+              placeholder="Tell others about yourself..."
+              multiline
+            />
+            
+            <Text style={styles.label}>Languages</Text>
+            <TextInput
+              style={styles.input}
+              value={profile.languages}
+              onChangeText={(text) => handleChange('languages', text)}
+              placeholder="Hebrew, English, Arabic, etc."
+            />
+            
+            <Text style={styles.label}>Location</Text>
             <LocationPicker
               value={profile.location}
               onChange={handleLocationChange}
             />
           </View>
           
-          <ProfileForm 
-            title="Private Information"
-            subtitle="This information is private and not shown to other users"
-            fields={privateInfoFields}
-            values={profile}
-            onChangeValue={handleChange}
-          />
+          <View style={styles.formSection}>
+            <Text style={styles.sectionTitle}>Private Information</Text>
+            <Text style={styles.sectionSubtitle}>This information is private and not shown to other users</Text>
+            
+            <Text style={styles.label}>Phone Number</Text>
+            <TextInput
+              style={styles.input}
+              value={profile.phone}
+              onChangeText={(text) => handleChange('phone', text)}
+              placeholder="Your phone number"
+              keyboardType="phone-pad"
+            />
+            
+            <Text style={styles.label}>Full Address</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={profile.fullAddress}
+              onChangeText={(text) => handleChange('fullAddress', text)}
+              placeholder="Your complete address"
+              multiline
+            />
+            
+            <Text style={styles.label}>Birth Date</Text>
+            <TextInput
+              style={styles.input}
+              value={profile.birthDate}
+              onChangeText={(text) => handleChange('birthDate', text)}
+              placeholder="YYYY-MM-DD"
+            />
+          </View>
           
-          <SaveButton 
-            onSave={handleSave}
-            isSaving={isSaving}
-          />
+          <View style={styles.formSection}>
+            <Text style={styles.sectionTitle}>Social Media</Text>
+            
+            <Text style={styles.label}>Instagram</Text>
+            <TextInput
+              style={styles.input}
+              value={profile.socialMedia?.instagram || ''}
+              onChangeText={(text) => handleChange('socialMedia.instagram', text)}
+              placeholder="Your Instagram username"
+            />
+            
+            <Text style={styles.label}>Facebook</Text>
+            <TextInput
+              style={styles.input}
+              value={profile.socialMedia?.facebook || ''}
+              onChangeText={(text) => handleChange('socialMedia.facebook', text)}
+              placeholder="Your Facebook profile"
+            />
+          </View>
+          
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.disabledButton]}
+            onPress={handleSave}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.saveButtonText}>Save Changes</Text>
+            )}
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -353,6 +410,64 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#4CAF50',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#f44336',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  avatarSection: {
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#eee',
+  },
+  changeAvatarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginTop: 10,
+  },
+  changeAvatarText: {
+    color: '#fff',
+    marginLeft: 8,
+    fontWeight: '600',
+  },
   formSection: {
     padding: 16,
     borderTopWidth: 8,
@@ -362,34 +477,56 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
+    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#666',
     marginBottom: 16,
   },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  label: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 8,
+  },
+  requiredText: {
+    color: '#f44336',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#333',
+    backgroundColor: '#f9f9f9',
+    marginBottom: 16,
+  },
+  disabledInput: {
+    backgroundColor: '#eee',
+    color: '#999',
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  saveButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 16,
+    borderRadius: 8,
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 40,
     alignItems: 'center',
   },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  errorText: {
-    color: '#f44336',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 10,
-  },
-  retryButton: {
-    marginTop: 16,
-    backgroundColor: '#4CAF50',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-  },
-  retryButtonText: {
+  saveButtonText: {
     color: '#fff',
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
 });
 

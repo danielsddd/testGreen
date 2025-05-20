@@ -2,28 +2,23 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
-  FlatList,
-  Animated,
-  Platform,
+  TouchableOpacity,
   ActivityIndicator,
+  FlatList,
+  Platform,
+  Animated,
+  Alert,
 } from 'react-native';
-import { getAzureMapsKey, geocodeAddress } from '../services/azureMapsService';
-import AddressInput from './LocationPicker-parts/AddressInput';
-import SuggestionItem from './LocationPicker-parts/SuggestionItem';
-import SelectedLocation from './LocationPicker-parts/SelectedLocation';
-import ConfirmButton from './LocationPicker-parts/ConfirmButton';
+import { MaterialIcons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
+import { getAzureMapsKey, geocodeAddress, reverseGeocode } from '../services/azureMapsService';
+import CrossPlatformAzureMapView from './CrossPlatformAzureMapView';
 
 /**
  * Enhanced LocationPicker component with Azure Maps integration
- * Provides address suggestions as you type
- * 
- * @param {Object} props Component props
- * @param {Object} props.value Current location value
- * @param {Function} props.onChange Called when location changes
- * @param {Object} props.style Additional container styles
- * @param {boolean} props.required Whether location is required
- * @param {boolean} props.showConfirmButton Whether to show confirm button
+ * Shows selected location on map + Current Location button
  */
 const LocationPicker = ({
   value,
@@ -32,7 +27,7 @@ const LocationPicker = ({
   required = false,
   showConfirmButton = true,
 }) => {
-  // State for address input and suggestions
+  // Existing state
   const [address, setAddress] = useState(value?.formattedAddress || '');
   const [city, setCity] = useState(value?.city || '');
   const [street, setStreet] = useState(value?.street || '');
@@ -43,6 +38,11 @@ const LocationPicker = ({
   const [azureMapsKey, setAzureMapsKey] = useState(null);
   const [isKeyLoading, setIsKeyLoading] = useState(true);
   const [isSuggestionsVisible, setIsSuggestionsVisible] = useState(false);
+  
+  // NEW STATE for location features
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [confirmedLocation, setConfirmedLocation] = useState(null); // Store confirmed location
   
   // Animation values for suggestions panel
   const suggestionsHeight = useRef(new Animated.Value(0)).current;
@@ -73,6 +73,12 @@ const LocationPicker = ({
       setStreet(value.street || '');
       setHouseNumber(value.houseNumber || '');
       setAddress(value.formattedAddress || '');
+      
+      // Show map if we have coordinates and set confirmed location
+      if (value.latitude && value.longitude) {
+        setShowMap(true);
+        setConfirmedLocation(value);
+      }
     }
   }, [value]);
   
@@ -110,8 +116,60 @@ const LocationPicker = ({
       });
     }
   }, [isSuggestionsVisible, suggestions.length, suggestionsHeight, suggestionsOpacity]);
+
+  // Get current location using GPS
+  const getCurrentLocation = async () => {
+    setIsGettingLocation(true);
+    try {
+      // Request permissions
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Location permission is needed to use this feature.');
+        setIsGettingLocation(false);
+        return;
+      }
+
+      // Get current position
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      const { latitude, longitude } = location.coords;
+
+      // Reverse geocode to get address
+      const addressData = await reverseGeocode(latitude, longitude);
+      
+      const locationData = {
+        latitude,
+        longitude,
+        formattedAddress: addressData.formattedAddress,
+        city: addressData.city || 'Current Location',
+        street: addressData.street || '',
+        houseNumber: addressData.houseNumber || '',
+        postalCode: addressData.postalCode || '',
+        country: addressData.country || 'Israel',
+      };
+
+      // Update all fields
+      setCity(locationData.city);
+      setStreet(locationData.street);
+      setHouseNumber(locationData.houseNumber);
+      setAddress(locationData.formattedAddress);
+      setShowMap(true);
+      setConfirmedLocation(locationData); // Set confirmed location
+      
+      // Call onChange with location data
+      onChange && onChange(locationData);
+      
+    } catch (error) {
+      console.error('Error getting current location:', error);
+      Alert.alert('Error', 'Could not get your current location. Please try again.');
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
   
-  // Fetch address suggestions from Azure Maps
+  // Existing functions...
   const fetchSuggestions = async (text) => {
     if (!text || text.length < 3 || !azureMapsKey) {
       setSuggestions([]);
@@ -123,10 +181,8 @@ const LocationPicker = ({
       setIsLoading(true);
       setError('');
       
-      // Construct search query with Israel country filter
       const query = `${text}, Israel`;
       
-      // Direct call to Azure Maps Search API
       const response = await fetch(
         `https://atlas.microsoft.com/search/address/json?` +
         `api-version=1.0&subscription-key=${azureMapsKey}` +
@@ -140,7 +196,6 @@ const LocationPicker = ({
       
       const data = await response.json();
       
-      // Filter for Israel addresses only
       const validResults = data.results?.filter(
         r => r.address?.country === 'Israel' || 
              r.address?.countryCode === 'IL' ||
@@ -159,25 +214,19 @@ const LocationPicker = ({
     }
   };
   
-  // Handle city input change with debounced suggestions
   const handleCityChange = (text) => {
     setCity(text);
-    
-    // Clear error when user starts typing
     if (error) setError('');
     
-    // Debounce suggestions
     clearTimeout(handleCityChange.timer);
     handleCityChange.timer = setTimeout(() => {
       fetchSuggestions(text);
     }, 300);
   };
   
-  // Handle street input change
   const handleStreetChange = (text) => {
     setStreet(text);
     
-    // If we already have a city, try to get suggestions for street
     if (city) {
       clearTimeout(handleStreetChange.timer);
       handleStreetChange.timer = setTimeout(() => {
@@ -186,33 +235,26 @@ const LocationPicker = ({
     }
   };
   
-  // Handle house number input
   const handleHouseNumberChange = (text) => {
-    // Only allow numbers
     if (/^\d*$/.test(text) || text === '') {
       setHouseNumber(text);
     }
   };
   
-  // Handle suggestion selection
   const handleSelectSuggestion = async (item) => {
     const addr = item.address || {};
     
-    // Extract address components
     const selectedCity = addr.municipality || addr.localName || '';
     const selectedStreet = addr.streetName || '';
     const selectedHouseNumber = addr.streetNumber || '';
     
-    // Update state with selected address
     setCity(selectedCity);
     setStreet(selectedStreet);
     setHouseNumber(selectedHouseNumber);
     setAddress(addr.freeformAddress || `${selectedStreet} ${selectedHouseNumber}, ${selectedCity}, Israel`);
     
-    // Close suggestions
     setIsSuggestionsVisible(false);
     
-    // Create location object
     const locationData = {
       formattedAddress: addr.freeformAddress || `${selectedStreet} ${selectedHouseNumber}, ${selectedCity}, Israel`,
       city: selectedCity,
@@ -223,11 +265,15 @@ const LocationPicker = ({
       country: 'Israel',
     };
     
-    // Call onChange with the new location data
+    // Show map when location is selected and set confirmed location
+    if (locationData.latitude && locationData.longitude) {
+      setShowMap(true);
+      setConfirmedLocation(locationData);
+    }
+    
     onChange(locationData);
   };
   
-  // Confirm the manually entered address 
   const handleConfirmAddress = async () => {
     if (!city) {
       setError('City is required');
@@ -238,12 +284,10 @@ const LocationPicker = ({
       setIsLoading(true);
       setError('');
       
-      // Build address string
       const addressString = street 
         ? `${street} ${houseNumber}, ${city}, Israel` 
         : `${city}, Israel`;
         
-      // Geocode the address
       const result = await geocodeAddress(addressString);
       
       if (result && result.latitude && result.longitude) {
@@ -258,6 +302,8 @@ const LocationPicker = ({
         };
         
         setAddress(locationData.formattedAddress);
+        setShowMap(true);
+        setConfirmedLocation(locationData); // Set confirmed location
         onChange(locationData);
       } else {
         setError('Location could not be found');
@@ -269,7 +315,7 @@ const LocationPicker = ({
       setIsLoading(false);
     }
   };
-  
+
   // Render loading indicator while Azure Maps key is loading
   if (isKeyLoading) {
     return (
@@ -306,45 +352,77 @@ const LocationPicker = ({
         Location {required && <Text style={styles.requiredAsterisk}>*</Text>}
       </Text>
       
+      {/* Current Location Button */}
+      <TouchableOpacity
+        style={styles.currentLocationButton}
+        onPress={getCurrentLocation}
+        disabled={isGettingLocation}
+      >
+        {isGettingLocation ? (
+          <ActivityIndicator size="small" color="#4CAF50" />
+        ) : (
+          <MaterialIcons name="my-location" size={20} color="#4CAF50" />
+        )}
+        <Text style={styles.currentLocationButtonText}>
+          {isGettingLocation ? 'Getting Location...' : 'Use Current Location'}
+        </Text>
+      </TouchableOpacity>
+      
       {/* City Input */}
-      <AddressInput
-        label="City"
-        value={city}
-        onChangeText={handleCityChange}
-        placeholder="Enter city in Israel"
-        icon="location-city"
-        isLoading={isLoading}
-        required={true}
-        onFocus={() => {
-          if (city.length >= 3) {
-            fetchSuggestions(city);
-          }
-        }}
-      />
+      <View style={styles.inputRow}>
+        <Text style={styles.fieldLabel}>City <Text style={styles.requiredAsterisk}>*</Text></Text>
+        <View style={styles.inputContainer}>
+          <MaterialIcons name="location-city" size={20} color="#4CAF50" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            value={city}
+            onChangeText={handleCityChange}
+            placeholder="Enter city in Israel"
+            onFocus={() => {
+              if (city.length >= 3) {
+                fetchSuggestions(city);
+              }
+            }}
+          />
+          {isLoading && (
+            <ActivityIndicator size="small" color="#4CAF50" style={styles.loadingIndicator} />
+          )}
+        </View>
+      </View>
       
       {/* Street Input */}
-      <AddressInput
-        label="Street"
-        value={street}
-        onChangeText={handleStreetChange}
-        placeholder="Enter street name"
-        icon="edit-road"
-        onFocus={() => {
-          if (street.length >= 3 && city) {
-            fetchSuggestions(`${street}, ${city}`);
-          }
-        }}
-      />
+      <View style={styles.inputRow}>
+        <Text style={styles.fieldLabel}>Street</Text>
+        <View style={styles.inputContainer}>
+          <MaterialIcons name="edit-road" size={20} color="#4CAF50" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            value={street}
+            onChangeText={handleStreetChange}
+            placeholder="Enter street name"
+            onFocus={() => {
+              if (street.length >= 3 && city) {
+                fetchSuggestions(`${street}, ${city}`);
+              }
+            }}
+          />
+        </View>
+      </View>
       
       {/* House Number Input */}
-      <AddressInput
-        label="House Number (Optional)"
-        value={houseNumber}
-        onChangeText={handleHouseNumberChange}
-        placeholder="Enter house number"
-        icon="home"
-        keyboardType="numeric"
-      />
+      <View style={styles.inputRow}>
+        <Text style={styles.fieldLabel}>House Number (Optional)</Text>
+        <View style={styles.inputContainer}>
+          <MaterialIcons name="home" size={20} color="#4CAF50" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            value={houseNumber}
+            onChangeText={handleHouseNumberChange}
+            placeholder="Enter house number"
+            keyboardType="numeric"
+          />
+        </View>
+      </View>
       
       {/* Suggestions Panel */}
       <Animated.View style={[
@@ -359,7 +437,20 @@ const LocationPicker = ({
           data={suggestions}
           keyExtractor={(item, index) => `suggestion-${index}-${item.id || ''}`}
           renderItem={({ item }) => (
-            <SuggestionItem item={item} onPress={handleSelectSuggestion} />
+            <TouchableOpacity
+              style={styles.suggestionItem}
+              onPress={() => handleSelectSuggestion(item)}
+            >
+              <MaterialIcons name="place" size={20} color="#4CAF50" style={styles.suggestionIcon} />
+              <View style={styles.suggestionTextContainer}>
+                <Text style={styles.suggestionText} numberOfLines={1}>
+                  {item.address?.freeformAddress || 'Address'}
+                </Text>
+                <Text style={styles.suggestionSubtext} numberOfLines={1}>
+                  {item.address?.municipality}, {item.address?.country}
+                </Text>
+              </View>
+            </TouchableOpacity>
           )}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
@@ -376,15 +467,64 @@ const LocationPicker = ({
       ) : null}
       
       {/* Selected Location Display */}
-      <SelectedLocation address={address} />
+      {address ? (
+        <View style={styles.selectedLocationContainer}>
+          <MaterialIcons name="check-circle" size={16} color="#4CAF50" />
+          <Text style={styles.selectedLocationText} numberOfLines={2}>
+            {address}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Map Display - Shows selected location with PIN */}
+      {showMap && confirmedLocation?.latitude && confirmedLocation?.longitude && (
+  <View style={styles.mapSection}>
+    <View style={styles.mapHeader}>
+      <MaterialIcons name="map" size={20} color="#4CAF50" />
+      <Text style={styles.mapTitle}>Location Preview</Text>
+    </View>
+    <View style={styles.mapContainer}>
+      <CrossPlatformAzureMapView
+        products={[]} // No products
+        initialRegion={{
+          latitude: confirmedLocation.latitude,
+          longitude: confirmedLocation.longitude,
+          zoom: 15,
+        }}
+        showControls={true}
+        azureMapsKey={azureMapsKey}
+        useCustomPin={true}
+        showMyLocation={true} // Show location pin
+        myLocation={{
+          latitude: confirmedLocation.latitude,
+          longitude: confirmedLocation.longitude,
+        }}
+        onSelectProduct={() => {}} // Empty function
+        onMapPress={() => {}} // Empty function
+      />
+    </View>
+  </View>
+)}
       
       {/* Confirm Button */}
       {showConfirmButton && (
-        <ConfirmButton
+        <TouchableOpacity
+          style={[
+            styles.confirmButton,
+            (!city) && styles.disabledButton
+          ]}
           onPress={handleConfirmAddress}
-          isLoading={isLoading}
-          disabled={!city}
-        />
+          disabled={!city || isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <MaterialIcons name="pin-drop" size={18} color="#fff" />
+              <Text style={styles.confirmButtonText}>Confirm Location</Text>
+            </>
+          )}
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -404,6 +544,52 @@ const styles = StyleSheet.create({
     color: '#f44336',
     fontWeight: 'bold',
   },
+  
+  // Current Location Button
+  currentLocationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f9f0',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    marginBottom: 16,
+    justifyContent: 'center',
+  },
+  currentLocationButtonText: {
+    marginLeft: 8,
+    fontSize: 16,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  
+  // Map Section
+  mapSection: {
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  mapHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  mapTitle: {
+    marginLeft: 8,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  mapContainer: {
+    height: 200,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  
+  // Existing styles...
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -427,10 +613,34 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ffcdd2',
   },
-  errorText: {
-    color: '#f44336',
-    fontSize: 13,
-    marginTop: 4,
+  inputRow: {
+    marginBottom: 12,
+  },
+  fieldLabel: {
+    fontSize: 14,
+    color: '#555',
+    marginBottom: 4,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    backgroundColor: '#f9f9f9',
+    paddingHorizontal: 12,
+  },
+  inputIcon: {
+    marginRight: 8,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#333',
+  },
+  loadingIndicator: {
+    marginLeft: 8,
   },
   suggestionsContainer: {
     backgroundColor: '#fff',
@@ -440,6 +650,25 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 8,
     overflow: 'hidden',
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+  suggestionIcon: {
+    marginRight: 12,
+  },
+  suggestionTextContainer: {
+    flex: 1,
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  suggestionSubtext: {
+    fontSize: 12,
+    color: '#999',
   },
   separator: {
     height: 1,
@@ -453,6 +682,43 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: '#999',
+  },
+  errorText: {
+    color: '#f44336',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  selectedLocationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f9f0',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  selectedLocationText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#333',
+    marginLeft: 8,
+  },
+  confirmButton: {
+    marginTop: 10,
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  confirmButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  disabledButton: {
+    backgroundColor: '#bdbdbd',
   },
 });
 

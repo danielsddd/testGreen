@@ -1,58 +1,66 @@
-// screens/ProfileScreen-parts/StatsRow.js
+// screens/ProfileScreen-parts/ProfileTabs.js
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 
-const StatsRow = ({ stats = {} }) => {
+const ProfileTabs = ({ activeTab, onTabPress }) => {
+  const tabs = [
+    { id: 'myPlants', label: 'My Plants', icon: 'eco' },
+    { id: 'favorites', label: 'Favorites', icon: 'favorite' },
+    { id: 'sold', label: 'Sold', icon: 'local-offer' },
+    { id: 'reviews', label: 'Reviews', icon: 'star' }
+  ];
+
   return (
-    <View style={styles.statsRow}>
-      <View style={styles.statBox}>
-        <Text style={styles.statValue}>{stats.plantsCount || 0}</Text>
-        <Text style={styles.statLabel}>Listings</Text>
-      </View>
-      <View style={styles.statBox}>
-        <Text style={styles.statValue}>{stats.salesCount || 0}</Text>
-        <Text style={styles.statLabel}>Sold</Text>
-      </View>
-      <View style={styles.statBox}>
-        <Text style={styles.statValue}>
-          {typeof stats.rating === 'number' ? stats.rating.toFixed(1) : '0.0'}
-        </Text>
-        <Text style={styles.statLabel}>Rating ({stats.reviewsCount || 0})</Text>
-      </View>
+    <View style={styles.tabsContainer}>
+      {tabs.map(tab => (
+        <TouchableOpacity
+          key={tab.id}
+          style={[styles.tabButton, activeTab === tab.id && styles.activeTabButton]}
+          onPress={() => onTabPress(tab.id)}
+        >
+          <MaterialIcons
+            name={tab.icon}
+            size={24}
+            color={activeTab === tab.id ? '#4CAF50' : '#666'}
+          />
+          <Text style={[styles.tabText, activeTab === tab.id && styles.activeTabText]}>
+            {tab.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  statsRow: {
+  tabsContainer: {
     flexDirection: 'row', 
-    justifyContent: 'space-around', 
-    marginHorizontal: 16, 
-    marginTop: 8, 
-    marginBottom: 12, 
     backgroundColor: '#fff', 
-    paddingVertical: 12, 
-    borderRadius: 12, 
-    shadowColor: '#000', 
-    shadowOpacity: 0.05, 
-    shadowOffset: { width: 0, height: 1 }, 
-    shadowRadius: 3, 
     elevation: 2,
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 1 }, 
+    shadowOpacity: 0.05, 
+    shadowRadius: 2,
   },
-  statBox: { 
+  tabButton: { 
+    flex: 1, 
     alignItems: 'center', 
-    flex: 1 
+    paddingVertical: 12 
   },
-  statValue: { 
-    fontSize: 18, 
-    fontWeight: 'bold', 
-    color: '#333' 
+  activeTabButton: { 
+    borderBottomWidth: 2, 
+    borderBottomColor: '#4CAF50' 
   },
-  statLabel: { 
-    fontSize: 12, 
-    color: '#888', 
-    marginTop: 2 
+  tabText: { 
+    fontSize: 14, 
+    color: '#666', 
+    marginTop: 4 
+  },
+  activeTabText: { 
+    color: '#4CAF50', 
+    fontWeight: 'bold' 
   },
 });
 
-export default StatsRow;
+export default ProfileTabs;
