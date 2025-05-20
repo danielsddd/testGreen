@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
+  Animated,
+  Easing,
 } from 'react-native';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,9 +17,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export default function BusinessInventorySetupScreen({ navigation }) {
   const [businessId, setBusinessId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isFinishing, setIsFinishing] = useState(false);
+  
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     loadBusinessId();
+    
+    // Start entrance animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 100,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+    ]).start();
   }, []);
 
   const loadBusinessId = async () => {
@@ -36,32 +59,46 @@ export default function BusinessInventorySetupScreen({ navigation }) {
     navigation.navigate('AddInventoryScreen', { businessId });
   };
 
-  const handleSkipForNow = () => {
-    Alert.alert(
-      'Skip Inventory Setup',
-      'You can add plants to your inventory later from your business dashboard.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Continue', 
-          onPress: () => navigation.navigate('BusinessDashboard')
-        },
-      ]
+  const handleFinishLater = () => {
+    setIsFinishing(true);
+    
+    // Start loading animation
+    const rotateAnimation = Animated.loop(
+      Animated.timing(rotateAnim, {
+        toValue: 1,
+        duration: 2000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
     );
+    
+    rotateAnimation.start();
+    
+    // Simulate setup completion process
+    setTimeout(() => {
+      // Fade out animation
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scaleAnim, {
+          toValue: 0.8,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        rotateAnimation.stop();
+        navigation.replace('BusinessHomeScreen');
+      });
+    }, 3000); // 3 seconds of "setup completion"
   };
 
-  const handleFinishSetup = () => {
-    Alert.alert(
-      'Setup Complete!',
-      'Your business account is ready. You can start managing your inventory and serving customers.',
-      [
-        { 
-          text: 'Go to Dashboard', 
-          onPress: () => navigation.navigate('BusinessDashboard')
-        },
-      ]
-    );
-  };
+  const rotateInterpolate = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   if (isLoading) {
     return (
@@ -74,9 +111,44 @@ export default function BusinessInventorySetupScreen({ navigation }) {
     );
   }
 
+  if (isFinishing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Animated.View style={[
+          styles.finishingContainer,
+          {
+            opacity: fadeAnim,
+            transform: [{ scale: scaleAnim }],
+          }
+        ]}>
+          <Animated.View style={{
+            transform: [{ rotate: rotateInterpolate }],
+          }}>
+            <MaterialCommunityIcons name="store-settings" size={80} color="#216a94" />
+          </Animated.View>
+          <Text style={styles.finishingTitle}>Setting up your business...</Text>
+          <Text style={styles.finishingSubtitle}>
+            We're preparing your dashboard and getting everything ready for you.
+          </Text>
+          <View style={styles.progressDots}>
+            <View style={[styles.dot, styles.activeDot]} />
+            <View style={[styles.dot, styles.activeDot]} />
+            <View style={[styles.dot, { backgroundColor: '#216a94' }]} />
+          </View>
+        </Animated.View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <Animated.ScrollView 
+        contentContainerStyle={styles.content}
+        style={{
+          opacity: fadeAnim,
+          transform: [{ scale: scaleAnim }],
+        }}
+      >
         <View style={styles.header}>
           <MaterialCommunityIcons name="store-outline" size={64} color="#216a94" />
           <Text style={styles.title}>Setup Your Inventory</Text>
@@ -99,14 +171,14 @@ export default function BusinessInventorySetupScreen({ navigation }) {
             <MaterialIcons name="arrow-forward" size={24} color="#216a94" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryOption} onPress={handleSkipForNow}>
+          <TouchableOpacity style={styles.secondaryOption} onPress={handleFinishLater}>
             <View style={styles.optionIcon}>
               <MaterialIcons name="schedule" size={28} color="#666" />
             </View>
             <View style={styles.optionContent}>
-              <Text style={styles.secondaryOptionTitle}>Skip for Now</Text>
+              <Text style={styles.secondaryOptionTitle}>Finish This Later</Text>
               <Text style={styles.optionDescription}>
-                You can add inventory items later from your dashboard
+                Skip for now and go to your business dashboard
               </Text>
             </View>
           </TouchableOpacity>
@@ -127,15 +199,14 @@ export default function BusinessInventorySetupScreen({ navigation }) {
             <Text style={styles.infoText}>Seeds and plant supplies</Text>
           </View>
         </View>
-      </ScrollView>
 
-      {/* Finish Setup Button */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.finishButton} onPress={handleFinishSetup}>
-          <MaterialIcons name="check-circle" size={20} color="#fff" />
-          <Text style={styles.finishButtonText}>Finish Setup</Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.encouragementSection}>
+          <MaterialCommunityIcons name="lightbulb-on" size={24} color="#FFC107" />
+          <Text style={styles.encouragementText}>
+            Don't worry! You can always add more products later from your dashboard.
+          </Text>
+        </View>
+      </Animated.ScrollView>
     </SafeAreaView>
   );
 }
@@ -154,6 +225,40 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     color: '#666',
+  },
+  finishingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  finishingTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#216a94',
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  finishingSubtitle: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 22,
+  },
+  progressDots: {
+    flexDirection: 'row',
+    marginTop: 30,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#e0e0e0',
+    marginHorizontal: 6,
+  },
+  activeDot: {
+    backgroundColor: '#4CAF50',
   },
   content: {
     flexGrow: 1,
@@ -190,6 +295,11 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#216a94',
     marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   secondaryOption: {
     flexDirection: 'row',
@@ -199,6 +309,11 @@ const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 1,
     borderColor: '#ddd',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   optionIcon: {
     width: 56,
@@ -251,23 +366,20 @@ const styles = StyleSheet.create({
     color: '#666',
     marginLeft: 12,
   },
-  footer: {
-    padding: 24,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  finishButton: {
-    backgroundColor: '#4CAF50',
+  encouragementSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 8,
+    backgroundColor: '#fff9e6',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FFC107',
   },
-  finishButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+  encouragementText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 12,
+    flex: 1,
+    lineHeight: 18,
   },
 });

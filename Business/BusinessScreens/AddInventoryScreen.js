@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import { searchPlants, createInventoryItem } from '../services/businessApi';
+import { searchPlants, createInventoryItem, getBusinessInventory } from '../services/businessApi';
 
 export default function AddInventoryScreen({ navigation, route }) {
   const { businessId } = route.params || {};
@@ -24,6 +24,8 @@ export default function AddInventoryScreen({ navigation, route }) {
   const [selectedPlant, setSelectedPlant] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentInventory, setCurrentInventory] = useState([]);
+  const [showInventory, setShowInventory] = useState(false);
   
   // Inventory form data
   const [formData, setFormData] = useState({
@@ -35,6 +37,11 @@ export default function AddInventoryScreen({ navigation, route }) {
   });
   
   const [errors, setErrors] = useState({});
+
+  // Load current inventory when component mounts
+  useEffect(() => {
+    loadCurrentInventory();
+  }, []);
 
   // Search plants with debounce
   useEffect(() => {
@@ -48,6 +55,15 @@ export default function AddInventoryScreen({ navigation, route }) {
 
     return () => clearTimeout(timeoutId);
   }, [searchQuery]);
+
+  const loadCurrentInventory = async () => {
+    try {
+      const inventory = await getBusinessInventory(businessId);
+      setCurrentInventory(inventory);
+    } catch (error) {
+      console.error('Error loading inventory:', error);
+    }
+  };
 
   const handleSearch = async (query) => {
     if (!query || query.length < 2) return;
@@ -68,6 +84,7 @@ export default function AddInventoryScreen({ navigation, route }) {
     setSelectedPlant(plant);
     setSearchResults([]);
     setSearchQuery(plant.common_name);
+    setShowInventory(false); // Hide inventory view when selecting a plant
   };
 
   const handleInputChange = (field, value) => {
@@ -160,6 +177,22 @@ export default function AddInventoryScreen({ navigation, route }) {
       
       await createInventoryItem(inventoryItem);
       
+      // Reset form and show success
+      setSelectedPlant(null);
+      setSearchQuery('');
+      setFormData({
+        quantity: '',
+        price: '',
+        minThreshold: '5',
+        discount: '0',
+        notes: '',
+      });
+      setErrors({});
+      
+      // Reload inventory and show it
+      await loadCurrentInventory();
+      setShowInventory(true);
+      
       Alert.alert(
         'Success',
         'Plant added to inventory successfully!',
@@ -167,20 +200,13 @@ export default function AddInventoryScreen({ navigation, route }) {
           {
             text: 'Add Another',
             onPress: () => {
-              setSelectedPlant(null);
-              setSearchQuery('');
-              setFormData({
-                quantity: '',
-                price: '',
-                minThreshold: '5',
-                discount: '0',
-                notes: '',
-              });
+              setShowInventory(false);
+              // Form is already reset above
             },
           },
           {
-            text: 'Done',
-            onPress: () => navigation.goBack(),
+            text: 'View Inventory',
+            onPress: () => setShowInventory(true),
           },
         ]
       );
@@ -190,6 +216,20 @@ export default function AddInventoryScreen({ navigation, route }) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setSelectedPlant(null);
+    setSearchResults([]);
+    setShowInventory(false);
+    setErrors({});
+  };
+
+  const handleShowCurrentInventory = () => {
+    setShowInventory(true);
+    setSelectedPlant(null);
+    setSearchQuery('');
   };
 
   const renderSearchResult = ({ item }) => (
@@ -208,6 +248,23 @@ export default function AddInventoryScreen({ navigation, route }) {
     </TouchableOpacity>
   );
 
+  const renderInventoryItem = ({ item }) => (
+    <View style={styles.inventoryItem}>
+      <View style={styles.inventoryItemContent}>
+        <Text style={styles.inventoryItemName}>{item.plantData?.common_name || item.name}</Text>
+        <Text style={styles.inventoryItemScientific}>
+          {item.plantData?.scientific_name || 'Scientific name'}
+        </Text>
+        <Text style={styles.inventoryItemDetails}>
+          Qty: {item.quantity} • ${item.price?.toFixed(2) || '0.00'}
+        </Text>
+      </View>
+      <View style={styles.inventoryItemActions}>
+        <MaterialIcons name="edit" size={20} color="#666" />
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
@@ -219,158 +276,209 @@ export default function AddInventoryScreen({ navigation, route }) {
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <MaterialIcons name="arrow-back" size={24} color="#216a94" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Add Plant to Inventory</Text>
-          <View style={{ width: 24 }} />
+          <Text style={styles.headerTitle}>
+            {showInventory ? 'Current Inventory' : 'Add Plant to Inventory'}
+          </Text>
+          <TouchableOpacity onPress={showInventory ? handleClearSearch : handleShowCurrentInventory}>
+            <MaterialIcons 
+              name={showInventory ? "add" : "inventory"}
+              size={24} 
+              color="#216a94" 
+            />
+          </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.content}>
-          {/* Plant Search */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Search Plants</Text>
-            <View style={styles.searchContainer}>
-              <MaterialIcons name="search" size={20} color="#666" style={styles.searchIcon} />
-              <TextInput
-                style={styles.searchInput}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search by common or scientific name"
-                autoCapitalize="none"
-              />
-              {isSearching && (
-                <ActivityIndicator size="small" color="#216a94" style={styles.searchLoader} />
-              )}
+        {showInventory ? (
+          // Current Inventory View
+          <View style={styles.inventoryContainer}>
+            <View style={styles.inventoryHeader}>
+              <Text style={styles.inventoryTitle}>
+                Your Inventory ({currentInventory.length} items)
+              </Text>
+              <TouchableOpacity 
+                style={styles.addNewButton}
+                onPress={handleClearSearch}
+              >
+                <MaterialIcons name="add" size={16} color="#fff" />
+                <Text style={styles.addNewButtonText}>Add New</Text>
+              </TouchableOpacity>
             </View>
-            {errors.plant && <Text style={styles.errorText}>{errors.plant}</Text>}
-          </View>
-
-          {/* Search Results */}
-          {searchResults.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Search Results ({searchResults.length})</Text>
-              <FlatList
-                data={searchResults}
-                renderItem={renderSearchResult}
-                keyExtractor={(item) => item.id}
-                style={styles.searchResults}
-                scrollEnabled={false}
-              />
-            </View>
-          )}
-
-          {/* Selected Plant */}
-          {selectedPlant && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Selected Plant</Text>
-              <View style={styles.selectedPlantCard}>
-                <View style={styles.selectedPlantHeader}>
-                  <MaterialCommunityIcons name="leaf" size={24} color="#4CAF50" />
-                  <View style={styles.selectedPlantInfo}>
-                    <Text style={styles.selectedPlantName}>{selectedPlant.common_name}</Text>
-                    <Text style={styles.selectedPlantScientific}>{selectedPlant.scientific_name}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setSelectedPlant(null)}>
-                    <MaterialIcons name="close" size={20} color="#999" />
+            
+            <FlatList
+              data={currentInventory}
+              renderItem={renderInventoryItem}
+              keyExtractor={(item) => item.id || item._id}
+              style={styles.inventoryList}
+              ListEmptyComponent={
+                <View style={styles.emptyInventory}>
+                  <MaterialCommunityIcons name="package-variant" size={48} color="#ccc" />
+                  <Text style={styles.emptyInventoryText}>No items in inventory yet</Text>
+                  <TouchableOpacity 
+                    style={styles.addFirstItemButton}
+                    onPress={handleClearSearch}
+                  >
+                    <Text style={styles.addFirstItemButtonText}>Add Your First Item</Text>
                   </TouchableOpacity>
                 </View>
-                
-                <View style={styles.plantDetails}>
-                  <View style={styles.plantDetailRow}>
-                    <Text style={styles.plantDetailLabel}>Origin:</Text>
-                    <Text style={styles.plantDetailValue}>{selectedPlant.origin}</Text>
+              }
+            />
+          </View>
+        ) : (
+          // Add Plant View
+          <ScrollView style={styles.content}>
+            {/* Plant Search */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Search Plants</Text>
+              <View style={styles.searchContainer}>
+                <MaterialIcons name="search" size={20} color="#666" style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="Search by common or scientific name"
+                  autoCapitalize="none"
+                />
+                {searchQuery ? (
+                  <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
+                    <MaterialIcons name="close" size={20} color="#999" />
+                  </TouchableOpacity>
+                ) : null}
+                {isSearching && (
+                  <ActivityIndicator size="small" color="#216a94" style={styles.searchLoader} />
+                )}
+              </View>
+              {errors.plant && <Text style={styles.errorText}>{errors.plant}</Text>}
+            </View>
+
+            {/* Search Results */}
+            {searchResults.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Search Results ({searchResults.length})</Text>
+                <FlatList
+                  data={searchResults}
+                  renderItem={renderSearchResult}
+                  keyExtractor={(item) => item.id}
+                  style={styles.searchResults}
+                  scrollEnabled={false}
+                />
+              </View>
+            )}
+
+            {/* Selected Plant */}
+            {selectedPlant && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Selected Plant</Text>
+                <View style={styles.selectedPlantCard}>
+                  <View style={styles.selectedPlantHeader}>
+                    <MaterialCommunityIcons name="leaf" size={24} color="#4CAF50" />
+                    <View style={styles.selectedPlantInfo}>
+                      <Text style={styles.selectedPlantName}>{selectedPlant.common_name}</Text>
+                      <Text style={styles.selectedPlantScientific}>{selectedPlant.scientific_name}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setSelectedPlant(null)}>
+                      <MaterialIcons name="close" size={20} color="#999" />
+                    </TouchableOpacity>
                   </View>
-                  <View style={styles.plantDetailRow}>
-                    <Text style={styles.plantDetailLabel}>Watering:</Text>
-                    <Text style={styles.plantDetailValue}>{formatWaterDays(selectedPlant.water_days)}</Text>
-                  </View>
-                  <View style={styles.plantDetailRow}>
-                    <Text style={styles.plantDetailLabel}>Light:</Text>
-                    <Text style={styles.plantDetailValue}>{selectedPlant.light}</Text>
-                  </View>
-                  <View style={styles.plantDetailRow}>
-                    <Text style={styles.plantDetailLabel}>Temperature:</Text>
-                    <Text style={styles.plantDetailValue}>{formatTemperature(selectedPlant.temperature)}</Text>
-                  </View>
-                  <View style={styles.plantDetailRow}>
-                    <Text style={styles.plantDetailLabel}>Difficulty:</Text>
-                    <Text style={styles.plantDetailValue}>{selectedPlant.difficulty}/10</Text>
+                  
+                  <View style={styles.plantDetails}>
+                    <View style={styles.plantDetailRow}>
+                      <Text style={styles.plantDetailLabel}>Origin:</Text>
+                      <Text style={styles.plantDetailValue}>{selectedPlant.origin}</Text>
+                    </View>
+                    <View style={styles.plantDetailRow}>
+                      <Text style={styles.plantDetailLabel}>Watering:</Text>
+                      <Text style={styles.plantDetailValue}>{formatWaterDays(selectedPlant.water_days)}</Text>
+                    </View>
+                    <View style={styles.plantDetailRow}>
+                      <Text style={styles.plantDetailLabel}>Light:</Text>
+                      <Text style={styles.plantDetailValue}>{selectedPlant.light}</Text>
+                    </View>
+                    <View style={styles.plantDetailRow}>
+                      <Text style={styles.plantDetailLabel}>Temperature:</Text>
+                      <Text style={styles.plantDetailValue}>{formatTemperature(selectedPlant.temperature)}</Text>
+                    </View>
+                    <View style={styles.plantDetailRow}>
+                      <Text style={styles.plantDetailLabel}>Difficulty:</Text>
+                      <Text style={styles.plantDetailValue}>{selectedPlant.difficulty}/10</Text>
+                    </View>
                   </View>
                 </View>
               </View>
-            </View>
-          )}
+            )}
 
-          {/* Inventory Details */}
-          {selectedPlant && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Inventory Details</Text>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Quantity in Stock <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={[styles.input, errors.quantity && styles.inputError]}
-                  value={formData.quantity}
-                  onChangeText={(text) => handleInputChange('quantity', text)}
-                  placeholder="Enter quantity"
-                  keyboardType="numeric"
-                />
-                {errors.quantity && <Text style={styles.errorText}>{errors.quantity}</Text>}
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Price per Plant ($) <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={[styles.input, errors.price && styles.inputError]}
-                  value={formData.price}
-                  onChangeText={(text) => handleInputChange('price', text)}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                />
-                {errors.price && <Text style={styles.errorText}>{errors.price}</Text>}
-              </View>
-
-              <View style={styles.row}>
-                <View style={styles.halfInput}>
-                  <Text style={styles.label}>Min. Threshold</Text>
+            {/* Inventory Details */}
+            {selectedPlant && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Inventory Details</Text>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Quantity in Stock <Text style={styles.required}>*</Text></Text>
                   <TextInput
-                    style={[styles.input, errors.minThreshold && styles.inputError]}
-                    value={formData.minThreshold}
-                    onChangeText={(text) => handleInputChange('minThreshold', text)}
-                    placeholder="5"
+                    style={[styles.input, errors.quantity && styles.inputError]}
+                    value={formData.quantity}
+                    onChangeText={(text) => handleInputChange('quantity', text)}
+                    placeholder="Enter quantity"
                     keyboardType="numeric"
                   />
-                  {errors.minThreshold && <Text style={styles.errorText}>{errors.minThreshold}</Text>}
+                  {errors.quantity && <Text style={styles.errorText}>{errors.quantity}</Text>}
                 </View>
 
-                <View style={styles.halfInput}>
-                  <Text style={styles.label}>Discount (%)</Text>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Price per Plant ($) <Text style={styles.required}>*</Text></Text>
                   <TextInput
-                    style={[styles.input, errors.discount && styles.inputError]}
-                    value={formData.discount}
-                    onChangeText={(text) => handleInputChange('discount', text)}
-                    placeholder="0"
+                    style={[styles.input, errors.price && styles.inputError]}
+                    value={formData.price}
+                    onChangeText={(text) => handleInputChange('price', text)}
+                    placeholder="0.00"
                     keyboardType="decimal-pad"
                   />
-                  {errors.discount && <Text style={styles.errorText}>{errors.discount}</Text>}
+                  {errors.price && <Text style={styles.errorText}>{errors.price}</Text>}
+                </View>
+
+                <View style={styles.row}>
+                  <View style={styles.halfInput}>
+                    <Text style={styles.label}>Min. Threshold</Text>
+                    <TextInput
+                      style={[styles.input, errors.minThreshold && styles.inputError]}
+                      value={formData.minThreshold}
+                      onChangeText={(text) => handleInputChange('minThreshold', text)}
+                      placeholder="5"
+                      keyboardType="numeric"
+                    />
+                    {errors.minThreshold && <Text style={styles.errorText}>{errors.minThreshold}</Text>}
+                  </View>
+
+                  <View style={styles.halfInput}>
+                    <Text style={styles.label}>Discount (%)</Text>
+                    <TextInput
+                      style={[styles.input, errors.discount && styles.inputError]}
+                      value={formData.discount}
+                      onChangeText={(text) => handleInputChange('discount', text)}
+                      placeholder="0"
+                      keyboardType="decimal-pad"
+                    />
+                    {errors.discount && <Text style={styles.errorText}>{errors.discount}</Text>}
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Notes (Optional)</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={formData.notes}
+                    onChangeText={(text) => handleInputChange('notes', text)}
+                    placeholder="Additional notes about this inventory item"
+                    multiline
+                    numberOfLines={3}
+                  />
                 </View>
               </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Notes (Optional)</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={formData.notes}
-                  onChangeText={(text) => handleInputChange('notes', text)}
-                  placeholder="Additional notes about this inventory item"
-                  multiline
-                  numberOfLines={3}
-                />
-              </View>
-            </View>
-          )}
-        </ScrollView>
+            )}
+          </ScrollView>
+        )}
 
         {/* Save Button */}
-        {selectedPlant && (
+        {selectedPlant && !showInventory && (
           <View style={styles.footer}>
             <TouchableOpacity 
               style={[styles.saveButton, isLoading && styles.saveButtonDisabled]} 
@@ -442,6 +550,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 12,
     fontSize: 16,
+  },
+  clearButton: {
+    padding: 12,
   },
   searchLoader: {
     marginRight: 12,
@@ -587,5 +698,99 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  // Inventory styles
+  inventoryContainer: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  inventoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  inventoryTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  addNewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  addNewButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  inventoryList: {
+    flex: 1,
+    padding: 16,
+  },
+  inventoryItem: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  inventoryItemContent: {
+    flex: 1,
+  },
+  inventoryItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  inventoryItemScientific: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    color: '#666',
+    marginTop: 2,
+  },
+  inventoryItemDetails: {
+    fontSize: 14,
+    color: '#4CAF50',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  inventoryItemActions: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingLeft: 12,
+  },
+  emptyInventory: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyInventoryText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  addFirstItemButton: {
+    backgroundColor: '#216a94',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  addFirstItemButtonText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });
