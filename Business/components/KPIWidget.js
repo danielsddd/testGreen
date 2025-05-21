@@ -11,27 +11,23 @@ import {
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 
 export default function KPIWidget({
-  title = '',
-  value = 0,
-  change = 0,
-  icon = 'chart-line',
+  title,
+  value,
+  change,
+  icon,
   color = '#4CAF50',
-  format = 'number', // 'number', 'currency', 'percentage'
-  subtitle = '',
-  onPress = null,
-  trend = 'up', // 'up', 'down', 'neutral'
+  format = 'number',
+  subtitle,
+  onPress,
+  trend,
   isLoading = false,
-  autoRefresh = true
+  autoRefresh = false
 }) {
   // Animation refs
-  const scaleAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const countAnim = useRef(new Animated.Value(0)).current;
-  
-  // Previous value for animation
-  const prevValue = useRef(value);
+  const rotateAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     // Entrance animation
@@ -41,46 +37,88 @@ export default function KPIWidget({
         duration: 600,
         useNativeDriver: Platform.OS !== 'web',
       }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 500,
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 100,
+        friction: 8,
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
   }, []);
 
   useEffect(() => {
-    // Value change animation
-    if (prevValue.current !== value) {
-      // Highlight animation when value changes
+    // Value change pulse animation
+    if (value !== undefined && value !== null) {
       Animated.sequence([
         Animated.timing(pulseAnim, {
           toValue: 1.1,
-          duration: 200,
+          duration: 150,
           useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 200,
+          duration: 150,
           useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start();
-      
-      // Animated counter
-      Animated.timing(countAnim, {
-        toValue: value,
-        duration: 1000,
-        useNativeDriver: false,
-      }).start();
-      
-      prevValue.current = value;
     }
   }, [value]);
 
+  useEffect(() => {
+    // Auto-refresh rotation animation
+    if (autoRefresh && isLoading) {
+      const rotateAnimation = Animated.loop(
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: Platform.OS !== 'web',
+        })
+      );
+      rotateAnimation.start();
+
+      return () => rotateAnimation.stop();
+    }
+  }, [autoRefresh, isLoading]);
+
+  // Format value based on type
+  const formatValue = (val) => {
+    if (val === undefined || val === null) return '0';
+    
+    switch (format) {
+      case 'currency':
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: 'USD',
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        }).format(val);
+      case 'percentage':
+        return `${parseFloat(val).toFixed(1)}%`;
+      case 'number':
+      default:
+        return new Intl.NumberFormat('en-US', {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        }).format(val);
+    }
+  };
+
+  // Get trend color
+  const getTrendColor = () => {
+    if (change === undefined || change === null) return '#666';
+    return change >= 0 ? '#4CAF50' : '#f44336';
+  };
+
+  // Get trend icon
+  const getTrendIcon = () => {
+    if (change === undefined || change === null) return 'trending-flat';
+    return change >= 0 ? 'trending-up' : 'trending-down';
+  };
+
+  // Handle press with animation
   const handlePress = () => {
     if (!onPress) return;
-    
-    // Press animation
+
     Animated.sequence([
       Animated.timing(scaleAnim, {
         toValue: 0.95,
@@ -93,46 +131,15 @@ export default function KPIWidget({
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
-    
+
     onPress();
   };
 
-  const formatValue = (val) => {
-    if (isLoading) return '...';
-    
-    switch (format) {
-      case 'currency':
-        return `$${Number(val).toLocaleString()}`;
-      case 'percentage':
-        return `${Number(val).toFixed(1)}%`;
-      default:
-        return Number(val).toLocaleString();
-    }
-  };
-
-  const getTrendIcon = () => {
-    switch (trend) {
-      case 'up':
-        return 'trending-up';
-      case 'down':
-        return 'trending-down';
-      default:
-        return 'trending-flat';
-    }
-  };
-
-  const getTrendColor = () => {
-    switch (trend) {
-      case 'up':
-        return '#4CAF50';
-      case 'down':
-        return '#F44336';
-      default:
-        return '#999';
-    }
-  };
-
-  const Component = onPress ? TouchableOpacity : View;
+  const Widget = onPress ? TouchableOpacity : View;
+  const rotateInterpolate = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   return (
     <Animated.View
@@ -140,88 +147,58 @@ export default function KPIWidget({
         styles.container,
         {
           opacity: fadeAnim,
-          transform: [
-            { scale: scaleAnim },
-            { translateY: slideAnim },
-          ],
-        }
+          transform: [{ scale: scaleAnim }],
+        },
       ]}
     >
-      <Component
-        style={styles.touchable}
+      <Widget
+        style={styles.widget}
         onPress={onPress ? handlePress : undefined}
-        activeOpacity={onPress ? 0.8 : 1}
+        activeOpacity={onPress ? 0.7 : 1}
       >
-        <View style={styles.content}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={[styles.iconContainer, { backgroundColor: `${color}20` }]}>
-              <MaterialCommunityIcons name={icon} size={24} color={color} />
-            </View>
-            
-            {autoRefresh && (
-              <View style={styles.refreshIndicator}>
-                <MaterialIcons name="sync" size={12} color="#4CAF50" />
-              </View>
+        <View style={styles.header}>
+          <View style={[styles.iconContainer, { backgroundColor: color }]}>
+            {isLoading && autoRefresh ? (
+              <Animated.View style={{ transform: [{ rotate: rotateInterpolate }] }}>
+                <MaterialIcons name="refresh" size={20} color="#fff" />
+              </Animated.View>
+            ) : (
+              <MaterialCommunityIcons name={icon} size={20} color="#fff" />
             )}
           </View>
           
-          {/* Value */}
-          <Animated.View
-            style={[
-              styles.valueContainer,
-              {
-                transform: [{ scale: pulseAnim }],
-              }
-            ]}
-          >
-            <Animated.Text 
-              style={[styles.value, { color }]}
-            >
-              {formatValue(value)}
-            </Animated.Text>
-            
-            {change !== 0 && (
-              <View style={styles.changeContainer}>
-                <MaterialIcons 
-                  name={getTrendIcon()} 
-                  size={16} 
-                  color={getTrendColor()} 
-                />
-                <Text style={[styles.change, { color: getTrendColor() }]}>
-                  {Math.abs(change)}%
-                </Text>
-              </View>
-            )}
-          </Animated.View>
-          
-          {/* Title */}
-          <Text style={styles.title}>{title}</Text>
-          
-          {/* Subtitle */}
-          {subtitle && (
-            <Text style={styles.subtitle}>{subtitle}</Text>
-          )}
-          
-          {/* Loading Indicator */}
-          {isLoading && (
-            <View style={styles.loadingOverlay}>
-              <Animated.View
-                style={{
-                  transform: [{
-                    rotate: fadeAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0deg', '360deg'],
-                    })
-                  }]
-                }}
-              >
-                <MaterialIcons name="refresh" size={20} color={color} />
-              </Animated.View>
+          {change !== undefined && change !== null && (
+            <View style={styles.trendContainer}>
+              <MaterialIcons 
+                name={getTrendIcon()} 
+                size={14} 
+                color={getTrendColor()} 
+              />
+              <Text style={[styles.trendText, { color: getTrendColor() }]}>
+                {Math.abs(change).toFixed(1)}%
+              </Text>
             </View>
           )}
         </View>
-      </Component>
+
+        <Text style={styles.title}>{title}</Text>
+        
+        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+          <Text style={[styles.value, { color: color }]}>
+            {formatValue(value)}
+          </Text>
+        </Animated.View>
+
+        {subtitle && (
+          <Text style={styles.subtitle}>{subtitle}</Text>
+        )}
+
+        {onPress && (
+          <View style={styles.pressHint}>
+            <MaterialIcons name="touch-app" size={12} color="#999" />
+          </View>
+        )}
+      </Widget>
     </Animated.View>
   );
 }
@@ -229,76 +206,62 @@ export default function KPIWidget({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    margin: 6,
+    minWidth: 120,
   },
-  touchable: {
+  widget: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 16,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    minHeight: 120,
-  },
-  content: {
-    flex: 1,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
     alignItems: 'center',
-  },
-  refreshIndicator: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#f0f9f3',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  valueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: 8,
   },
-  value: {
-    fontSize: 24,
-    fontWeight: '700',
-    flex: 1,
+  iconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  changeContainer: {
+  trendContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
   },
-  change: {
+  trendText: {
     fontSize: 12,
     fontWeight: '600',
+    marginLeft: 2,
   },
   title: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  value: {
+    fontSize: 20,
+    fontWeight: '700',
     marginBottom: 2,
   },
   subtitle: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: 10,
+    color: '#999',
+    fontStyle: 'italic',
   },
-  loadingOverlay: {
+  pressHint: {
     position: 'absolute',
-    top: 16,
-    right: 16,
+    top: 8,
+    right: 8,
+    opacity: 0.5,
   },
 });

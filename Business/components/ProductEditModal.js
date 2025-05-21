@@ -14,16 +14,14 @@ import {
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
-import { 
-  MaterialCommunityIcons, 
-  MaterialIcons 
-} from '@expo/vector-icons';
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { updateInventoryItem } from '../services/businessApi';
 
 export default function ProductEditModal({
-  visible = false,
-  product = null,
-  onClose = () => {},
-  onSave = () => {},
+  visible,
+  product,
+  onClose,
+  onSave,
   businessId
 }) {
   // Form state
@@ -38,13 +36,14 @@ export default function ProductEditModal({
   
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [originalData, setOriginalData] = useState({});
   
   // Animation refs
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(300)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
-  
+
   // Initialize form data when product changes
   useEffect(() => {
     if (product && visible) {
@@ -58,13 +57,14 @@ export default function ProductEditModal({
       };
       
       setFormData(initialData);
+      setOriginalData(initialData);
       setErrors({});
-      setHasChanges(false);
+      setHasUnsavedChanges(false);
       
       // Entrance animation
       Animated.parallel([
         Animated.timing(slideAnim, {
-          toValue: 1,
+          toValue: 0,
           duration: 300,
           useNativeDriver: Platform.OS !== 'web',
         }),
@@ -77,116 +77,124 @@ export default function ProductEditModal({
     }
   }, [product, visible]);
 
-  // Handle form field change
-  const handleFieldChange = (field, value) => {
-    const newFormData = {
-      ...formData,
+  // Check for unsaved changes
+  useEffect(() => {
+    const hasChanges = Object.keys(formData).some(
+      key => formData[key] !== originalData[key]
+    );
+    setHasUnsavedChanges(hasChanges);
+  }, [formData, originalData]);
+
+  // Exit animation
+  const handleClose = () => {
+    if (hasUnsavedChanges) {
+      Alert.alert(
+        'Unsaved Changes',
+        'You have unsaved changes. Are you sure you want to close?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Discard Changes', 
+            style: 'destructive',
+            onPress: performClose 
+          }
+        ]
+      );
+    } else {
+      performClose();
+    }
+  };
+
+  const performClose = () => {
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: 300,
+        duration: 250,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start(() => {
+      onClose();
+      setFormData({
+        quantity: '',
+        price: '',
+        minThreshold: '',
+        discount: '',
+        notes: '',
+        status: 'active'
+      });
+      setErrors({});
+    });
+  };
+
+  // Handle input change with validation
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({
+      ...prev,
       [field]: value
-    };
-    
-    setFormData(newFormData);
-    setHasChanges(true);
-    
-    // Clear field error
+    }));
+
+    // Clear error when field is changed
     if (errors[field]) {
       setErrors(prev => ({
         ...prev,
         [field]: null
       }));
     }
-    
+
     // Real-time validation
-    validateField(field, value);
+    if (field === 'quantity' && value) {
+      const qty = parseInt(value);
+      if (isNaN(qty) || qty < 0) {
+        setErrors(prev => ({ ...prev, quantity: 'Quantity must be a positive number' }));
+      }
+    }
+
+    if (field === 'price' && value) {
+      const price = parseFloat(value);
+      if (isNaN(price) || price <= 0) {
+        setErrors(prev => ({ ...prev, price: 'Price must be greater than 0' }));
+      }
+    }
+
+    if (field === 'discount' && value) {
+      const discount = parseFloat(value);
+      if (isNaN(discount) || discount < 0 || discount > 100) {
+        setErrors(prev => ({ ...prev, discount: 'Discount must be between 0-100%' }));
+      }
+    }
   };
 
-  // Validate individual field
-  const validateField = (field, value) => {
-    let error = null;
-    
-    switch (field) {
-      case 'quantity':
-        const qty = parseInt(value);
-        if (value && (isNaN(qty) || qty < 0)) {
-          error = 'Quantity must be a valid number';
-        } else if (qty > 10000) {
-          error = 'Quantity seems very high. Please verify.';
-        }
-        break;
-        
-      case 'price':
-        const price = parseFloat(value);
-        if (value && (isNaN(price) || price < 0)) {
-          error = 'Price must be a valid positive number';
-        } else if (price > 10000) {
-          error = 'Price seems very high. Please verify.';
-        }
-        break;
-        
-      case 'minThreshold':
-        const threshold = parseInt(value);
-        if (value && (isNaN(threshold) || threshold < 0)) {
-          error = 'Threshold must be a valid positive number';
-        }
-        break;
-        
-      case 'discount':
-        const discount = parseFloat(value);
-        if (value && (isNaN(discount) || discount < 0 || discount > 100)) {
-          error = 'Discount must be between 0 and 100';
-        }
-        break;
-    }
-    
-    if (error) {
-      setErrors(prev => ({
-        ...prev,
-        [field]: error
-      }));
-    }
-    
-    return !error;
-  };
-
-  // Validate entire form
+  // Validate form
   const validateForm = () => {
     const newErrors = {};
-    
-    // Required fields
-    if (!formData.quantity) {
-      newErrors.quantity = 'Quantity is required';
-    } else {
-      const qty = parseInt(formData.quantity);
-      if (isNaN(qty) || qty < 0) {
-        newErrors.quantity = 'Quantity must be a valid positive number';
-      }
+
+    const quantity = parseInt(formData.quantity);
+    if (!formData.quantity || isNaN(quantity) || quantity < 0) {
+      newErrors.quantity = 'Valid quantity is required';
     }
-    
-    if (!formData.price) {
-      newErrors.price = 'Price is required';
-    } else {
-      const price = parseFloat(formData.price);
-      if (isNaN(price) || price < 0) {
-        newErrors.price = 'Price must be a valid positive number';
-      }
+
+    const price = parseFloat(formData.price);
+    if (!formData.price || isNaN(price) || price <= 0) {
+      newErrors.price = 'Valid price is required';
     }
-    
-    // Optional fields validation
-    if (formData.minThreshold) {
-      const threshold = parseInt(formData.minThreshold);
-      if (isNaN(threshold) || threshold < 0) {
-        newErrors.minThreshold = 'Threshold must be a valid positive number';
-      }
+
+    const threshold = parseInt(formData.minThreshold);
+    if (formData.minThreshold && (isNaN(threshold) || threshold < 0)) {
+      newErrors.minThreshold = 'Minimum threshold must be 0 or greater';
     }
-    
-    if (formData.discount) {
-      const discount = parseFloat(formData.discount);
-      if (isNaN(discount) || discount < 0 || discount > 100) {
-        newErrors.discount = 'Discount must be between 0 and 100';
-      }
+
+    const discount = parseFloat(formData.discount);
+    if (formData.discount && (isNaN(discount) || discount < 0 || discount > 100)) {
+      newErrors.discount = 'Discount must be between 0-100%';
     }
-    
+
     setErrors(newErrors);
-    
+
     // Shake animation on validation error
     if (Object.keys(newErrors).length > 0) {
       Animated.sequence([
@@ -207,123 +215,63 @@ export default function ProductEditModal({
         }),
       ]).start();
     }
-    
+
     return Object.keys(newErrors).length === 0;
   };
 
-  // Handle save
-  const handleSave = async () => {
-    if (!validateForm()) return;
-    
-    setIsLoading(true);
-    
-    try {
-      const updatedData = {
-        quantity: parseInt(formData.quantity),
-        price: parseFloat(formData.price),
-        minThreshold: parseInt(formData.minThreshold) || 5,
-        discount: parseFloat(formData.discount) || 0,
-        notes: formData.notes.trim(),
-        status: formData.status
-      };
-      
-      await onSave(updatedData);
-      
-      // Success animation and close
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start(() => {
-        setHasChanges(false);
-        onClose();
-      });
-      
-    } catch (error) {
-      console.error('Error saving product:', error);
-      Alert.alert('Error', `Failed to save changes: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Handle close with unsaved changes check
-  const handleClose = () => {
-    if (hasChanges) {
-      Alert.alert(
-        'Unsaved Changes',
-        'You have unsaved changes. Are you sure you want to close?',
-        [
-          {
-            text: 'Keep Editing',
-            style: 'cancel'
-          },
-          {
-            text: 'Discard Changes',
-            style: 'destructive',
-            onPress: () => {
-              setHasChanges(false);
-              Animated.parallel([
-                Animated.timing(slideAnim, {
-                  toValue: 0,
-                  duration: 200,
-                  useNativeDriver: Platform.OS !== 'web',
-                }),
-                Animated.timing(fadeAnim, {
-                  toValue: 0,
-                  duration: 200,
-                  useNativeDriver: Platform.OS !== 'web',
-                }),
-              ]).start(() => {
-                onClose();
-              });
-            }
-          }
-        ]
-      );
-    } else {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start(() => {
-        onClose();
-      });
-    }
-  };
-
-  // Calculate final price with discount
+  // Calculate final price
   const calculateFinalPrice = () => {
     const price = parseFloat(formData.price) || 0;
     const discount = parseFloat(formData.discount) || 0;
     return price - (price * discount / 100);
   };
 
-  // Get status color
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'active': return '#4CAF50';
-      case 'inactive': return '#FF9800';
-      case 'discontinued': return '#F44336';
-      default: return '#757575';
+  // Handle save
+  const handleSave = async () => {
+    if (!validateForm()) return;
+
+    setIsLoading(true);
+
+    try {
+      const updateData = {
+        quantity: parseInt(formData.quantity),
+        price: parseFloat(formData.price),
+        minThreshold: parseInt(formData.minThreshold) || 5,
+        discount: parseFloat(formData.discount) || 0,
+        notes: formData.notes,
+        status: formData.status
+      };
+
+      console.log('Updating product:', product.id, updateData);
+      await updateInventoryItem(product.id, updateData);
+
+      Alert.alert(
+        '✅ Success',
+        'Product updated successfully!',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              onSave && onSave({
+                ...product,
+                ...updateData,
+                finalPrice: calculateFinalPrice()
+              });
+              performClose();
+            }
+          }
+        ]
+      );
+
+    } catch (error) {
+      console.error('Error updating product:', error);
+      Alert.alert('Error', `Failed to update product: ${error.message}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  if (!visible || !product) return null;
+  if (!product) return null;
 
   return (
     <Modal
@@ -332,290 +280,243 @@ export default function ProductEditModal({
       transparent={true}
       onRequestClose={handleClose}
     >
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-        style={styles.overlay}
+      <Animated.View 
+        style={[
+          styles.overlay,
+          {
+            opacity: fadeAnim,
+          }
+        ]}
       >
-        <Animated.View 
-          style={[
-            styles.modalContainer,
-            {
-              opacity: fadeAnim,
-              transform: [
-                { 
-                  translateY: slideAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [300, 0],
-                  })
-                },
-                { translateX: shakeAnim }
-              ],
-            }
-          ]}
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardAvoid}
         >
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <View style={styles.productIcon}>
+          <Animated.View 
+            style={[
+              styles.modalContainer,
+              {
+                transform: [
+                  { translateY: slideAnim },
+                  { translateX: shakeAnim }
+                ],
+              }
+            ]}
+          >
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={styles.headerLeft}>
                 <MaterialCommunityIcons 
                   name={product.productType === 'plant' ? 'leaf' : 'cube-outline'} 
                   size={24} 
                   color="#4CAF50" 
                 />
-              </View>
-              <View>
-                <Text style={styles.headerTitle}>Edit Product</Text>
-                <Text style={styles.headerSubtitle} numberOfLines={1}>
-                  {product.name || product.common_name}
-                </Text>
-              </View>
-            </View>
-            
-            <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-              <MaterialIcons name="close" size={24} color="#666" />
-            </TouchableOpacity>
-          </View>
-          
-          {/* Content */}
-          <ScrollView 
-            style={styles.content} 
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Basic Information */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                <MaterialIcons name="inventory" size={16} color="#4CAF50" />
-                {' '}Stock & Pricing
-              </Text>
-              
-              <View style={styles.inputRow}>
-                <View style={[styles.inputGroup, styles.halfWidth]}>
-                  <Text style={styles.label}>
-                    Quantity <Text style={styles.required}>*</Text>
+                <View style={styles.headerInfo}>
+                  <Text style={styles.headerTitle}>Edit Product</Text>
+                  <Text style={styles.headerSubtitle} numberOfLines={1}>
+                    {product.name || product.common_name || product.productName}
                   </Text>
-                  <TextInput
-                    style={[styles.input, errors.quantity && styles.inputError]}
-                    value={formData.quantity}
-                    onChangeText={(text) => handleFieldChange('quantity', text)}
-                    placeholder="0"
-                    keyboardType="numeric"
-                    selectTextOnFocus={true}
-                  />
-                  {errors.quantity && (
-                    <Text style={styles.errorText}>
-                      <MaterialIcons name="error" size={12} color="#f44336" /> {errors.quantity}
-                    </Text>
-                  )}
                 </View>
-                
-                <View style={[styles.inputGroup, styles.halfWidth]}>
+              </View>
+              
+              <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                <MaterialIcons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Unsaved changes indicator */}
+            {hasUnsavedChanges && (
+              <View style={styles.unsavedIndicator}>
+                <MaterialIcons name="edit" size={16} color="#FF9800" />
+                <Text style={styles.unsavedText}>You have unsaved changes</Text>
+              </View>
+            )}
+
+            {/* Form Content */}
+            <ScrollView 
+              style={styles.content}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {/* Quantity */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  <MaterialCommunityIcons name="package-variant" size={16} color="#666" />
+                  <Text> Quantity in Stock </Text>
+                  <Text style={styles.required}>*</Text>
+                </Text>
+                <TextInput
+                  style={[styles.input, errors.quantity && styles.inputError]}
+                  value={formData.quantity}
+                  onChangeText={(text) => handleInputChange('quantity', text)}
+                  placeholder="Enter quantity"
+                  keyboardType="numeric"
+                  placeholderTextColor="#999"
+                />
+                {errors.quantity && (
+                  <Text style={styles.errorText}>
+                    <MaterialIcons name="error" size={14} color="#f44336" />
+                    <Text> {errors.quantity}</Text>
+                  </Text>
+                )}
+              </View>
+
+              {/* Price */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  <MaterialCommunityIcons name="currency-usd" size={16} color="#666" />
+                  <Text> Price per Item </Text>
+                  <Text style={styles.required}>*</Text>
+                </Text>
+                <TextInput
+                  style={[styles.input, errors.price && styles.inputError]}
+                  value={formData.price}
+                  onChangeText={(text) => handleInputChange('price', text)}
+                  placeholder="0.00"
+                  keyboardType="decimal-pad"
+                  placeholderTextColor="#999"
+                />
+                {errors.price && (
+                  <Text style={styles.errorText}>
+                    <MaterialIcons name="error" size={14} color="#f44336" />
+                    <Text> {errors.price}</Text>
+                  </Text>
+                )}
+              </View>
+
+              {/* Row: Min Threshold & Discount */}
+              <View style={styles.row}>
+                <View style={styles.halfInput}>
                   <Text style={styles.label}>
-                    Min. Threshold
+                    <MaterialCommunityIcons name="alert" size={16} color="#666" />
+                    <Text> Min. Threshold</Text>
                   </Text>
                   <TextInput
                     style={[styles.input, errors.minThreshold && styles.inputError]}
                     value={formData.minThreshold}
-                    onChangeText={(text) => handleFieldChange('minThreshold', text)}
+                    onChangeText={(text) => handleInputChange('minThreshold', text)}
                     placeholder="5"
                     keyboardType="numeric"
-                    selectTextOnFocus={true}
+                    placeholderTextColor="#999"
                   />
                   {errors.minThreshold && (
                     <Text style={styles.errorText}>
-                      <MaterialIcons name="error" size={12} color="#f44336" /> {errors.minThreshold}
+                      <MaterialIcons name="error" size={14} color="#f44336" />
+                      <Text> {errors.minThreshold}</Text>
                     </Text>
                   )}
                 </View>
-              </View>
-              
-              <View style={styles.inputRow}>
-                <View style={[styles.inputGroup, styles.halfWidth]}>
+
+                <View style={styles.halfInput}>
                   <Text style={styles.label}>
-                    Base Price <Text style={styles.required}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={[styles.input, errors.price && styles.inputError]}
-                    value={formData.price}
-                    onChangeText={(text) => handleFieldChange('price', text)}
-                    placeholder="0.00"
-                    keyboardType="decimal-pad"
-                    selectTextOnFocus={true}
-                  />
-                  {errors.price && (
-                    <Text style={styles.errorText}>
-                      <MaterialIcons name="error" size={12} color="#f44336" /> {errors.price}
-                    </Text>
-                  )}
-                </View>
-                
-                <View style={[styles.inputGroup, styles.halfWidth]}>
-                  <Text style={styles.label}>
-                    Discount (%)
+                    <MaterialCommunityIcons name="percent" size={16} color="#666" />
+                    <Text> Discount (%)</Text>
                   </Text>
                   <TextInput
                     style={[styles.input, errors.discount && styles.inputError]}
                     value={formData.discount}
-                    onChangeText={(text) => handleFieldChange('discount', text)}
+                    onChangeText={(text) => handleInputChange('discount', text)}
                     placeholder="0"
                     keyboardType="decimal-pad"
-                    selectTextOnFocus={true}
+                    placeholderTextColor="#999"
                   />
                   {errors.discount && (
                     <Text style={styles.errorText}>
-                      <MaterialIcons name="error" size={12} color="#f44336" /> {errors.discount}
+                      <MaterialIcons name="error" size={14} color="#f44336" />
+                      <Text> {errors.discount}</Text>
                     </Text>
                   )}
                 </View>
               </View>
-              
-              {/* Price Preview */}
-              {formData.price && (
+
+              {/* Final Price Preview */}
+              {formData.price && !errors.price && (
                 <View style={styles.pricePreview}>
                   <Text style={styles.pricePreviewLabel}>Final Price:</Text>
-                  <View style={styles.pricePreviewValue}>
-                    {formData.discount > 0 && (
-                      <Text style={styles.originalPrice}>${formData.price}</Text>
-                    )}
-                    <Text style={styles.finalPrice}>${calculateFinalPrice().toFixed(2)}</Text>
-                    {formData.discount > 0 && (
-                      <View style={styles.discountBadge}>
-                        <Text style={styles.discountText}>{formData.discount}% OFF</Text>
-                      </View>
-                    )}
-                  </View>
+                  <Text style={styles.pricePreviewValue}>
+                    ${calculateFinalPrice().toFixed(2)}
+                  </Text>
+                  {parseFloat(formData.discount) > 0 && (
+                    <Text style={styles.originalPrice}>
+                      (${parseFloat(formData.price).toFixed(2)})
+                    </Text>
+                  )}
                 </View>
               )}
-            </View>
-            
-            {/* Status */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                <MaterialIcons name="toggle-on" size={16} color="#4CAF50" />
-                {' '}Product Status
-              </Text>
-              
-              <View style={styles.statusContainer}>
-                {['active', 'inactive', 'discontinued'].map((status) => (
-                  <TouchableOpacity
-                    key={status}
-                    style={[
-                      styles.statusOption,
-                      formData.status === status && styles.statusOptionActive,
-                      { borderColor: getStatusColor(status) }
-                    ]}
-                    onPress={() => handleFieldChange('status', status)}
-                  >
-                    <View style={[
-                      styles.statusDot,
-                      { backgroundColor: getStatusColor(status) }
-                    ]} />
-                    <Text style={[
-                      styles.statusOptionText,
-                      formData.status === status && { color: getStatusColor(status) }
-                    ]}>
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-            
-            {/* Notes */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                <MaterialIcons name="note" size={16} color="#4CAF50" />
-                {' '}Additional Notes
-              </Text>
-              
+
+              {/* Status */}
               <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  <MaterialCommunityIcons name="toggle-switch" size={16} color="#666" />
+                  <Text> Product Status</Text>
+                </Text>
+                <View style={styles.statusContainer}>
+                  {['active', 'inactive', 'discontinued'].map((status) => (
+                    <TouchableOpacity
+                      key={status}
+                      style={[
+                        styles.statusOption,
+                        formData.status === status && styles.statusOptionActive
+                      ]}
+                      onPress={() => handleInputChange('status', status)}
+                    >
+                      <Text style={[
+                        styles.statusOptionText,
+                        formData.status === status && styles.statusOptionTextActive
+                      ]}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Notes */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>
+                  <MaterialCommunityIcons name="note-text" size={16} color="#666" />
+                  <Text> Notes (Optional)</Text>
+                </Text>
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   value={formData.notes}
-                  onChangeText={(text) => handleFieldChange('notes', text)}
-                  placeholder="Add any additional notes about this product..."
+                  onChangeText={(text) => handleInputChange('notes', text)}
+                  placeholder="Additional notes about this product..."
                   multiline
                   numberOfLines={3}
-                  textAlignVertical="top"
+                  placeholderTextColor="#999"
                 />
               </View>
+            </ScrollView>
+
+            {/* Footer Actions */}
+            <View style={styles.footer}>
+              <TouchableOpacity 
+                style={styles.cancelButton}
+                onPress={handleClose}
+                disabled={isLoading}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
+                onPress={handleSave}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="content-save" size={16} color="#fff" />
+                    <Text style={styles.saveButtonText}>Save Changes</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
-            
-            {/* Product Info (Read-only) */}
-            {product.productType === 'plant' && product.plantInfo && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>
-                  <MaterialCommunityIcons name="leaf" size={16} color="#4CAF50" />
-                  {' '}Plant Information
-                </Text>
-                
-                <View style={styles.plantInfoGrid}>
-                  {product.plantInfo.origin && (
-                    <View style={styles.plantInfoItem}>
-                      <MaterialCommunityIcons name="earth" size={14} color="#8BC34A" />
-                      <Text style={styles.plantInfoLabel}>Origin</Text>
-                      <Text style={styles.plantInfoValue}>{product.plantInfo.origin}</Text>
-                    </View>
-                  )}
-                  
-                  {product.plantInfo.water_days && (
-                    <View style={styles.plantInfoItem}>
-                      <MaterialCommunityIcons name="water" size={14} color="#2196F3" />
-                      <Text style={styles.plantInfoLabel}>Watering</Text>
-                      <Text style={styles.plantInfoValue}>Every {product.plantInfo.water_days} days</Text>
-                    </View>
-                  )}
-                  
-                  {product.plantInfo.light && (
-                    <View style={styles.plantInfoItem}>
-                      <MaterialCommunityIcons name="white-balance-sunny" size={14} color="#FF9800" />
-                      <Text style={styles.plantInfoLabel}>Light</Text>
-                      <Text style={styles.plantInfoValue}>{product.plantInfo.light}</Text>
-                    </View>
-                  )}
-                  
-                  {product.plantInfo.difficulty && (
-                    <View style={styles.plantInfoItem}>
-                      <MaterialIcons name="bar-chart" size={14} color="#9C27B0" />
-                      <Text style={styles.plantInfoLabel}>Difficulty</Text>
-                      <Text style={styles.plantInfoValue}>{product.plantInfo.difficulty}/10</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            )}
-          </ScrollView>
-          
-          {/* Footer Actions */}
-          <View style={styles.footer}>
-            <TouchableOpacity 
-              style={styles.cancelButton}
-              onPress={handleClose}
-              disabled={isLoading}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[
-                styles.saveButton, 
-                (!hasChanges || isLoading) && styles.saveButtonDisabled
-              ]}
-              onPress={handleSave}
-              disabled={!hasChanges || isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <MaterialIcons name="save" size={16} color="#fff" />
-                  <Text style={styles.saveButtonText}>Save Changes</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </KeyboardAvoidingView>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      </Animated.View>
     </Modal>
   );
 }
@@ -624,6 +525,10 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  keyboardAvoid: {
+    flex: 1,
     justifyContent: 'flex-end',
   },
   modalContainer: {
@@ -646,14 +551,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
   },
-  productIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f0f9f3',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+  headerInfo: {
+    marginLeft: 12,
+    flex: 1,
   },
   headerTitle: {
     fontSize: 18,
@@ -667,48 +567,50 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: 8,
-    borderRadius: 8,
+    borderRadius: 20,
     backgroundColor: '#f5f5f5',
+  },
+  unsavedIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff3e0',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  unsavedText: {
+    fontSize: 12,
+    color: '#FF9800',
+    marginLeft: 6,
+    fontWeight: '500',
   },
   content: {
     flex: 1,
     paddingHorizontal: 20,
+    paddingTop: 16,
   },
-  section: {
-    marginBottom: 24,
+  inputGroup: {
+    marginBottom: 20,
   },
-  sectionTitle: {
+  label: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 16,
+    marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  halfWidth: {
-    flex: 1,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
   required: {
     color: '#f44336',
+    fontWeight: 'bold',
   },
   input: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
     borderRadius: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
     backgroundColor: '#fafafa',
@@ -729,97 +631,63 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  pricePreview: {
-    backgroundColor: '#f0f9f3',
-    borderRadius: 8,
-    padding: 16,
-    marginTop: 8,
+  row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 16,
+  },
+  halfInput: {
+    flex: 1,
+  },
+  pricePreview: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#f0f9f3',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
   },
   pricePreviewLabel: {
     fontSize: 14,
-    fontWeight: '600',
     color: '#666',
+    marginRight: 8,
   },
   pricePreviewValue: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4CAF50',
   },
   originalPrice: {
     fontSize: 14,
     color: '#999',
     textDecorationLine: 'line-through',
-  },
-  finalPrice: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#4CAF50',
-  },
-  discountBadge: {
-    backgroundColor: '#f44336',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  discountText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
+    marginLeft: 8,
   },
   statusContainer: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
   statusOption: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    borderWidth: 2,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
     borderColor: '#e0e0e0',
-    backgroundColor: '#fff',
+    alignItems: 'center',
   },
   statusOptionActive: {
-    backgroundColor: '#f8f9fa',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
   },
   statusOptionText: {
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
   },
-  plantInfoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  plantInfoItem: {
-    flex: 0.48,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  plantInfoLabel: {
-    fontSize: 11,
-    color: '#666',
-    marginTop: 4,
-  },
-  plantInfoValue: {
-    fontSize: 11,
-    color: '#333',
-    marginTop: 2,
-    textAlign: 'center',
+  statusOptionTextActive: {
+    color: '#fff',
+    fontWeight: '600',
   },
   footer: {
     flexDirection: 'row',
@@ -835,29 +703,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    justifyContent: 'center',
   },
   cancelButtonText: {
     fontSize: 16,
     color: '#666',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   saveButton: {
-    flex: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex: 1,
     paddingVertical: 14,
     borderRadius: 8,
     backgroundColor: '#4CAF50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
   },
   saveButtonDisabled: {
     backgroundColor: '#bdbdbd',
   },
   saveButtonText: {
     fontSize: 16,
-    fontWeight: '600',
     color: '#fff',
+    fontWeight: '600',
     marginLeft: 6,
   },
 });

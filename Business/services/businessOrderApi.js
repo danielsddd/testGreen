@@ -1,4 +1,4 @@
-// Business/services/businessOrderApi.js
+// Business/services/businessOrderApi.js - FIXED VERSION
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
@@ -67,7 +67,7 @@ const handleResponse = async (response, context = 'API Request') => {
 };
 
 /**
- * Create a new order for pickup
+ * FIXED: Create a new order for pickup with correct route
  * @param {Object} orderData Order data
  * @returns {Promise<Object>} Created order response
  */
@@ -92,6 +92,7 @@ export const createOrder = async (orderData) => {
     console.log('Creating order:', orderData);
     const headers = await getHeaders();
     
+    // FIXED: Use correct route from backend
     const url = `${API_BASE_URL}/business/orders/create`;
     console.log('Create Order URL:', url);
     
@@ -112,7 +113,7 @@ export const createOrder = async (orderData) => {
 };
 
 /**
- * Get orders for business
+ * FIXED: Get orders for business with correct route
  * @param {string} businessId Business ID
  * @param {Object} options Filter options
  * @returns {Promise<Array>} Array of orders
@@ -141,6 +142,7 @@ export const getBusinessOrders = async (businessId, options = {}) => {
       queryParams.append('offset', options.offset);
     }
     
+    // FIXED: Use correct route from backend
     const url = `${API_BASE_URL}/business/orders?${queryParams.toString()}`;
     console.log('Get Orders URL:', url);
     
@@ -188,7 +190,7 @@ export const getBusinessOrders = async (businessId, options = {}) => {
 };
 
 /**
- * Update order status
+ * FIXED: Update order status with correct route
  * @param {string} orderId Order ID to update
  * @param {string} newStatus New status
  * @returns {Promise<Object>} Updated order
@@ -206,6 +208,7 @@ export const updateOrderStatus = async (orderId, newStatus) => {
     console.log('Updating order status:', orderId, 'to', newStatus);
     const headers = await getHeaders();
     
+    // FIXED: Use correct route from backend
     const url = `${API_BASE_URL}/business/orders`;
     console.log('Update Order Status URL:', url);
     
@@ -229,7 +232,7 @@ export const updateOrderStatus = async (orderId, newStatus) => {
 };
 
 /**
- * Get customers for business
+ * FIXED: Get customers for business with correct route
  * @param {string} businessId Business ID
  * @returns {Promise<Array>} Array of customers
  */
@@ -242,6 +245,7 @@ export const getBusinessCustomers = async (businessId) => {
     console.log('Getting business customers for:', businessId);
     const headers = await getHeaders();
     
+    // FIXED: Use correct route from backend
     const url = `${API_BASE_URL}/business/customers`;
     console.log('Get Customers URL:', url);
     
@@ -279,7 +283,7 @@ export const getBusinessCustomers = async (businessId) => {
 };
 
 /**
- * Create or update customer record
+ * FIXED: Create or update customer record with correct route
  * @param {Object} customerData Customer data
  * @returns {Promise<Object>} Customer record
  */
@@ -292,6 +296,7 @@ export const createOrUpdateCustomer = async (customerData) => {
     console.log('Creating/updating customer:', customerData);
     const headers = await getHeaders();
     
+    // FIXED: Use correct route from backend
     const url = `${API_BASE_URL}/business/customers`;
     console.log('Create/Update Customer URL:', url);
     

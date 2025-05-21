@@ -1,4 +1,4 @@
-// frontend/Business/services/businessApi.js
+// Business/services/businessApi.js - FIXED VERSION
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
@@ -157,21 +157,17 @@ export const getBusinessDashboard = async () => {
 };
 
 /**
- * Enhanced Inventory Management
+ * FIXED: Enhanced Inventory Management - Using correct route
  */
 export const getBusinessInventory = async (businessId, filters = {}) => {
   try {
-    console.log('📦 Loading enhanced inventory...', filters);
+    console.log('📦 Loading enhanced inventory for business:', businessId);
     const headers = await getEnhancedHeaders();
     
-    const queryParams = new URLSearchParams();
-    if (businessId) queryParams.append('businessId', businessId);
-    if (filters.status) queryParams.append('status', filters.status);
-    if (filters.category) queryParams.append('category', filters.category);
-    if (filters.lowStock) queryParams.append('lowStock', 'true');
-    if (filters.search) queryParams.append('search', filters.search);
+    // FIXED: Use the correct route pattern from backend
+    const url = `${API_BASE_URL}/business/inventory/${encodeURIComponent(businessId)}`;
+    console.log('📦 Calling inventory URL:', url);
     
-    const url = `${API_BASE_URL}/business/inventory-get?${queryParams.toString()}`;
     const response = await apiRequest(url, {
       method: 'GET',
       headers,
@@ -184,8 +180,8 @@ export const getBusinessInventory = async (businessId, filters = {}) => {
       inventory: inventory.map(item => ({
         ...item,
         isLowStock: (item.quantity || 0) <= (item.minThreshold || 5),
-        finalPrice: item.price - (item.price * (item.discount || 0) / 100),
-        lastUpdated: item.lastUpdated || item.dateAdded || new Date().toISOString()
+        finalPrice: item.finalPrice || (item.price - (item.price * (item.discount || 0) / 100)),
+        lastUpdated: item.updatedAt || item.dateAdded || new Date().toISOString()
       })),
       summary: response.summary || {
         totalItems: inventory.length,
@@ -198,12 +194,25 @@ export const getBusinessInventory = async (businessId, filters = {}) => {
     };
   } catch (error) {
     console.error('❌ Enhanced inventory error:', error);
-    throw error;
+    
+    // Return empty data structure on error instead of throwing
+    return {
+      inventory: [],
+      summary: {
+        totalItems: 0,
+        activeItems: 0,
+        lowStockItems: 0,
+        totalValue: 0
+      },
+      filters: {},
+      lastRefreshed: new Date().toISOString(),
+      error: error.message
+    };
   }
 };
 
 /**
- * Enhanced Plant Search with AI suggestions
+ * FIXED: Enhanced Plant Search with correct route
  */
 export const searchPlants = async (query, options = {}) => {
   if (!query || query.length < 2) {
@@ -214,13 +223,14 @@ export const searchPlants = async (query, options = {}) => {
     console.log('🔍 Enhanced plant search:', query, options);
     const headers = await getEnhancedHeaders();
     
+    // FIXED: Use the correct route pattern
     const queryParams = new URLSearchParams();
     queryParams.append('q', query);
     if (options.limit) queryParams.append('limit', options.limit);
     if (options.category) queryParams.append('category', options.category);
     if (options.difficulty) queryParams.append('difficulty', options.difficulty);
     
-    const url = `${API_BASE_URL}/business/plant-search?${queryParams.toString()}`;
+    const url = `${API_BASE_URL}/business/plants/search?${queryParams.toString()}`;
     const response = await apiRequest(url, {
       method: 'GET',
       headers,
@@ -256,7 +266,7 @@ export const searchPlants = async (query, options = {}) => {
 };
 
 /**
- * Enhanced Inventory Item Creation with validation
+ * FIXED: Enhanced Inventory Item Creation with correct route
  */
 export const createInventoryItem = async (inventoryData) => {
   try {
@@ -285,7 +295,8 @@ export const createInventoryItem = async (inventoryData) => {
       finalPrice: inventoryData.price - (inventoryData.price * (inventoryData.discount || 0) / 100)
     };
     
-    const url = `${API_BASE_URL}/business/inventory-create`;
+    // FIXED: Use correct route pattern
+    const url = `${API_BASE_URL}/business/inventory/create`;
     const response = await apiRequest(url, {
       method: 'POST',
       headers,
@@ -301,22 +312,55 @@ export const createInventoryItem = async (inventoryData) => {
 };
 
 /**
- * Enhanced Orders Management
+ * FIXED: Update inventory item with correct route
+ */
+export const updateInventoryItem = async (inventoryId, updateData) => {
+  try {
+    console.log('🔄 Updating inventory item:', inventoryId);
+    const headers = await getEnhancedHeaders();
+    
+    const enhancedUpdateData = {
+      ...updateData,
+      lastUpdated: new Date().toISOString(),
+      finalPrice: updateData.price ? 
+        updateData.price - (updateData.price * (updateData.discount || 0) / 100) : 
+        undefined
+    };
+    
+    // FIXED: Use correct route pattern with inventoryId in path
+    const url = `${API_BASE_URL}/business/inventory/${encodeURIComponent(inventoryId)}`;
+    const response = await apiRequest(url, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(enhancedUpdateData),
+    }, 3, 'Update Inventory Item');
+    
+    console.log('✅ Inventory item updated successfully');
+    return response;
+  } catch (error) {
+    console.error('❌ Inventory update error:', error);
+    throw error;
+  }
+};
+
+/**
+ * FIXED: Enhanced Orders Management with correct route
  */
 export const getBusinessOrders = async (businessId, options = {}) => {
   try {
     console.log('📋 Loading enhanced orders...', options);
     const headers = await getEnhancedHeaders();
     
+    // FIXED: Use correct route pattern
     const queryParams = new URLSearchParams();
-    queryParams.append('businessId', businessId);
+    if (businessId) queryParams.append('businessId', businessId);
     if (options.status) queryParams.append('status', options.status);
     if (options.limit) queryParams.append('limit', options.limit);
     if (options.offset) queryParams.append('offset', options.offset);
     if (options.startDate) queryParams.append('startDate', options.startDate);
     if (options.endDate) queryParams.append('endDate', options.endDate);
     
-    const url = `${API_BASE_URL}/business/orders-get?${queryParams.toString()}`;
+    const url = `${API_BASE_URL}/business/orders?${queryParams.toString()}`;
     const response = await apiRequest(url, {
       method: 'GET',
       headers,
@@ -386,7 +430,7 @@ export const getBusinessOrders = async (businessId, options = {}) => {
 };
 
 /**
- * Enhanced Order Creation with validation
+ * FIXED: Enhanced Order Creation with correct route
  */
 export const createOrder = async (orderData) => {
   try {
@@ -423,7 +467,8 @@ export const createOrder = async (orderData) => {
       }
     };
     
-    const url = `${API_BASE_URL}/business/order-create`;
+    // FIXED: Use correct route pattern
+    const url = `${API_BASE_URL}/business/orders/create`;
     const response = await apiRequest(url, {
       method: 'POST',
       headers,
@@ -439,7 +484,7 @@ export const createOrder = async (orderData) => {
 };
 
 /**
- * Real-time order status updates
+ * FIXED: Real-time order status updates with correct route
  */
 export const updateOrderStatus = async (orderId, newStatus, notes = '') => {
   try {
@@ -454,6 +499,7 @@ export const updateOrderStatus = async (orderId, newStatus, notes = '') => {
       staffAssigned: headers['X-User-Email'] || 'system'
     };
     
+    // FIXED: Use correct route pattern
     const url = `${API_BASE_URL}/business/orders`;
     const response = await apiRequest(url, {
       method: 'PATCH',
@@ -470,35 +516,83 @@ export const updateOrderStatus = async (orderId, newStatus, notes = '') => {
 };
 
 /**
- * Enhanced Analytics and Insights
+ * Get business customers
  */
-export const getBusinessAnalytics = async (businessId, period = '30d') => {
+export const getBusinessCustomers = async (businessId) => {
   try {
-    console.log('📈 Loading business analytics...', period);
+    console.log('👥 Getting business customers for:', businessId);
     const headers = await getEnhancedHeaders();
     
-    const queryParams = new URLSearchParams();
-    queryParams.append('businessId', businessId);
-    queryParams.append('period', period);
-    
-    const url = `${API_BASE_URL}/business/analytics?${queryParams.toString()}`;
+    const url = `${API_BASE_URL}/business/customers`;
     const response = await apiRequest(url, {
       method: 'GET',
       headers,
-    }, 3, 'Business Analytics');
+    }, 3, 'Get Business Customers');
+    
+    const customers = Array.isArray(response) ? response : (response.customers || []);
+    
+    console.log(`Business customers loaded: ${customers.length} customers`);
+    return customers;
+  } catch (error) {
+    console.error('❌ Get business customers error:', error);
+    
+    // Return empty array instead of throwing for customer listing
+    if (error.message.includes('404') || error.message.includes('not found')) {
+      console.log('No customers found, returning empty array');
+      return [];
+    }
+    
+    throw error;
+  }
+};
+
+/**
+ * FIXED: Create or update business profile with correct route
+ */
+export const createBusinessProfile = async (businessData) => {
+  try {
+    console.log('👤 Creating/updating business profile');
+    const headers = await getEnhancedHeaders();
+    
+    const enhancedBusinessData = {
+      ...businessData,
+      lastUpdated: new Date().toISOString(),
+      id: businessData.email || headers['X-User-Email']
+    };
+    
+    const url = `${API_BASE_URL}/business/profile`;
+    const response = await apiRequest(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(enhancedBusinessData),
+    }, 3, 'Create Business Profile');
+    
+    console.log('✅ Business profile created/updated successfully');
+    return response;
+  } catch (error) {
+    console.error('❌ Business profile error:', error);
+    throw error;
+  }
+};
+
+/**
+ * FIXED: Get business profile with correct route
+ */
+export const getBusinessProfile = async (businessId) => {
+  try {
+    console.log('👤 Getting business profile for:', businessId);
+    const headers = await getEnhancedHeaders();
+    
+    const url = `${API_BASE_URL}/business/profile?businessId=${encodeURIComponent(businessId)}`;
+    const response = await apiRequest(url, {
+      method: 'GET',
+      headers,
+    }, 3, 'Get Business Profile');
     
     return response;
   } catch (error) {
-    console.error('❌ Analytics error:', error);
-    
-    // Return mock analytics structure
-    return {
-      revenue: { total: 0, growth: 0, byDay: [] },
-      orders: { total: 0, growth: 0, byStatus: {} },
-      customers: { total: 0, new: 0, returning: 0 },
-      inventory: { totalValue: 0, lowStock: 0, topSelling: [] },
-      period: period
-    };
+    console.error('❌ Get business profile error:', error);
+    throw error;
   }
 };
 
@@ -539,49 +633,17 @@ export const checkApiHealth = async () => {
 };
 
 /**
- * Update inventory item
- */
-export const updateInventoryItem = async (inventoryId, updateData) => {
-  try {
-    console.log('🔄 Updating inventory item:', inventoryId);
-    const headers = await getEnhancedHeaders();
-    
-    const enhancedUpdateData = {
-      ...updateData,
-      lastUpdated: new Date().toISOString(),
-      finalPrice: updateData.price ? 
-        updateData.price - (updateData.price * (updateData.discount || 0) / 100) : 
-        undefined
-    };
-    
-    const url = `${API_BASE_URL}/business/inventory-update`;
-    const response = await apiRequest(url, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({ inventoryId, ...enhancedUpdateData }),
-    }, 3, 'Update Inventory Item');
-    
-    console.log('✅ Inventory item updated successfully');
-    return response;
-  } catch (error) {
-    console.error('❌ Inventory update error:', error);
-    throw error;
-  }
-};
-
-/**
- * Delete inventory item
+ * Delete inventory item - NEW
  */
 export const deleteInventoryItem = async (inventoryId) => {
   try {
     console.log('🗑️ Deleting inventory item:', inventoryId);
     const headers = await getEnhancedHeaders();
     
-    const url = `${API_BASE_URL}/business/inventory-delete`;
+    const url = `${API_BASE_URL}/business/inventory/${encodeURIComponent(inventoryId)}`;
     const response = await apiRequest(url, {
       method: 'DELETE',
       headers,
-      body: JSON.stringify({ inventoryId }),
     }, 3, 'Delete Inventory Item');
     
     console.log('✅ Inventory item deleted successfully');
@@ -598,7 +660,7 @@ export const deleteInventoryItem = async (inventoryId) => {
 export const getLowStockItems = async (businessId) => {
   try {
     console.log('⚠️ Getting low stock items for:', businessId);
-    const inventoryResponse = await getBusinessInventory(businessId, { lowStock: true });
+    const inventoryResponse = await getBusinessInventory(businessId);
     
     const lowStockItems = inventoryResponse.inventory.filter(item => 
       item.isLowStock && item.status === 'active'
@@ -608,91 +670,6 @@ export const getLowStockItems = async (businessId) => {
   } catch (error) {
     console.error('❌ Low stock items error:', error);
     return [];
-  }
-};
-
-/**
- * Create or update business profile
- */
-export const createBusinessProfile = async (businessData) => {
-  try {
-    console.log('👤 Creating/updating business profile');
-    const headers = await getEnhancedHeaders();
-    
-    const enhancedBusinessData = {
-      ...businessData,
-      lastUpdated: new Date().toISOString(),
-      id: businessData.email || headers['X-User-Email']
-    };
-    
-    const url = `${API_BASE_URL}/business/profile`;
-    const response = await apiRequest(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(enhancedBusinessData),
-    }, 3, 'Create Business Profile');
-    
-    console.log('✅ Business profile created/updated successfully');
-    return response;
-  } catch (error) {
-    console.error('❌ Business profile error:', error);
-    throw error;
-  }
-};
-
-/**
- * Get business profile
- */
-export const getBusinessProfile = async (businessId) => {
-  try {
-    console.log('👤 Getting business profile for:', businessId);
-    const headers = await getEnhancedHeaders();
-    
-    const url = `${API_BASE_URL}/business/profile?businessId=${encodeURIComponent(businessId)}`;
-    const response = await apiRequest(url, {
-      method: 'GET',
-      headers,
-    }, 3, 'Get Business Profile');
-    
-    return response;
-  } catch (error) {
-    console.error('❌ Get business profile error:', error);
-    throw error;
-  }
-};
-
-/**
- * Upload business logo
- */
-export const uploadBusinessLogo = async (imageUri, businessId) => {
-  try {
-    console.log('📸 Uploading business logo for:', businessId);
-    const headers = await getEnhancedHeaders();
-    
-    // Remove content-type for file upload
-    const uploadHeaders = { ...headers };
-    delete uploadHeaders['Content-Type'];
-    
-    const formData = new FormData();
-    formData.append('image', {
-      uri: imageUri,
-      type: 'image/jpeg',
-      name: `business_logo_${businessId}.jpg`,
-    });
-    formData.append('businessId', businessId);
-    
-    const url = `${API_BASE_URL}/business/upload-logo`;
-    const response = await apiRequest(url, {
-      method: 'POST',
-      headers: uploadHeaders,
-      body: formData,
-    }, 3, 'Upload Business Logo');
-    
-    console.log('✅ Business logo uploaded successfully');
-    return response;
-  } catch (error) {
-    console.error('❌ Business logo upload error:', error);
-    throw error;
   }
 };
 
@@ -708,7 +685,7 @@ export const testConnection = async () => {
   }
 };
 
-// Export all API functions with original names
+// Export all API functions
 export default {
   getBusinessDashboard,
   getBusinessInventory,
@@ -719,11 +696,10 @@ export default {
   getLowStockItems,
   createBusinessProfile,
   getBusinessProfile,
-  uploadBusinessLogo,
   getBusinessOrders,
   createOrder,
   updateOrderStatus,
-  getBusinessAnalytics,
+  getBusinessCustomers,
   checkApiHealth,
   testConnection
 };
