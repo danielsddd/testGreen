@@ -18,16 +18,23 @@ import {
   StatusBar,
 } from 'react-native';
 import { MaterialCommunityIcons, MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { searchPlants, createInventoryItem, getBusinessInventory } from '../services/businessApi';
+import { searchPlants, createInventoryItem, getBusinessInventory, updateInventoryItem } from '../services/businessApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SpeechToTextComponent from '../../marketplace/components/SpeechToTextComponent';
 
+// Import Business Components
+import InventoryTable from '../components/InventoryTable';
+import ProductEditModal from '../components/ProductEditModal';
+import LowStockBanner from '../components/LowStockBanner';
+
 const { width, height } = Dimensions.get('window');
-const [editMode, setEditMode] = useState(false);
-const [editingItemId, setEditingItemId] = useState(null);
 
 export default function AddInventoryScreen({ navigation, route }) {
   const { businessId, showInventory: initialShowInventory = false } = route.params || {};
+  
+  // FIXED: Move all useState hooks inside the function component
+  const [editMode, setEditMode] = useState(false);
+  const [editingItemId, setEditingItemId] = useState(null);
   
   // Core state
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,6 +56,9 @@ export default function AddInventoryScreen({ navigation, route }) {
   const [showSearchHistory, setShowSearchHistory] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [showCompletionAnimation, setShowCompletionAnimation] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [productToEdit, setProductToEdit] = useState(null);
+  const [lowStockItems, setLowStockItems] = useState([]);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -69,7 +79,7 @@ export default function AddInventoryScreen({ navigation, route }) {
   const successAnim = useRef(new Animated.Value(0)).current;
   const completionAnim = useRef(new Animated.Value(0)).current;
   const rotateAnim = useRef(new Animated.Value(0)).current;
-  const headerHeightAnim = useRef(new Animated.Value(100)).current; // Reduced initial height
+  const headerHeightAnim = useRef(new Animated.Value(100)).current;
   const searchBarFocusAnim = useRef(new Animated.Value(0)).current;
   
   // Refs for better performance
@@ -194,11 +204,19 @@ export default function AddInventoryScreen({ navigation, route }) {
       setNetworkStatus('loading');
       
       console.log('Loading inventory for business:', id);
-      const inventory = await getBusinessInventory(id);
+      const inventoryResponse = await getBusinessInventory(id);
+      const inventory = inventoryResponse.inventory || inventoryResponse || [];
       
       if (isMounted.current) {
         console.log('Loaded inventory:', inventory.length, 'items');
         setCurrentInventory(inventory);
+        
+        // Calculate low stock items
+        const lowStock = inventory.filter(item => 
+          item.isLowStock && item.status === 'active'
+        );
+        setLowStockItems(lowStock);
+        
         setNetworkStatus('online');
         
         // Success animation for inventory load
@@ -243,22 +261,23 @@ export default function AddInventoryScreen({ navigation, route }) {
     try {
       console.log('Searching for plants by common name:', query);
       const results = await searchPlants(query);
+      const plants = results.plants || results || [];
       
       if (isMounted.current) {
-        console.log('Search results:', results.length, 'plants found');
-        setSearchResults(results);
-        setActualSearchCount(results.length); // Track actual count
+        console.log('Search results:', plants.length, 'plants found');
+        setSearchResults(plants);
+        setActualSearchCount(plants.length);
         setNetworkStatus('online');
         
         // Save successful search to history
-        if (results.length > 0) {
+        if (plants.length > 0) {
           saveSearchToHistory(query);
         }
         
         // Staggered animation for search results
-        if (results.length > 0) {
+        if (plants.length > 0) {
           Animated.stagger(50, 
-            results.slice(0, 8).map((_, index) => 
+            plants.slice(0, 8).map((_, index) => 
               Animated.timing(new Animated.Value(0), {
                 toValue: 1,
                 duration: 200,
@@ -502,59 +521,21 @@ export default function AddInventoryScreen({ navigation, route }) {
         const result = await updateInventoryItem(editingItemId, updateData);
         console.log('Item updated successfully:', result);
         
-        // Show success message
         Alert.alert(
           '✅ Updated Successfully!',
-          `${selectedPlant?.common_name || 'Item'} has been updated!\n\nQuantity: ${formData.quantity}\nPrice: $${formData.price}`,
+          `${selectedPlant?.common_name || 'Item'} has been updated!`,
           [
             {
-              text: 'View Inventory',
-              style: 'default',
+              text: 'Continue',
               onPress: () => {
-                const resetForm = () => {
-                  setSelectedItems([]);
-                  setSelectedPlant(null);
-                  setSearchQuery('');
-                  setFormData({
-                    quantity: '',
-                    price: '',
-                    minThreshold: '5',
-                    discount: '0',
-                    notes: '',
-                  });
-                  setErrors({});
-                  setEditMode(false);
-                  setEditingItemId(null);
-                  setShowSearchHistory(false);
-                  
-                  // Reset animations
-                  Animated.parallel([
-                    Animated.timing(slideAnim, {
-                      toValue: 0,
-                      duration: 300,
-                      useNativeDriver: Platform.OS !== 'web',
-                    }),
-                    Animated.timing(headerHeightAnim, {
-                      toValue: 100,
-                      duration: 300,
-                      useNativeDriver: false,
-                    }),
-                  ]).start();
-                };
+                resetForm();
                 setShowInventory(true);
-              },
-            },
-            {
-              text: 'Continue Editing',
-              style: 'default',
-              onPress: () => {
-                // Stay in edit mode
               },
             },
           ]
         );
       } else {
-        // CREATE new item (existing logic)
+        // CREATE new item
         const inventoryItem = {
           productType: 'plant',
           plantData: {
@@ -584,13 +565,12 @@ export default function AddInventoryScreen({ navigation, route }) {
         const result = await createInventoryItem(inventoryItem);
         console.log('Item created successfully:', result);
         
-        // Show success message for creation
         Alert.alert(
           '🌱 Success!',
-          `${selectedPlant?.common_name || 'Plant'} has been added to your inventory!\n\nQuantity: ${formData.quantity}\nPrice: $${formData.price}`,
+          `${selectedPlant?.common_name || 'Plant'} has been added to your inventory!`,
           [
             {
-              text: 'Add Another Plant',
+              text: 'Add Another',
               style: 'default',
               onPress: () => {
                 resetForm();
@@ -599,7 +579,7 @@ export default function AddInventoryScreen({ navigation, route }) {
               },
             },
             {
-              text: 'View My Inventory',
+              text: 'View Inventory',
               style: 'default',
               onPress: () => {
                 resetForm();
@@ -661,7 +641,45 @@ export default function AddInventoryScreen({ navigation, route }) {
     }
   };
 
-  // FIXED: Navigate to Business Home with proper navigation
+  // Reset form helper
+  const resetForm = () => {
+    setSelectedPlant(null);
+    setSearchQuery('');
+    setFormData({
+      quantity: '',
+      price: '',
+      minThreshold: '5',
+      discount: '0',
+      notes: '',
+    });
+    setErrors({});
+    setEditMode(false);
+    setEditingItemId(null);
+    setShowSearchHistory(false);
+    
+    // Reset animations
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(headerHeightAnim, {
+        toValue: 100,
+        duration: 300,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  };
+
+  // Clear search function
+  const handleClearSearch = () => {
+    resetForm();
+    setShowInventory(false);
+    searchInputRef.current?.focus();
+  };
+
+  // Navigate to Business Home with proper navigation
   const handleGoToBusinessHome = async () => {
     try {
       setShowCompletionAnimation(true);
@@ -685,13 +703,13 @@ export default function AddInventoryScreen({ navigation, route }) {
         rotateAnimation.stop();
         setShowCompletionAnimation(false);
         
-        // FIXED: Navigate properly to business navigation
+        // Navigate to business navigation
         navigation.reset({
           index: 0,
-          routes: [{ name: 'BusinessTabs' }], // Navigate to BusinessTabs instead of BusinessHomeScreen
+          routes: [{ name: 'BusinessTabs' }],
         });
         
-      }, 2000); // Reduced time for better UX
+      }, 2000);
       
     } catch (error) {
       console.error('Error completing signup:', error);
@@ -718,55 +736,56 @@ export default function AddInventoryScreen({ navigation, route }) {
     loadCurrentInventory();
   };
 
-  // FIXED: Handle inventory item edit
+  // Handle inventory item edit
   const handleEditInventoryItem = (item) => {
     console.log('Editing inventory item:', item.id);
-    
-    // Set the item as selected for editing
-    setSelectedPlant({
-      id: item.id,
-      common_name: item.name || item.common_name || item.productName,
-      scientific_name: item.scientific_name || '',
-      productType: item.productType,
-      // Include all the plant data if it's a plant
-      ...(item.plantInfo || {})
-    });
-    
-    // Pre-fill the form with current values
-    setFormData({
-      quantity: item.quantity?.toString() || '',
-      price: item.price?.toString() || '',
-      minThreshold: item.minThreshold?.toString() || '5',
-      discount: item.discount?.toString() || '0',
-      notes: item.notes || '',
-    });
-    
-    // Set edit mode
-    setEditMode(true);
-    setEditingItemId(item.id);
-    
-    // Switch to form view
-    setShowInventory(false);
-    
-    // Animate to form
-    Animated.timing(slideAnim, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: Platform.OS !== 'web',
-    }).start();
-    
-    // Animate header height
-    Animated.timing(headerHeightAnim, {
-      toValue: 85,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-    
+    setProductToEdit(item);
+    setShowEditModal(true);
+  };
+
+  // Handle product save from modal
+  const handleProductSave = async (updatedProduct) => {
+    try {
+      console.log('Saving updated product:', updatedProduct);
+      // Refresh inventory after successful save
+      await loadCurrentInventory();
+      setShowEditModal(false);
+      setProductToEdit(null);
+    } catch (error) {
+      console.error('Error saving product:', error);
+      Alert.alert('Error', 'Failed to save product changes');
+    }
+  };
+
+  // Handle delete inventory item
+  const handleDeleteInventoryItem = (item) => {
     Alert.alert(
-      'Edit Mode',
-      `Now editing: ${item.name || item.common_name || item.productName}\n\nUpdate the fields below and save your changes.`,
-      [{ text: 'OK' }]
+      'Delete Item',
+      `Are you sure you want to delete ${item.name || item.common_name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Implementation would call delete API
+              console.log('Deleting item:', item.id);
+              await loadCurrentInventory(); // Refresh after delete
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete item');
+            }
+          }
+        }
+      ]
     );
+  };
+
+  // Handle low stock restock
+  const handleRestock = (item) => {
+    // Quick restock action - could open a modal or navigate to edit
+    setProductToEdit(item);
+    setShowEditModal(true);
   };
 
   // Handle refresh
@@ -785,7 +804,10 @@ export default function AddInventoryScreen({ navigation, route }) {
           <TouchableOpacity
             key={index}
             style={styles.searchHistoryItem}
-            onPress={() => handleSearchHistorySelect(item)}
+            onPress={() => {
+              setSearchQuery(item);
+              handleSearch(item);
+            }}
           >
             <MaterialIcons name="history" size={16} color="#666" />
             <Text style={styles.searchHistoryText}>{item}</Text>
@@ -795,7 +817,7 @@ export default function AddInventoryScreen({ navigation, route }) {
     );
   };
 
-  // FIXED: Better search result layout with proper spacing
+  // Render search result
   const renderSearchResult = ({ item, index }) => (
     <TouchableOpacity 
       style={[
@@ -818,9 +840,8 @@ export default function AddInventoryScreen({ navigation, route }) {
             {item.scientific_name || 'Scientific name not available'}
           </Text>
           
-          {/* Better organized attributes */}
           <View style={styles.attributesRow}>
-          {item.water_days && (
+            {item.water_days && (
               <View style={styles.attribute}>
                 <MaterialCommunityIcons name="water" size={12} color="#2196F3" />
                 <Text style={styles.attributeText}>{formatWaterDays(item.water_days)}</Text>
@@ -849,73 +870,6 @@ export default function AddInventoryScreen({ navigation, route }) {
     </TouchableOpacity>
   );
 
-  // FIXED: Render inventory item with working edit button
-  const renderInventoryItem = ({ item, index }) => (
-    <Animated.View
-      style={[
-        styles.inventoryItem,
-        {
-          opacity: fadeAnim,
-          transform: [{ scale: scaleAnim }],
-        }
-      ]}
-    >
-      <View style={styles.inventoryItemHeader}>
-        <View style={styles.inventoryIcon}>
-          <MaterialCommunityIcons 
-            name={item.productType === 'plant' ? 'leaf' : 'tools'} 
-            size={20} 
-            color="#fff" 
-          />
-        </View>
-        <View style={styles.inventoryItemInfo}>
-          <Text style={styles.inventoryItemName} numberOfLines={2}>
-            {item.name || item.common_name || item.productName}
-          </Text>
-          <Text style={styles.inventoryItemScientific} numberOfLines={1}>
-            {item.scientific_name || `${item.productType?.charAt(0).toUpperCase()}${item.productType?.slice(1)}`}
-          </Text>
-        </View>
-        <View style={styles.inventoryItemActions}>
-          <TouchableOpacity 
-            style={styles.editButton}
-            onPress={() => handleEditInventoryItem(item)}
-          >
-            <MaterialIcons name="edit" size={18} color="#2196F3" />
-          </TouchableOpacity>
-        </View>
-      </View>
-      
-      <View style={styles.inventoryItemDetails}>
-        <View style={styles.detailItem}>
-          <Text style={styles.detailLabel}>Stock</Text>
-          <Text style={[
-            styles.detailValue,
-            item.quantity <= (item.minThreshold || 5) && styles.lowStockText
-          ]}>
-            {item.quantity || 0}
-            {item.quantity <= (item.minThreshold || 5) && ' ⚠️'}
-          </Text>
-        </View>
-        <View style={styles.detailItem}>
-          <Text style={styles.detailLabel}>Price</Text>
-          <Text style={styles.detailValue}>
-            ${(item.finalPrice || item.price || 0).toFixed(2)}
-          </Text>
-        </View>
-        <View style={styles.detailItem}>
-          <Text style={styles.detailLabel}>Status</Text>
-          <View style={[
-            styles.statusBadge, 
-            { backgroundColor: item.status === 'active' ? '#4CAF50' : '#FF9800' }
-          ]}>
-            <Text style={styles.statusText}>{item.status || 'active'}</Text>
-          </View>
-        </View>
-      </View>
-    </Animated.View>
-  );
-
   // Rotate interpolation for completion animation
   const rotateInterpolate = rotateAnim.interpolate({
     inputRange: [0, 1],
@@ -930,7 +884,7 @@ export default function AddInventoryScreen({ navigation, route }) {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={styles.keyboardAvoid}
       >
-        {/* FIXED: Cleaner Header without "Add New" button */}
+        {/* Header */}
         <Animated.View 
           style={[
             styles.header,
@@ -949,14 +903,14 @@ export default function AddInventoryScreen({ navigation, route }) {
             </TouchableOpacity>
             
             <View style={styles.headerCenter}>
-            <Text style={styles.headerTitle}>
-  {showInventory 
-    ? 'My Plant Inventory' 
-    : editMode 
-      ? `Edit: ${selectedPlant?.common_name || 'Item'}` 
-      : 'Add Plant to Inventory'
-  }
-</Text>
+              <Text style={styles.headerTitle}>
+                {showInventory 
+                  ? 'My Plant Inventory' 
+                  : editMode 
+                    ? `Edit: ${selectedPlant?.common_name || 'Item'}` 
+                    : 'Add Plant to Inventory'
+                }
+              </Text>
               <View style={styles.networkStatusContainer}>
                 {networkStatus === 'loading' && (
                   <ActivityIndicator size="small" color="#216a94" />
@@ -979,7 +933,6 @@ export default function AddInventoryScreen({ navigation, route }) {
               </View>
             </View>
             
-            {/* FIXED: Only show inventory toggle button */}
             <TouchableOpacity 
               onPress={showInventory ? handleClearSearch : handleShowCurrentInventory}
               style={styles.headerButton}
@@ -1043,7 +996,6 @@ export default function AddInventoryScreen({ navigation, route }) {
                 </TouchableOpacity>
               ) : null}
               
-              {/* Speech-to-Text Component */}
               <SpeechToTextComponent 
                 onTranscriptionResult={handleSpeechResult}
                 style={styles.speechButton}
@@ -1053,28 +1005,6 @@ export default function AddInventoryScreen({ navigation, route }) {
                 <ActivityIndicator size="small" color="#4CAF50" style={styles.searchLoader} />
               )}
             </Animated.View>
-          )}
-
-          {/* Auto-refresh toggle */}
-          {showInventory && (
-            <View style={styles.autoRefreshContainer}>
-              <TouchableOpacity
-                style={styles.autoRefreshToggle}
-                onPress={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
-              >
-                <MaterialIcons 
-                  name={autoRefreshEnabled ? "sync" : "sync-disabled"} 
-                  size={16} 
-                  color={autoRefreshEnabled ? "#4CAF50" : "#999"} 
-                />
-                <Text style={[
-                  styles.autoRefreshText,
-                  { color: autoRefreshEnabled ? "#4CAF50" : "#999" }
-                ]}>
-                  Auto-refresh {autoRefreshEnabled ? 'ON' : 'OFF'}
-                </Text>
-              </TouchableOpacity>
-            </View>
           )}
         </Animated.View>
 
@@ -1093,8 +1023,15 @@ export default function AddInventoryScreen({ navigation, route }) {
 
         {/* Content Area */}
         {showInventory ? (
-          // Enhanced Inventory View
+          // Enhanced Inventory View using InventoryTable component
           <View style={styles.inventoryContainer}>
+            {/* Low Stock Banner */}
+            <LowStockBanner
+              lowStockItems={lowStockItems}
+              onManageStock={() => setShowInventory(true)}
+              onRestock={handleRestock}
+            />
+
             <View style={styles.inventoryHeader}>
               <View style={styles.inventoryStats}>
                 <View style={styles.statItem}>
@@ -1109,7 +1046,7 @@ export default function AddInventoryScreen({ navigation, route }) {
                 </View>
                 <View style={styles.statItem}>
                   <Text style={[styles.statNumber, styles.warningText]}>
-                    {currentInventory.filter(item => item.quantity <= (item.minThreshold || 5)).length}
+                    {lowStockItems.length}
                   </Text>
                   <Text style={styles.statLabel}>Low Stock</Text>
                 </View>
@@ -1124,7 +1061,6 @@ export default function AddInventoryScreen({ navigation, route }) {
                   <Text style={styles.addNewButtonText}>Add New Plant</Text>
                 </TouchableOpacity>
                 
-                {/* FIXED: Go to Dashboard button with proper navigation */}
                 <TouchableOpacity 
                   style={styles.businessHomeButton}
                   onPress={handleGoToBusinessHome}
@@ -1147,41 +1083,20 @@ export default function AddInventoryScreen({ navigation, route }) {
               </View>
             </View>
             
-            <FlatList
-              data={currentInventory}
-              renderItem={renderInventoryItem}
-              keyExtractor={(item) => item.id || item._id || Math.random().toString()}
-              style={styles.inventoryList}
-              contentContainerStyle={styles.inventoryListContent}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  colors={['#4CAF50']}
-                  tintColor="#4CAF50"
-                />
-              }
-              ListEmptyComponent={
-                <View style={styles.emptyInventory}>
-                  <MaterialCommunityIcons name="package-variant-closed" size={64} color="#e0e0e0" />
-                  <Text style={styles.emptyInventoryTitle}>No plants yet</Text>
-                  <Text style={styles.emptyInventoryText}>
-                    Start building your inventory by adding your first plant
-                  </Text>
-                  <TouchableOpacity 
-                    style={styles.addFirstItemButton}
-                    onPress={handleClearSearch}
-                  >
-                    <MaterialCommunityIcons name="leaf" size={20} color="#fff" />
-                    <Text style={styles.addFirstItemButtonText}>Add Your First Plant</Text>
-                  </TouchableOpacity>
-                </View>
-              }
-              showsVerticalScrollIndicator={false}
+            {/* Use InventoryTable component */}
+            <InventoryTable
+              inventory={currentInventory}
+              isLoading={isLoading}
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              onEditProduct={handleEditInventoryItem}
+              onDeleteProduct={handleDeleteInventoryItem}
+              onProductPress={handleEditInventoryItem}
+              businessId={currentBusinessId}
             />
           </View>
         ) : (
-          // FIXED: Better organized Add Plant View with improved spacing
+          // Add Plant View
           <ScrollView 
             style={styles.content}
             contentContainerStyle={styles.scrollContent}
@@ -1191,7 +1106,7 @@ export default function AddInventoryScreen({ navigation, route }) {
             {/* Search History */}
             {renderSearchHistory()}
 
-            {/* FIXED: Better spaced search results */}
+            {/* Search results */}
             {searchResults.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
@@ -1217,7 +1132,7 @@ export default function AddInventoryScreen({ navigation, route }) {
               </View>
             )}
 
-            {/* FIXED: Selected plant details moved further down */}
+            {/* Selected plant details and form */}
             {selectedPlant && (
               <View style={styles.selectedPlantSection}>
                 <Animated.View 
@@ -1264,13 +1179,13 @@ export default function AddInventoryScreen({ navigation, route }) {
                           <Text style={styles.plantDetailValue}>{formatWaterDays(selectedPlant.water_days)}</Text>
                         </View>
                       )}
-                     {selectedPlant.light && (
-                      <View style={styles.plantDetailItem}>
-                        <MaterialCommunityIcons name="white-balance-sunny" size={16} color="#FF9800" />
-                        <Text style={styles.plantDetailLabel}>Light</Text>
-                        <Text style={styles.plantDetailValue}>{selectedPlant.light}</Text>
-                      </View>
-                    )}
+                      {selectedPlant.light && (
+                        <View style={styles.plantDetailItem}>
+                          <MaterialCommunityIcons name="white-balance-sunny" size={16} color="#FF9800" />
+                          <Text style={styles.plantDetailLabel}>Light</Text>
+                          <Text style={styles.plantDetailValue}>{selectedPlant.light}</Text>
+                        </View>
+                      )}
                       {selectedPlant.temperature && (
                         <View style={styles.plantDetailItem}>
                           <MaterialIcons name="thermostat" size={16} color="#F44336" />
@@ -1285,13 +1200,13 @@ export default function AddInventoryScreen({ navigation, route }) {
                           <Text style={styles.plantDetailValue}>{selectedPlant.difficulty}/10</Text>
                         </View>
                       )}
-                       {selectedPlant.pets && (
-                      <View style={styles.plantDetailItem}>
-                        <MaterialCommunityIcons name="paw" size={16} color="#795548" />
-                        <Text style={styles.plantDetailLabel}>Pet Safe</Text>
-                        <Text style={styles.plantDetailValue}>{selectedPlant.pets}</Text>
-                      </View>
-                    )}
+                      {selectedPlant.pets && (
+                        <View style={styles.plantDetailItem}>
+                          <MaterialCommunityIcons name="paw" size={16} color="#795548" />
+                          <Text style={styles.plantDetailLabel}>Pet Safe</Text>
+                          <Text style={styles.plantDetailValue}>{selectedPlant.pets}</Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </Animated.View>
@@ -1420,28 +1335,40 @@ export default function AddInventoryScreen({ navigation, route }) {
             ]}
           >
             <TouchableOpacity 
-  style={[styles.saveButton, isLoading && styles.saveButtonDisabled]} 
-  onPress={handleSave}
-  disabled={isLoading}
-  activeOpacity={0.8}
->
-  {isLoading ? (
-    <ActivityIndicator size="small" color="#fff" />
-  ) : (
-    <>
-      <MaterialCommunityIcons 
-        name={editMode ? "content-save" : "plus-circle"} 
-        size={20} 
-        color="#fff" 
-      />
-      <Text style={styles.saveButtonText}>
-        {editMode ? 'Update Item' : 'Add to Inventory'}
-      </Text>
-    </>
-  )}
-</TouchableOpacity>
+              style={[styles.saveButton, isLoading && styles.saveButtonDisabled]} 
+              onPress={handleSave}
+              disabled={isLoading}
+              activeOpacity={0.8}
+            >
+              {isLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons 
+                    name={editMode ? "content-save" : "plus-circle"} 
+                    size={20} 
+                    color="#fff" 
+                  />
+                  <Text style={styles.saveButtonText}>
+                    {editMode ? 'Update Item' : 'Add to Inventory'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
           </Animated.View>
         )}
+
+        {/* Product Edit Modal */}
+        <ProductEditModal
+          visible={showEditModal}
+          product={productToEdit}
+          onClose={() => {
+            setShowEditModal(false);
+            setProductToEdit(null);
+          }}
+          onSave={handleProductSave}
+          businessId={currentBusinessId}
+        />
 
         {/* Success Animation Overlay */}
         {showSuccessAnimation && (
@@ -1464,7 +1391,7 @@ export default function AddInventoryScreen({ navigation, route }) {
           </Animated.View>
         )}
 
-        {/* FIXED: Completion Animation Overlay */}
+        {/* Completion Animation Overlay */}
         {showCompletionAnimation && (
           <Animated.View style={styles.completionOverlay}>
             <Animated.View style={{
@@ -1573,23 +1500,6 @@ const styles = StyleSheet.create({
   searchLoader: {
     marginLeft: 8,
   },
-  autoRefreshContainer: {
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  autoRefreshToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#f5f5f5',
-  },
-  autoRefreshText: {
-    fontSize: 12,
-    marginLeft: 4,
-    fontWeight: '500',
-  },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1612,13 +1522,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingTop: 24, // INCREASE THIS - more space from header
+    paddingTop: 24,
     paddingBottom: 120,
   },
   section: {
-    marginBottom: 32, // Increased spacing
-    marginTop: 8, // ADD THIS - extra top margin
-
+    marginBottom: 32,
+    marginTop: 8,
   },
   sectionHeader: {
     marginBottom: 16,
@@ -1667,7 +1576,6 @@ const styles = StyleSheet.create({
     color: '#333',
     marginLeft: 8,
   },
-  // FIXED: Better search results container
   searchResultsContainer: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -1677,8 +1585,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    marginTop: 16, // ADD THIS - creates space from search bar
-    zIndex: 1, // ADD THIS - ensures proper layering
+    marginTop: 16,
+    zIndex: 1,
   },
   searchResultsList: {
     flexGrow: 0,
@@ -1694,15 +1602,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
     marginHorizontal: 16,
   },
-  // FIXED: Better search result content layout
   searchResultContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20, // Increased padding
-    minHeight: 100, // Increased minimum height
+    padding: 20,
+    minHeight: 100,
   },
   plantIcon: {
-    width: 56, // Larger icon
+    width: 56,
     height: 56,
     borderRadius: 28,
     backgroundColor: '#f0f9f3',
@@ -1716,7 +1623,7 @@ const styles = StyleSheet.create({
     marginRight: 16,
   },
   searchResultName: {
-    fontSize: 17, // Slightly larger
+    fontSize: 17,
     fontWeight: '700',
     color: '#333',
     marginBottom: 4,
@@ -1760,10 +1667,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 2,
   },
-  
-  // FIXED: Better selected plant section spacing
   selectedPlantSection: {
-    marginTop: 40, // More space from search results
+    marginTop: 40,
   },
   selectedPlantContainer: {
     marginBottom: 24,
@@ -1773,7 +1678,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderLeftWidth: 4,
     borderLeftColor: '#4CAF50',
-    padding: 20, // Increased padding
+    padding: 20,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1783,25 +1688,25 @@ const styles = StyleSheet.create({
   selectedPlantHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20, // Increased spacing
+    marginBottom: 20,
   },
   selectedPlantInfo: {
     flex: 1,
     marginLeft: 12,
   },
   selectedPlantName: {
-    fontSize: 19, // Larger font
+    fontSize: 19,
     fontWeight: '700',
     color: '#333',
   },
   selectedPlantScientific: {
-    fontSize: 15, // Larger font
+    fontSize: 15,
     fontStyle: 'italic',
     color: '#666',
     marginTop: 4,
   },
   removeButton: {
-    padding: 10, // Larger touch target
+    padding: 10,
     borderRadius: 20,
     backgroundColor: 'rgba(244, 67, 54, 0.1)',
   },
@@ -1814,7 +1719,7 @@ const styles = StyleSheet.create({
     flex: 0.48,
     backgroundColor: 'rgba(255,255,255,0.8)',
     borderRadius: 8,
-    padding: 14, // Increased padding
+    padding: 14,
     alignItems: 'center',
   },
   plantDetailLabel: {
@@ -1829,15 +1734,13 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
-  
-  // FIXED: Better form section spacing
   formSection: {
     marginTop: 20,
   },
   formContainer: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 20, // Increased padding
+    padding: 20,
     elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -1845,13 +1748,13 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
   },
   inputGroup: {
-    marginBottom: 24, // Increased spacing
+    marginBottom: 24,
   },
   label: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    marginBottom: 10, // Increased spacing
+    marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -1864,7 +1767,7 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
     borderRadius: 8,
     paddingHorizontal: 14,
-    paddingVertical: 16, // Increased padding
+    paddingVertical: 16,
     fontSize: 16,
     backgroundColor: '#fafafa',
     color: '#333',
@@ -1874,18 +1777,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffebee',
   },
   textArea: {
-    height: 90, // Slightly taller
+    height: 90,
     textAlignVertical: 'top',
   },
   row: {
     flexDirection: 'row',
-    gap: 16, // Increased gap
+    gap: 16,
   },
   halfInput: {
     flex: 1,
   },
   footer: {
-    padding: 20, // Increased padding
+    padding: 20,
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
@@ -1895,7 +1798,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18, // Increased padding
+    paddingVertical: 18,
     borderRadius: 12,
     elevation: 2,
     shadowColor: '#000',
@@ -1979,128 +1882,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 6,
   },
-  inventoryList: {
-    flex: 1,
-  },
-  inventoryListContent: {
-    padding: 16,
-  },
-  inventoryItem: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  inventoryItemHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  inventoryIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4CAF50',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  inventoryItemInfo: {
-    flex: 1,
-  },
-  inventoryItemName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  inventoryItemScientific: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
-  inventoryItemActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  editButton: {
-    padding: 8,
-    borderRadius: 6,
-    backgroundColor: '#e3f2fd',
-  },
-  inventoryItemDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  detailItem: {
-    alignItems: 'center',
-  },
-  detailLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 2,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  lowStockText: {
-    color: '#FF9800',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  emptyInventory: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 40,
-  },
-  emptyInventoryTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyInventoryText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  addFirstItemButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4CAF50',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  addFirstItemButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    marginLeft: 8,
-  },
   // Success Animation Overlay
   successOverlay: {
     position: 'absolute',
@@ -2127,7 +1908,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     opacity: 0.8,
   },
-  // FIXED: Completion Animation Overlay
+  // Completion Animation Overlay
   completionOverlay: {
     position: 'absolute',
     top: 0,
