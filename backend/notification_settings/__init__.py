@@ -11,15 +11,57 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Notification Settings API triggered.')
     
     try:
-        # Initialize Cosmos client
-        endpoint = os.environ["COSMOSDB__MARKETPLACE_CONNECTION_STRING"]
-        key = os.environ["COSMOSDB_KEY"]
-        database_id = os.environ["COSMOSDB_MARKETPLACE_DATABASE_NAME"]
+        # Handle CORS for web requests
+        if req.method == 'OPTIONS':
+            return func.HttpResponse(
+                "",
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, X-Business-ID, X-User-Email"
+                }
+            )
+        
+        # Initialize Cosmos client with proper connection string handling
+        connection_string = os.environ.get("COSMOSDB__MARKETPLACE_CONNECTION_STRING")
+        database_id = os.environ.get("COSMOSDB_MARKETPLACE_DATABASE_NAME", "GreenerMarketplace")
         container_id = "watering_notifications"
         
-        client = CosmosClient(endpoint, key)
+        if not connection_string:
+            return func.HttpResponse(
+                json.dumps({"error": "Database connection not configured"}),
+                status_code=500,
+                mimetype="application/json",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json"
+                }
+            )
+        
+        # Parse connection string properly
+        if connection_string.startswith("AccountEndpoint="):
+            # Full connection string format
+            client = CosmosClient.from_connection_string(connection_string)
+        else:
+            # Separate endpoint and key (fallback)
+            key = os.environ.get("COSMOSDB_KEY")
+            client = CosmosClient(connection_string, key)
+        
         database = client.get_database_client(database_id)
-        container = database.get_container_client(container_id)
+        
+        # Ensure container exists
+        try:
+            container = database.get_container_client(container_id)
+            container.read()
+        except Exception:
+            logging.info(f"Creating container {container_id}")
+            from azure.cosmos import PartitionKey
+            container = database.create_container(
+                id=container_id,
+                partition_key=PartitionKey(path="/businessId"),
+                offer_throughput=400
+            )
         
         # Handle different HTTP methods
         if req.method == "GET":
@@ -32,7 +74,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({"error": "Method not allowed"}),
                 status_code=405,
-                mimetype="application/json"
+                mimetype="application/json",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json"
+                }
             )
     
     except Exception as e:
@@ -40,7 +86,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({"error": f"Internal server error: {str(e)}"}),
             status_code=500,
-            mimetype="application/json"
+            mimetype="application/json",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json"
+            }
         )
 
 def get_notification_settings(container, req):
@@ -54,16 +104,24 @@ def get_notification_settings(container, req):
             return func.HttpResponse(
                 json.dumps({"error": "Business ID is required"}),
                 status_code=400,
-                mimetype="application/json"
+                mimetype="application/json",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json"
+                }
             )
         
         # Query for notification settings
         query = "SELECT * FROM c WHERE c.businessId = @businessId"
-        settings = list(container.query_items(
-            query=query,
-            parameters=[{"name": "@businessId", "value": business_id}],
-            enable_cross_partition_query=True
-        ))
+        try:
+            settings = list(container.query_items(
+                query=query,
+                parameters=[{"name": "@businessId", "value": business_id}],
+                enable_cross_partition_query=True
+            ))
+        except Exception as e:
+            logging.warning(f"Error querying settings: {str(e)}")
+            settings = []
         
         # If no settings exist, return default
         if not settings:
@@ -73,6 +131,7 @@ def get_notification_settings(container, req):
                 "enableWateringReminders": True,
                 "enableLowStockAlerts": True,
                 "enableSuccessNotifications": True,
+                "pollingInterval": 60,
                 "status": "active"
             }
             settings = [default_setting]
@@ -83,7 +142,11 @@ def get_notification_settings(container, req):
                 "businessId": business_id
             }),
             status_code=200,
-            mimetype="application/json"
+            mimetype="application/json",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json"
+            }
         )
     
     except Exception as e:
@@ -99,7 +162,11 @@ def create_or_update_notification_settings(container, req):
             return func.HttpResponse(
                 json.dumps({"error": "Request body is required"}),
                 status_code=400,
-                mimetype="application/json"
+                mimetype="application/json",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json"
+                }
             )
         
         business_id = req_body.get('businessId')
@@ -110,16 +177,23 @@ def create_or_update_notification_settings(container, req):
             return func.HttpResponse(
                 json.dumps({"error": "Business ID is required"}),
                 status_code=400,
-                mimetype="application/json"
+                mimetype="application/json",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json"
+                }
             )
         
         # Check if settings already exist
         existing_query = "SELECT * FROM c WHERE c.businessId = @businessId"
-        existing_settings = list(container.query_items(
-            query=existing_query,
-            parameters=[{"name": "@businessId", "value": business_id}],
-            enable_cross_partition_query=True
-        ))
+        try:
+            existing_settings = list(container.query_items(
+                query=existing_query,
+                parameters=[{"name": "@businessId", "value": business_id}],
+                enable_cross_partition_query=True
+            ))
+        except Exception:
+            existing_settings = []
         
         # Create or update notification setting document
         setting = {
@@ -146,11 +220,15 @@ def create_or_update_notification_settings(container, req):
         return func.HttpResponse(
             json.dumps({
                 "success": True,
-                "setting": setting,
+                "settings": setting,
                 "message": "Notification settings saved successfully"
             }),
             status_code=200,
-            mimetype="application/json"
+            mimetype="application/json",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json"
+            }
         )
     
     except Exception as e:
@@ -167,7 +245,11 @@ def delete_notification_settings(container, req):
             return func.HttpResponse(
                 json.dumps({"error": "Setting ID and Business ID are required"}),
                 status_code=400,
-                mimetype="application/json"
+                mimetype="application/json",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json"
+                }
             )
         
         # Delete the setting
@@ -179,7 +261,11 @@ def delete_notification_settings(container, req):
                 "message": "Notification settings deleted successfully"
             }),
             status_code=200,
-            mimetype="application/json"
+            mimetype="application/json",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/json"
+            }
         )
     
     except Exception as e:
