@@ -1,4 +1,4 @@
-// Business/BusinessScreens/WateringChecklistScreen.js - FIXED VERSION
+// Business/BusinessScreens/WateringChecklistScreen.js - FIXED LOADING ISSUES
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -29,7 +29,9 @@ import {
   getWateringChecklist, 
   markPlantAsWatered, 
   getOptimizedWateringRoute,
-  getBusinessWeather 
+  getBusinessWeather,
+  getCachedWateringChecklist,
+  setCachedWateringChecklist 
 } from '../services/businessWateringApi';
 
 export default function WateringChecklistScreen({ navigation, route }) {
@@ -70,21 +72,41 @@ export default function WateringChecklistScreen({ navigation, route }) {
   // Initialize when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      console.log('🌱 WateringChecklistScreen focused');
+      
       const initialize = async () => {
         try {
-          const storedBusinessId = await AsyncStorage.getItem('businessId');
-          if (storedBusinessId) {
-            setBusinessId(storedBusinessId);
-            loadChecklist(storedBusinessId);
-            loadWeatherInfo(storedBusinessId);
-            startAutoRefresh(storedBusinessId);
+          // Get business ID first
+          let id = await AsyncStorage.getItem('businessId');
+          if (!id) {
+            id = await AsyncStorage.getItem('userEmail');
+          }
+          
+          console.log('📧 Business ID:', id);
+          
+          if (id) {
+            setBusinessId(id);
+            
+            // Try to load cached data first for faster display
+            const cachedData = await getCachedWateringChecklist();
+            if (cachedData) {
+              console.log('📦 Loading cached checklist data');
+              updateChecklistState(cachedData);
+              setIsLoading(false);
+            }
+            
+            // Then load fresh data
+            await loadChecklist(id);
+            await loadWeatherInfo(id);
+            startAutoRefresh(id);
             startEntranceAnimation();
           } else {
+            console.error('❌ No business ID found');
             setError('Business ID not found. Please set up your business profile.');
             setIsLoading(false);
           }
         } catch (error) {
-          console.error('Error initializing:', error);
+          console.error('❌ Error initializing:', error);
           setError('Failed to initialize checklist');
           setIsLoading(false);
         }
@@ -99,6 +121,43 @@ export default function WateringChecklistScreen({ navigation, route }) {
       };
     }, [])
   );
+  
+  // Helper function to update checklist state
+  const updateChecklistState = (data) => {
+    const checklistData = data.checklist || [];
+    
+    // Sort: First plants that need watering, then by days remaining
+    checklistData.sort((a, b) => {
+      if (a.needsWatering && !b.needsWatering) return -1;
+      if (!a.needsWatering && b.needsWatering) return 1;
+      
+      if (!a.needsWatering && !b.needsWatering) {
+        return (a.daysRemaining || 0) - (b.daysRemaining || 0);
+      }
+      
+      if (a.location?.section && b.location?.section) {
+        if (a.location.section !== b.location.section) {
+          return a.location.section.localeCompare(b.location.section);
+        }
+        
+        if (a.location.aisle && b.location.aisle) {
+          return a.location.aisle.localeCompare(b.location.aisle);
+        }
+      }
+      
+      return 0;
+    });
+    
+    setChecklist(checklistData);
+    
+    const completedCount = checklistData.filter(plant => plant.completed).length;
+    
+    setStats({
+      totalCount: data.totalCount || checklistData.length || 0,
+      needsWateringCount: data.needsWateringCount || checklistData.filter(p => p.needsWatering).length || 0,
+      completedCount
+    });
+  };
   
   // Animation functions
   const startEntranceAnimation = () => {
@@ -150,6 +209,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
     
     refreshTimer.current = setInterval(() => {
       if (businessId && autoRefreshEnabled) {
+        console.log('🔄 Auto-refreshing watering checklist');
         loadChecklist(businessId, true); // Silent refresh
       }
     }, autoRefreshInterval);
@@ -163,13 +223,18 @@ export default function WateringChecklistScreen({ navigation, route }) {
         setWeatherInfo(weather);
       }
     } catch (error) {
-      console.warn('Could not load weather info:', error);
+      console.warn('⚠️ Could not load weather info:', error);
     }
   };
   
   // Load checklist data
   const loadChecklist = async (businessId, silent = false) => {
-    if (!businessId) return;
+    if (!businessId) {
+      console.warn('⚠️ No business ID provided to loadChecklist');
+      return;
+    }
+    
+    console.log(`📊 Loading checklist for business: ${businessId}, silent: ${silent}`);
     
     if (!silent) {
       setIsLoading(true);
@@ -178,45 +243,13 @@ export default function WateringChecklistScreen({ navigation, route }) {
     
     try {
       const data = await getWateringChecklist(businessId, silent);
+      console.log('📋 Checklist data received:', data);
       
-      // Process and sort the checklist
-      let checklistData = data.checklist || [];
+      // Update state
+      updateChecklistState(data);
       
-      // Sort: First plants that need watering, then by days remaining
-      checklistData.sort((a, b) => {
-        // First priority: plants that need watering
-        if (a.needsWatering && !b.needsWatering) return -1;
-        if (!a.needsWatering && b.needsWatering) return 1;
-        
-        // Second priority: days remaining (for plants that don't need watering)
-        if (!a.needsWatering && !b.needsWatering) {
-          return a.daysRemaining - b.daysRemaining;
-        }
-        
-        // Plants that both need watering - sort by location if available
-        if (a.location?.section && b.location?.section) {
-          if (a.location.section !== b.location.section) {
-            return a.location.section.localeCompare(b.location.section);
-          }
-          
-          if (a.location.aisle && b.location.aisle) {
-            return a.location.aisle.localeCompare(b.location.aisle);
-          }
-        }
-        
-        return 0;
-      });
-      
-      setChecklist(checklistData);
-      
-      // Calculate stats
-      const completedCount = checklistData.filter(plant => plant.completed).length;
-      
-      setStats({
-        totalCount: data.totalCount || checklistData.length || 0,
-        needsWateringCount: data.needsWateringCount || checklistData.filter(p => p.needsWatering).length || 0,
-        completedCount
-      });
+      // Cache the data
+      await setCachedWateringChecklist(data);
       
       // Get optimized route if there are plants needing watering and not already shown
       if (data.needsWateringCount > 0 && !optimizedRoute) {
@@ -224,13 +257,13 @@ export default function WateringChecklistScreen({ navigation, route }) {
           const routeData = await getOptimizedWateringRoute(businessId);
           setOptimizedRoute(routeData);
         } catch (routeError) {
-          console.warn('Could not get optimized route:', routeError);
+          console.warn('⚠️ Could not get optimized route:', routeError);
         }
       }
       
       setError(null);
     } catch (error) {
-      console.error('Error loading checklist:', error);
+      console.error('❌ Error loading checklist:', error);
       if (!silent) {
         setError('Could not load watering checklist');
         startShakeAnimation();
@@ -245,6 +278,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
   
   // Pull-to-refresh handler
   const onRefresh = useCallback(() => {
+    console.log('🔄 Manual refresh triggered');
     if (businessId) {
       loadChecklist(businessId);
       loadWeatherInfo(businessId);
@@ -253,6 +287,8 @@ export default function WateringChecklistScreen({ navigation, route }) {
   
   // Mark plant as watered
   const handleMarkWatered = async (plantId) => {
+    console.log(`💧 Marking plant ${plantId} as watered`);
+    
     try {
       // Provide haptic feedback
       if (Platform.OS !== 'web') {
@@ -277,7 +313,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
         }));
         
         // Show success feedback
-        Alert.alert('✅ Success', `${result.plant.name} has been watered.`);
+        Alert.alert('✅ Success', `${result.plant?.name || 'Plant'} has been watered.`);
         
         // Refresh checklist after a short delay
         setTimeout(() => {
@@ -287,7 +323,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
         }, 1000);
       }
     } catch (error) {
-      console.error('Error marking plant as watered:', error);
+      console.error('❌ Error marking plant as watered:', error);
       Alert.alert('❌ Error', 'Could not mark plant as watered');
       startShakeAnimation();
     }
@@ -321,7 +357,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
         Alert.alert('⚠️ Invalid Barcode', 'This barcode does not contain valid plant data');
       }
     } catch (error) {
-      console.error('Error processing barcode:', error);
+      console.error('❌ Error processing barcode:', error);
       Alert.alert('❌ Invalid Format', 'The scanned barcode is not in a valid format');
     }
   };
@@ -341,16 +377,9 @@ export default function WateringChecklistScreen({ navigation, route }) {
     }
   };
   
-  // Toggle optimized route view
-  const toggleOptimizedRoute = () => {
-    setShowOptimizedRoute(!showOptimizedRoute);
-    
-    // Animate header height
-    Animated.timing(headerHeightAnim, {
-      toValue: !showOptimizedRoute ? (Platform.OS === 'ios' ? 170 : 150) : (Platform.OS === 'ios' ? 120 : 100),
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
+  // Handle optimized route
+  const handleOptimizeRoute = () => {
+    navigation.navigate('OptimizeWateringRouteScreen', { businessId });
   };
   
   // Toggle auto-refresh
@@ -368,7 +397,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
     try {
       await AsyncStorage.setItem('watering_auto_refresh', newState ? 'true' : 'false');
     } catch (error) {
-      console.warn('Could not save auto-refresh preference:', error);
+      console.warn('⚠️ Could not save auto-refresh preference:', error);
     }
   };
   
@@ -380,6 +409,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Loading watering checklist...</Text>
+          <Text style={styles.loadingSubtext}>Checking which plants need water</Text>
         </View>
       </SafeAreaView>
     );
@@ -394,6 +424,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
           <MaterialIcons name="error-outline" size={64} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => loadChecklist(businessId)}>
+            <MaterialIcons name="refresh" size={20} color="#fff" />
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -510,16 +541,13 @@ export default function WateringChecklistScreen({ navigation, route }) {
           <TouchableOpacity 
             style={[
               styles.actionButton,
-              stats.needsWateringCount === 0 && styles.disabledButton,
-              optimizedRoute?.route?.length > 0 && showOptimizedRoute && styles.activeButton
+              stats.needsWateringCount === 0 && styles.disabledButton
             ]}
-            onPress={toggleOptimizedRoute}
-            disabled={stats.needsWateringCount === 0 || !optimizedRoute}
+            onPress={handleOptimizeRoute}
+            disabled={stats.needsWateringCount === 0}
           >
             <MaterialIcons name="route" size={22} color="#fff" />
-            <Text style={styles.actionButtonText}>
-              {showOptimizedRoute ? 'Hide Route' : 'Show Route'}
-            </Text>
+            <Text style={styles.actionButtonText}>Optimize</Text>
           </TouchableOpacity>
         </Animated.View>
       </Animated.View>
@@ -560,67 +588,6 @@ export default function WateringChecklistScreen({ navigation, route }) {
         </Animated.View>
       )}
       
-      {/* Optimized Route View */}
-      {showOptimizedRoute && optimizedRoute && optimizedRoute.route && optimizedRoute.route.length > 0 && (
-        <Animated.View 
-          style={[
-            styles.optimizedRouteContainer,
-            {
-              opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }],
-            }
-          ]}
-        >
-          <View style={styles.routeHeader}>
-            <Text style={styles.routeTitle}>Optimized Watering Route</Text>
-            <Text style={styles.routeSubtitle}>
-              {optimizedRoute.totalPlants} plants • {optimizedRoute.estimatedTime.formatted}
-            </Text>
-          </View>
-          
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.routeSteps}>
-              {optimizedRoute.route.map((plant, index) => (
-                <View key={plant.id} style={styles.routeStep}>
-                  <View style={styles.routeStepNumber}>
-                    <Text style={styles.stepNumberText}>{index + 1}</Text>
-                  </View>
-                  
-                  <View style={styles.routeStepInfo}>
-                    <Text style={styles.routeStepName} numberOfLines={1}>
-                      {plant.name}
-                    </Text>
-                    {plant.location && (
-                      <Text style={styles.routeStepLocation} numberOfLines={1}>
-                        {[
-                          plant.location.section && `Section ${plant.location.section}`,
-                          plant.location.aisle && `Aisle ${plant.location.aisle}`,
-                          plant.location.shelfNumber && `Shelf ${plant.location.shelfNumber}`
-                        ].filter(Boolean).join(', ')}
-                      </Text>
-                    )}
-                  </View>
-                  
-                  {index < optimizedRoute.route.length - 1 && (
-                    <View style={styles.routeArrow}>
-                      <MaterialIcons name="arrow-forward" size={16} color="#4CAF50" />
-                    </View>
-                  )}
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-          
-          <TouchableOpacity 
-            style={styles.startNavigationButton}
-            onPress={handleGPSNavigation}
-          >
-            <MaterialIcons name="navigation" size={20} color="#fff" />
-            <Text style={styles.startNavigationText}>Start Navigation</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      )}
-      
       {/* Checklist */}
       <ScrollView
         style={styles.scrollView}
@@ -654,6 +621,14 @@ export default function WateringChecklistScreen({ navigation, route }) {
               <MaterialCommunityIcons name="water-off" size={64} color="#e0e0e0" />
               <Text style={styles.emptyText}>No plants need watering</Text>
               <Text style={styles.emptySubtext}>All your plants are properly watered!</Text>
+              
+              <TouchableOpacity 
+                style={styles.addPlantsButton}
+                onPress={() => navigation.navigate('AddInventoryScreen', { businessId, showInventory: true })}
+              >
+                <MaterialIcons name="add" size={20} color="#4CAF50" />
+                <Text style={styles.addPlantsButtonText}>Manage Plants</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             checklist.map((plant) => (
@@ -808,10 +783,17 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 40,
   },
   loadingText: {
     marginTop: 16,
-    fontSize: 16,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    fontSize: 14,
     color: '#666',
   },
   errorContainer: {
@@ -827,6 +809,8 @@ const styles = StyleSheet.create({
     marginVertical: 16,
   },
   retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#4CAF50',
     paddingVertical: 12,
     paddingHorizontal: 24,
@@ -835,6 +819,7 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: '#fff',
     fontWeight: '600',
+    marginLeft: 8,
   },
   header: {
     backgroundColor: '#4CAF50',
@@ -972,85 +957,6 @@ const styles = StyleSheet.create({
     color: '#2196F3',
     marginLeft: 4,
   },
-  optimizedRouteContainer: {
-    backgroundColor: '#fff',
-    margin: 16,
-    marginTop: 8,
-    marginBottom: 8,
-    borderRadius: 12,
-    padding: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  routeHeader: {
-    marginBottom: 12,
-  },
-  routeTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  routeSubtitle: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  routeSteps: {
-    flexDirection: 'row',
-    paddingVertical: 8,
-  },
-  routeStep: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  routeStepNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#4CAF50',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  stepNumberText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  routeStepInfo: {
-    marginRight: 8,
-    maxWidth: 120,
-  },
-  routeStepName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  routeStepLocation: {
-    fontSize: 12,
-    color: '#666',
-  },
-  routeArrow: {
-    marginHorizontal: 8,
-  },
-  startNavigationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#4CAF50',
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 12,
-  },
-  startNavigationText: {
-    color: '#fff',
-    fontWeight: '600',
-    marginLeft: 8,
-  },
   scrollView: {
     flex: 1,
   },
@@ -1090,6 +996,22 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 8,
     textAlign: 'center',
+  },
+  addPlantsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f9f3',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+  },
+  addPlantsButtonText: {
+    color: '#4CAF50',
+    fontWeight: '600',
+    marginLeft: 4,
   },
   plantCard: {
     backgroundColor: '#fff',

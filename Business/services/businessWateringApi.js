@@ -1,72 +1,122 @@
 // Business/services/businessWateringApi.js
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
 
 const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
-const DEFAULT_TIMEOUT = 15000; // 15 seconds
-const MAX_RETRY_ATTEMPTS = 3;
+const DEFAULT_TIMEOUT = 15000;
+
+class ApiError extends Error {
+  constructor(message, status, response) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.response = response;
+  }
+}
+
+// Helper function to get headers
+const getHeaders = async () => {
+  try {
+    const userEmail = await AsyncStorage.getItem('userEmail');
+    const userType = await AsyncStorage.getItem('userType');
+    const businessId = await AsyncStorage.getItem('businessId');
+    
+    return {
+      'Content-Type': 'application/json',
+      'X-User-Email': userEmail || '',
+      'X-User-Type': userType || 'business',
+      'X-Business-ID': businessId || '',
+    };
+  } catch (error) {
+    console.error('Error getting headers:', error);
+    return {
+      'Content-Type': 'application/json',
+    };
+  }
+};
+
+// Helper function to make API calls with retry logic
+const apiCall = async (endpoint, options = {}) => {
+  const headers = await getHeaders();
+  const config = {
+    timeout: DEFAULT_TIMEOUT,
+    headers,
+    ...options,
+  };
+
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      console.log(`🔗 API Call (attempt ${attempt}): ${endpoint}`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), config.timeout);
+      
+      const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+        ...config,
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      const responseText = await response.text();
+      console.log(`📋 Response Status: ${response.status}`);
+      
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorData = JSON.parse(responseText);
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new ApiError(errorMessage, response.status, responseText);
+      }
+      
+      const data = responseText ? JSON.parse(responseText) : {};
+      console.log(`✅ API Success: ${endpoint}`, data);
+      return data;
+      
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ API Error (attempt ${attempt}):`, error.message);
+      
+      // Don't retry on client errors (4xx)
+      if (error.status >= 400 && error.status < 500) {
+        break;
+      }
+      
+      // Wait before retry (exponential backoff)
+      if (attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+      }
+    }
+  }
+  
+  throw lastError;
+};
 
 /**
  * Get watering checklist for a business
- * @param {string} businessId - Business identifier
- * @param {boolean} silent - If true, no error will be thrown on failure
- * @returns {Promise<Object>} - Watering checklist data
  */
 export const getWateringChecklist = async (businessId, silent = false) => {
   try {
     if (!businessId) {
-      businessId = await AsyncStorage.getItem('businessId');
+      throw new Error('Business ID is required');
     }
     
-    const response = await fetchWithRetry(`${API_BASE_URL}/business/watering-checklist?businessId=${businessId}`, {
-      method: 'GET',
-      headers: await getAuthHeaders(businessId)
-    });
+    const data = await apiCall(`business/watering-checklist?businessId=${businessId}`);
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to get watering checklist: ${response.status} ${errorText}`);
-    }
-    
-    const data = await response.json();
-    
-    // Save to cache for offline use
-    try {
-      await AsyncStorage.setItem('cached_watering_checklist', JSON.stringify({
-        data,
-        timestamp: Date.now(),
-        businessId
-      }));
-    } catch (cacheError) {
-      console.warn('Failed to cache watering checklist:', cacheError);
-    }
-    
-    return data;
+    return {
+      checklist: data.checklist || [],
+      totalCount: data.totalCount || 0,
+      needsWateringCount: data.needsWateringCount || 0,
+      timestamp: data.timestamp || new Date().toISOString()
+    };
   } catch (error) {
-    console.error('Error fetching watering checklist:', error);
-    
-    // Try to get from cache if silent mode
-    if (silent) {
-      try {
-        const cachedData = await AsyncStorage.getItem('cached_watering_checklist');
-        if (cachedData) {
-          const parsed = JSON.parse(cachedData);
-          if (parsed.businessId === businessId) {
-            console.log('Using cached watering checklist data');
-            return parsed.data;
-          }
-        }
-      } catch (cacheError) {
-        console.warn('Error reading cache:', cacheError);
-      }
-    }
-    
+    console.error('Error getting watering checklist:', error);
     if (!silent) {
-      throw error;
+      throw new Error('Failed to load watering checklist');
     }
-    
-    // Return empty structure if silent
     return {
       checklist: [],
       totalCount: 0,
@@ -78,127 +128,113 @@ export const getWateringChecklist = async (businessId, silent = false) => {
 
 /**
  * Mark a plant as watered
- * @param {string} plantId - Plant identifier
- * @param {string} method - Watering method ('manual', 'barcode', or 'gps')
- * @param {Object} coordinates - Optional GPS coordinates
- * @returns {Promise<Object>} - Result data
  */
 export const markPlantAsWatered = async (plantId, method = 'manual', coordinates = null) => {
   try {
+    if (!plantId) {
+      throw new Error('Plant ID is required');
+    }
+    
     const businessId = await AsyncStorage.getItem('businessId');
     
-    // If method is 'gps' but no coordinates provided, get current location
-    if (method === 'gps' && !coordinates) {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.High
-          });
-          
-          coordinates = {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude
-          };
-        }
-      } catch (locationError) {
-        console.warn('Could not get location:', locationError);
-      }
+    const requestBody = {
+      plantId,
+      method,
+      businessId
+    };
+    
+    if (coordinates) {
+      requestBody.coordinates = coordinates;
     }
     
-    const response = await fetchWithRetry(`${API_BASE_URL}/business/watering-checklist`, {
+    const data = await apiCall('business/watering-checklist', {
       method: 'POST',
-      headers: await getAuthHeaders(businessId),
-      body: JSON.stringify({
-        businessId,
-        plantId,
-        method,
-        coordinates
-      })
+      body: JSON.stringify(requestBody)
     });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to mark plant as watered: ${response.status} ${errorText}`);
-    }
-    
-    const data = await response.json();
-    
-    // Clear cache to force refresh
-    await AsyncStorage.removeItem('cached_watering_checklist');
     
     return data;
   } catch (error) {
     console.error('Error marking plant as watered:', error);
-    throw error;
+    throw new Error('Failed to mark plant as watered');
   }
 };
 
 /**
  * Get optimized watering route
- * @param {string} businessId - Business identifier
- * @returns {Promise<Object>} - Optimized route data
  */
 export const getOptimizedWateringRoute = async (businessId) => {
   try {
     if (!businessId) {
-      businessId = await AsyncStorage.getItem('businessId');
+      throw new Error('Business ID is required');
     }
     
-    const response = await fetchWithRetry(`${API_BASE_URL}/business/optimize-watering-route?businessId=${businessId}`, {
-      method: 'GET',
-      headers: await getAuthHeaders(businessId)
-    });
+    const data = await apiCall(`business/optimize-watering-route?businessId=${businessId}`);
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to get optimized route: ${response.status} ${errorText}`);
-    }
-    
-    return await response.json();
+    return {
+      route: data.route || [],
+      routeType: data.routeType || 'location',
+      totalPlants: data.totalPlants || 0,
+      estimatedTime: data.estimatedTime || { minutes: 0, formatted: '0 min' }
+    };
   } catch (error) {
-    console.error('Error fetching optimized watering route:', error);
-    throw error;
+    console.error('Error getting optimized route:', error);
+    throw new Error('Failed to generate optimized watering route');
   }
 };
 
 /**
- * Get plant barcode PDF URL
- * @param {string} plantId - Plant identifier
- * @param {string} businessId - Business identifier
- * @returns {Promise<string>} URL to download barcode PDF
+ * Get weather information for business location
+ */
+export const getBusinessWeather = async (businessId) => {
+  try {
+    if (!businessId) {
+      throw new Error('Business ID is required');
+    }
+    
+    // Mock weather data for now - replace with actual weather API
+    return {
+      location: 'Business Location',
+      temperature: 22,
+      condition: 'Partly Cloudy',
+      precipitation: 10
+    };
+  } catch (error) {
+    console.error('Error getting weather:', error);
+    return null;
+  }
+};
+
+/**
+ * Generate plant barcode PDF URL
  */
 export const getPlantBarcodeUrl = async (plantId, businessId) => {
-  if (!businessId) {
-    businessId = await AsyncStorage.getItem('businessId');
+  try {
+    if (!plantId || !businessId) {
+      throw new Error('Plant ID and Business ID are required');
+    }
+    
+    const data = await apiCall(`business/generate-plant-barcode?plantId=${plantId}&businessId=${businessId}`);
+    
+    return data.pdfUrl || null;
+  } catch (error) {
+    console.error('Error getting barcode URL:', error);
+    throw new Error('Failed to generate barcode URL');
   }
-  
-  return `${API_BASE_URL}/business/generate-barcode?businessId=${businessId}&plantId=${plantId}`;
 };
 
 /**
- * Register device for watering notifications
- * @param {string} deviceToken - FCM or Expo push token
- * @param {string} notificationTime - Format: HH:MM (24-hour)
- * @returns {Promise<Object>} - Registration result
+ * Register for watering notifications
  */
-export const registerForWateringNotifications = async (deviceToken, notificationTime = '07:00') => {
+export const registerForWateringNotifications = async (deviceToken, notificationTime) => {
   try {
+    if (!deviceToken || !notificationTime) {
+      throw new Error('Device token and notification time are required');
+    }
+    
     const businessId = await AsyncStorage.getItem('businessId');
     
-    // If no token provided, get one from Expo
-    if (!deviceToken) {
-      deviceToken = await getExpoPushToken();
-    }
-    
-    if (!deviceToken) {
-      throw new Error('Failed to get device token for notifications');
-    }
-    
-    // Register with backend
-    const response = await fetchWithRetry(`${API_BASE_URL}/business/register-notification`, {
+    const data = await apiCall('business/register-notification', {
       method: 'POST',
-      headers: await getAuthHeaders(businessId),
       body: JSON.stringify({
         businessId,
         deviceToken,
@@ -206,204 +242,53 @@ export const registerForWateringNotifications = async (deviceToken, notification
       })
     });
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to register for notifications: ${response.status} ${errorText}`);
-    }
-    
-    // Save notification settings locally
-    await AsyncStorage.setItem('wateringNotificationTime', notificationTime);
-    await AsyncStorage.setItem('wateringNotificationsEnabled', 'true');
-    await AsyncStorage.setItem('devicePushToken', deviceToken);
-    
-    return await response.json();
+    return data;
   } catch (error) {
-    console.error('Error registering for watering notifications:', error);
-    throw error;
+    console.error('Error registering for notifications:', error);
+    throw new Error('Failed to register for notifications');
   }
 };
 
 /**
- * Send a test notification
- * @param {string} deviceToken - Optional specific device token to test
- * @returns {Promise<Object>} - Test result
+ * Cache management for offline support
  */
-export const sendTestNotification = async (deviceToken = null) => {
+const CACHE_KEY = 'watering_checklist_cache';
+const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
+
+export const getCachedWateringChecklist = async () => {
   try {
-    const businessId = await AsyncStorage.getItem('businessId');
-    
-    // Get token if not provided
-    if (!deviceToken) {
-      deviceToken = await AsyncStorage.getItem('devicePushToken');
+    const cached = await AsyncStorage.getItem(CACHE_KEY);
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
       
-      if (!deviceToken) {
-        deviceToken = await getExpoPushToken();
-        
-        if (deviceToken) {
-          await AsyncStorage.setItem('devicePushToken', deviceToken);
-        }
+      // Check if cache is still valid
+      if (Date.now() - timestamp < CACHE_EXPIRY) {
+        return data;
       }
     }
-    
-    // Send test notification request
-    const response = await fetchWithRetry(`${API_BASE_URL}/business/test-notification`, {
-      method: 'POST',
-      headers: await getAuthHeaders(businessId),
-      body: JSON.stringify({
-        businessId,
-        deviceToken
-      })
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to send test notification: ${response.status} ${errorText}`);
-    }
-    
-    return await response.json();
+    return null;
   } catch (error) {
-    console.error('Error sending test notification:', error);
-    throw error;
+    console.error('Error getting cached checklist:', error);
+    return null;
   }
 };
 
-/**
- * Get business weather information
- * @param {string} businessId - Business identifier 
- * @returns {Promise<Object>} - Weather data
- */
-export const getBusinessWeather = async (businessId) => {
+export const setCachedWateringChecklist = async (data) => {
   try {
-    if (!businessId) {
-      businessId = await AsyncStorage.getItem('businessId');
-    }
-    
-    // For now, weather info is not directly exposed through an API endpoint
-    // We could either add a specific endpoint or use a mock for display purposes
-    
-    // Mock weather data for now
-    return {
-      location: "Hadera, IL",
-      temperature: 22,
-      condition: "Partly Cloudy",
-      precipitation: 10,
-      icon: "partly-cloudy",
-      timestamp: new Date().toISOString()
+    const cacheObject = {
+      data,
+      timestamp: Date.now()
     };
-    
-    // Real implementation would be:
-    /*
-    const response = await fetchWithRetry(`${API_BASE_URL}/business/weather?businessId=${businessId}`, {
-      method: 'GET',
-      headers: await getAuthHeaders(businessId)
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to get weather: ${response.status}`);
-    }
-    
-    return await response.json();
-    */
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cacheObject));
   } catch (error) {
-    console.error('Error fetching business weather:', error);
-    // Return null instead of throwing to allow graceful degradation
-    return null;
+    console.error('Error caching checklist:', error);
   }
 };
 
-/**
- * Get Expo push notification token
- * @returns {Promise<string|null>} - Push token or null if not available
- */
-export const getExpoPushToken = async () => {
-  if (!Device.isDevice) {
-    console.log('Push notifications are not available on simulator');
-    return null;
-  }
-  
+export const clearWateringCache = async () => {
   try {
-    // Check permission
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    
-    if (finalStatus !== 'granted') {
-      console.log('Failed to get push token for push notification!');
-      return null;
-    }
-    
-    // Get token
-    const token = (await Notifications.getExpoPushTokenAsync()).data;
-    console.log('Expo push token:', token);
-    
-    return token;
+    await AsyncStorage.removeItem(CACHE_KEY);
   } catch (error) {
-    console.error('Error getting push token:', error);
-    return null;
-  }
-};
-
-/**
- * Helper function to get auth headers
- * @param {string} businessId - Business identifier
- * @returns {Object} - Headers object
- */
-const getAuthHeaders = async (businessId) => {
-  const userEmail = await AsyncStorage.getItem('userEmail');
-  const authToken = await AsyncStorage.getItem('authToken');
-  
-  const headers = {
-    'Content-Type': 'application/json',
-    'X-User-Email': userEmail || '',
-    'X-User-Type': 'business',
-    'X-Business-ID': businessId || userEmail || '',
-    'X-API-Version': '1.0',
-    'X-Client': 'greener-mobile'
-  };
-  
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
-  }
-  
-  return headers;
-};
-
-/**
- * Helper function for fetch with retry logic
- * @param {string} url - The URL to fetch
- * @param {Object} options - Fetch options
- * @returns {Promise<Response>} - Fetch response
- */
-const fetchWithRetry = async (url, options, attempt = 1) => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
-    
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      console.warn(`Request timeout: ${url}`);
-    }
-    
-    if (attempt >= MAX_RETRY_ATTEMPTS) {
-      throw error;
-    }
-    
-    // Exponential backoff
-    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-    console.log(`Retrying request (${attempt}/${MAX_RETRY_ATTEMPTS}) after ${delay}ms`);
-    
-    await new Promise(resolve => setTimeout(resolve, delay));
-    return fetchWithRetry(url, options, attempt + 1);
+    console.error('Error clearing cache:', error);
   }
 };

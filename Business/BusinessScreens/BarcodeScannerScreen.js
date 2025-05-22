@@ -1,4 +1,4 @@
-// Business/BusinessScreens/BarcodeScannerScreen.js
+// Business/BusinessScreens/BarcodeScannerScreen.js - FIXED WITH EXPO-CAMERA
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -11,9 +11,9 @@ import {
   SafeAreaView,
   StatusBar,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { BarCodeScanner, BarCodeScannerResult, BarCodeScannerSettings } from 'expo-barcode-scanner';
-import { Camera } from 'expo-camera';
+import { CameraView, Camera } from 'expo-camera';
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
@@ -26,23 +26,29 @@ export default function BarcodeScannerScreen({ navigation, route }) {
   // State management
   const [hasPermission, setHasPermission] = useState(null);
   const [scanned, setScanned] = useState(false);
-  const [flashMode, setFlashMode] = useState(Camera.Constants.FlashMode.off);
-  const [cameraRatio, setCameraRatio] = useState('16:9');
+  const [flashMode, setFlashMode] = useState('off');
+  const [isLoading, setIsLoading] = useState(true);
   
   // Animation refs
   const scanLineAnim = useRef(new Animated.Value(0)).current;
   const frameOpacity = useRef(new Animated.Value(0.5)).current;
-  const cameraRef = useRef(null);
   
   // Request camera permission
   useEffect(() => {
     (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
-      
-      if (status === 'granted') {
-        // Start scanner animations
-        startScanAnimation();
+      try {
+        const { status } = await Camera.requestCameraPermissionsAsync();
+        setHasPermission(status === 'granted');
+        
+        if (status === 'granted') {
+          // Start scanner animations
+          startScanAnimation();
+        }
+      } catch (error) {
+        console.error('Error requesting camera permission:', error);
+        setHasPermission(false);
+      } finally {
+        setIsLoading(false);
       }
     })();
     
@@ -88,34 +94,11 @@ export default function BarcodeScannerScreen({ navigation, route }) {
     ).start();
   };
   
-  // Get optimal camera ratio (Android only)
-  const setOptimalRatio = async () => {
-    if (Platform.OS === 'android' && cameraRef.current) {
-      const ratios = await cameraRef.current.getSupportedRatiosAsync();
-      
-      // Choose ratio closest to screen aspect ratio
-      const screenRatio = height / width;
-      let optimalRatio = '16:9';
-      let minDiff = Infinity;
-      
-      ratios.forEach(ratio => {
-        const [w, h] = ratio.split(':').map(Number);
-        const ratioValue = h / w;
-        const diff = Math.abs(ratioValue - screenRatio);
-        
-        if (diff < minDiff) {
-          minDiff = diff;
-          optimalRatio = ratio;
-        }
-      });
-      
-      setCameraRatio(optimalRatio);
-    }
-  };
-  
-  // Handle barcode scan
-  const handleBarCodeScanned = ({ type, data }) => {
+  // Handle barcode scan using expo-camera
+  const handleBarcodeScanned = ({ type, data }) => {
     if (scanned) return;
+    
+    console.log('Barcode scanned:', { type, data });
     
     // Vibrate to indicate successful scan
     if (Platform.OS !== 'web') {
@@ -126,7 +109,7 @@ export default function BarcodeScannerScreen({ navigation, route }) {
     
     if (onBarcodeScanned) {
       try {
-        // Try to parse as JSON to validate
+        // Try to parse as JSON to validate plant barcode format
         const parsedData = JSON.parse(data);
         
         // Simple validation for plant barcode format
@@ -146,17 +129,28 @@ export default function BarcodeScannerScreen({ navigation, route }) {
           );
         }
       } catch (error) {
-        // Not valid JSON
-        Alert.alert(
-          'Invalid Barcode Format',
-          'Please scan a valid plant barcode.',
-          [
-            {
-              text: 'Scan Again',
-              onPress: () => setScanned(false),
-            }
-          ]
-        );
+        // Handle non-JSON barcodes - check if it's a plant ID format
+        if (data.startsWith('PLT-') || data.includes('plant')) {
+          // Create a plant object format for backward compatibility
+          const plantData = {
+            type: 'plant',
+            id: data.replace('PLT-', ''),
+            barcode: data
+          };
+          onBarcodeScanned(JSON.stringify(plantData));
+          navigation.goBack();
+        } else {
+          Alert.alert(
+            'Invalid Barcode Format',
+            'Please scan a valid plant barcode or QR code.',
+            [
+              {
+                text: 'Scan Again',
+                onPress: () => setScanned(false),
+              }
+            ]
+          );
+        }
       }
     } else {
       Alert.alert(
@@ -179,15 +173,11 @@ export default function BarcodeScannerScreen({ navigation, route }) {
   
   // Toggle flash mode
   const toggleFlash = () => {
-    setFlashMode(
-      flashMode === Camera.Constants.FlashMode.off
-        ? Camera.Constants.FlashMode.torch
-        : Camera.Constants.FlashMode.off
-    );
+    setFlashMode(flashMode === 'off' ? 'on' : 'off');
   };
   
   // Handle permission states
-  if (hasPermission === null) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#000" />
@@ -221,23 +211,29 @@ export default function BarcodeScannerScreen({ navigation, route }) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000" translucent={true} />
       
-      <Camera
-        ref={cameraRef}
+      <CameraView
         style={styles.camera}
-        type={Camera.Constants.Type.back}
-        flashMode={flashMode}
-        ratio={cameraRatio}
-        onCameraReady={setOptimalRatio}
-        barCodeScannerSettings={{
-          barCodeTypes: [
-            BarCodeScanner.Constants.BarCodeType.qr,
-            BarCodeScanner.Constants.BarCodeType.code128,
-            BarCodeScanner.Constants.BarCodeType.code39,
-            BarCodeScanner.Constants.BarCodeType.ean13,
-            BarCodeScanner.Constants.BarCodeType.pdf417
+        facing="back"
+        flash={flashMode}
+        barcodeScannerSettings={{
+          barcodeTypes: [
+            'qr',
+            'pdf417',
+            'aztec',
+            'ean13',
+            'ean8',
+            'code39',
+            'code93',
+            'code128',
+            'code39mod43',
+            'datamatrix',
+            'interleaved2of5',
+            'itf14',
+            'upc_e',
+            'upc_a',
           ],
         }}
-        onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+        onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
       >
         <SafeAreaView style={styles.overlay}>
           <View style={styles.header}>
@@ -255,7 +251,7 @@ export default function BarcodeScannerScreen({ navigation, route }) {
               onPress={toggleFlash}
             >
               <MaterialIcons 
-                name={flashMode === Camera.Constants.FlashMode.off ? "flash-off" : "flash-on"} 
+                name={flashMode === 'off' ? "flash-off" : "flash-on"} 
                 size={24} 
                 color="#fff" 
               />
@@ -302,9 +298,21 @@ export default function BarcodeScannerScreen({ navigation, route }) {
                 <Text style={styles.scanAgainButtonText}>Scan Again</Text>
               </TouchableOpacity>
             )}
+            
+            <View style={styles.instructionDetails}>
+              <Text style={styles.instructionDetail}>
+                • Point camera at plant barcode
+              </Text>
+              <Text style={styles.instructionDetail}>
+                • Keep steady and well-lit
+              </Text>
+              <Text style={styles.instructionDetail}>
+                • QR codes and barcodes supported
+              </Text>
+            </View>
           </View>
         </SafeAreaView>
-      </Camera>
+      </CameraView>
     </View>
   );
 }
@@ -333,6 +341,8 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   headerTitle: {
     color: '#fff',
@@ -341,6 +351,8 @@ const styles = StyleSheet.create({
   },
   flashButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   scanArea: {
     width: SCAN_AREA_SIZE,
@@ -397,6 +409,10 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#4CAF50',
     top: 0,
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
   },
   footer: {
     padding: 20,
@@ -407,14 +423,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 20,
+    fontWeight: '600',
+  },
+  instructionDetails: {
+    marginTop: 16,
+    alignItems: 'flex-start',
+  },
+  instructionDetail: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+    marginBottom: 4,
   },
   scanAgainButton: {
     backgroundColor: '#4CAF50',
     paddingVertical: 12,
     paddingHorizontal: 24,
-    borderRadius: 8,
+    borderRadius: 25,
     flexDirection: 'row',
     alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   scanAgainButtonText: {
     color: '#fff',
@@ -438,6 +469,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     marginVertical: 20,
+    lineHeight: 24,
   },
   permissionButton: {
     backgroundColor: '#4CAF50',

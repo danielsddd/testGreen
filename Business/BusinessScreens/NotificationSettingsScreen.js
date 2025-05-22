@@ -1,4 +1,4 @@
-// Business/BusinessScreens/NotificationSettingsScreen.js
+// Business/BusinessScreens/NotificationSettingsScreen.js - FIXED TIME PICKER
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -10,6 +10,8 @@ import {
   Alert,
   ActivityIndicator,
   SafeAreaView,
+  Platform,
+  Modal,
 } from 'react-native';
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,6 +35,10 @@ export default function NotificationSettingsScreen({ navigation, route }) {
     pollingInterval: 60,
     status: 'active'
   });
+  
+  // Time picker state
+  const [selectedTime, setSelectedTime] = useState(new Date());
+  const [tempTime, setTempTime] = useState(new Date());
   
   // Initialize
   useEffect(() => {
@@ -63,10 +69,19 @@ export default function NotificationSettingsScreen({ navigation, route }) {
     try {
       const data = await getNotificationSettings(id);
       if (data.settings) {
-        setSettings(prev => ({
-          ...prev,
+        const loadedSettings = {
+          ...settings,
           ...data.settings
-        }));
+        };
+        setSettings(loadedSettings);
+        
+        // Parse time and set selectedTime
+        const timeString = loadedSettings.notificationTime || '07:00';
+        const [hours, minutes] = timeString.split(':').map(Number);
+        const timeDate = new Date();
+        timeDate.setHours(hours, minutes, 0, 0);
+        setSelectedTime(timeDate);
+        setTempTime(timeDate);
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -86,6 +101,11 @@ export default function NotificationSettingsScreen({ navigation, route }) {
       
       if (result.success) {
         Alert.alert('✅ Success', 'Notification settings saved successfully!');
+        
+        // Auto-refresh any parent screens
+        if (navigation.canGoBack()) {
+          navigation.goBack();
+        }
       }
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -97,23 +117,59 @@ export default function NotificationSettingsScreen({ navigation, route }) {
   
   // Handle time change
   const handleTimeChange = (event, selectedTime) => {
-    setShowTimePicker(false);
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
     
     if (selectedTime) {
-      const timeString = selectedTime.toTimeString().slice(0, 5);
-      setSettings(prev => ({
-        ...prev,
-        notificationTime: timeString
-      }));
+      setTempTime(selectedTime);
+      
+      if (Platform.OS === 'android') {
+        // Apply immediately on Android
+        confirmTimeChange(selectedTime);
+      }
     }
   };
   
-  // Get time object for picker
-  const getTimeObject = () => {
-    const [hours, minutes] = settings.notificationTime.split(':').map(Number);
-    const time = new Date();
-    time.setHours(hours, minutes, 0, 0);
-    return time;
+  // Confirm time change (for iOS)
+  const confirmTimeChange = (time = tempTime) => {
+    const timeString = formatTimeToString(time);
+    setSelectedTime(time);
+    setSettings(prev => ({
+      ...prev,
+      notificationTime: timeString
+    }));
+    setShowTimePicker(false);
+  };
+  
+  // Cancel time change (for iOS)
+  const cancelTimeChange = () => {
+    setTempTime(selectedTime);
+    setShowTimePicker(false);
+  };
+  
+  // Format time to HH:MM string
+  const formatTimeToString = (date) => {
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+  
+  // Format time for display
+  const formatTime = (timeString) => {
+    try {
+      const [hours, minutes] = timeString.split(':').map(Number);
+      const time = new Date();
+      time.setHours(hours, minutes, 0, 0);
+      
+      return time.toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: true 
+      });
+    } catch (error) {
+      return timeString;
+    }
   };
   
   // Handle setting change
@@ -129,7 +185,7 @@ export default function NotificationSettingsScreen({ navigation, route }) {
     try {
       Alert.alert(
         '🔔 Test Notification',
-        'This is how notifications will appear. You can customize the timing and types below.',
+        `This is how notifications will appear at ${formatTime(settings.notificationTime)} daily.`,
         [{ text: 'OK' }]
       );
     } catch (error) {
@@ -183,9 +239,11 @@ export default function NotificationSettingsScreen({ navigation, route }) {
           >
             <View style={styles.timeSelectorContent}>
               <Text style={styles.timeSelectorLabel}>Notification Time</Text>
-              <Text style={styles.timeSelectorValue}>{settings.notificationTime}</Text>
+              <Text style={styles.timeSelectorValue}>
+                {formatTime(settings.notificationTime)}
+              </Text>
             </View>
-            <MaterialIcons name="chevron-right" size={24} color="#999" />
+            <MaterialIcons name="access-time" size={24} color="#4CAF50" />
           </TouchableOpacity>
           
           <Text style={styles.sectionDescription}>
@@ -356,15 +414,45 @@ export default function NotificationSettingsScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
       
-      {/* Time Picker */}
+      {/* Time Picker Modal */}
       {showTimePicker && (
-        <DateTimePicker
-          value={getTimeObject()}
-          mode="time"
-          is24Hour={true}
-          display="default"
-          onChange={handleTimeChange}
-        />
+        <Modal
+          transparent={true}
+          animationType="slide"
+          visible={showTimePicker}
+          onRequestClose={cancelTimeChange}
+        >
+          <View style={styles.timePickerModal}>
+            <View style={styles.timePickerContainer}>
+              <View style={styles.timePickerHeader}>
+                <TouchableOpacity
+                  style={styles.timePickerButton}
+                  onPress={cancelTimeChange}
+                >
+                  <Text style={styles.timePickerCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <Text style={styles.timePickerTitle}>Set Notification Time</Text>
+                
+                <TouchableOpacity
+                  style={styles.timePickerButton}
+                  onPress={() => confirmTimeChange()}
+                >
+                  <Text style={styles.timePickerConfirmText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <DateTimePicker
+                value={tempTime}
+                mode="time"
+                is24Hour={false}
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={handleTimeChange}
+                style={styles.dateTimePicker}
+              />
+            </View>
+          </View>
+        </Modal>
       )}
     </SafeAreaView>
   );
@@ -564,5 +652,47 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  timePickerModal: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  timePickerContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+  },
+  timePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  timePickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  timePickerButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  timePickerCancelText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  timePickerConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  dateTimePicker: {
+    height: 200,
+    marginTop: 20,
   },
 });
