@@ -5,6 +5,10 @@ import os
 import datetime
 import requests
 import json
+import hmac
+import hashlib
+import base64
+import urllib.parse
 from azure.cosmos import CosmosClient
 
 def main(mytimer: func.TimerRequest) -> None:
@@ -147,51 +151,186 @@ def process_business_notifications(inventory_container, notifications_container,
         logging.error(f"Error processing notifications for business {business_id}: {str(e)}")
         raise
 
+def generate_sas_token(namespace, hub_name, key_name, key_value, expiry_seconds=3600):
+    """Generate SAS token for Azure Notification Hub authentication"""
+    try:
+        # Create the resource URI
+        uri = f"https://{namespace}.servicebus.windows.net/{hub_name}"
+        encoded_uri = urllib.parse.quote_plus(uri)
+        
+        # Calculate expiry time
+        expiry = int(datetime.datetime.utcnow().timestamp()) + expiry_seconds
+        
+        # Create the string to sign
+        string_to_sign = f"{encoded_uri}\n{expiry}"
+        
+        # Create HMAC signature
+        signature = hmac.new(
+            key_value.encode('utf-8'),
+            string_to_sign.encode('utf-8'),
+            hashlib.sha256
+        ).digest()
+        
+        # Encode signature
+        encoded_signature = base64.b64encode(signature).decode('utf-8')
+        encoded_signature = urllib.parse.quote_plus(encoded_signature)
+        
+        # Create the SAS token
+        sas_token = f"SharedAccessSignature sr={encoded_uri}&sig={encoded_signature}&se={expiry}&skn={key_name}"
+        
+        return sas_token
+    
+    except Exception as e:
+        logging.error(f"Error generating SAS token: {str(e)}")
+        raise
+
 def send_notifications(business_id, title, body, plant_count, device_tokens):
     """Send notifications via Azure Notification Hub"""
     try:
-        # Get connection string and hub name from environment
-        connection_string = os.environ["AZURE_NOTIFICATION_HUB_CONNECTION_STRING"]
-        hub_name = os.environ["AZURE_NOTIFICATION_HUB_NAME"]
+        # Get configuration from environment variables
+        connection_string = os.environ.get("AZURE_NOTIFICATION_HUB_CONNECTION_STRING")
+        hub_name = os.environ.get("AZURE_NOTIFICATION_HUB_NAME")
+        namespace = os.environ.get("AZURE_NOTIFICATION_HUB_NAMESPACE")
         
-        # Prepare notification payload for FCM (Firebase Cloud Messaging)
-        notification = {
+        if not all([connection_string, hub_name, namespace]):
+            logging.error("Missing Azure Notification Hub configuration")
+            return
+        
+        # Parse connection string to get key name and key value
+        conn_parts = dict(part.split('=', 1) for part in connection_string.split(';') if '=' in part)
+        key_name = conn_parts.get('SharedAccessKeyName')
+        key_value = conn_parts.get('SharedAccessKey')
+        
+        if not all([key_name, key_value]):
+            logging.error("Invalid connection string format")
+            return
+        
+        # Generate SAS token
+        sas_token = generate_sas_token(namespace, hub_name, key_name, key_value)
+        
+        # Prepare notification payload for Android (FCM format)
+        fcm_payload = {
             "data": {
                 "title": title,
                 "body": body,
                 "type": "WATERING_REMINDER",
                 "businessId": business_id,
                 "plantCount": str(plant_count),
-                "timestamp": datetime.datetime.utcnow().isoformat()
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "action": "open_watering_checklist"
             }
         }
         
-        # Create authorization header
-        # This is a simplified approach - in production, use Azure SDK or proper SAS token generation
-        headers = {
-            "Content-Type": "application/json",
-            "ServiceBusNotification-Format": "gcm",
-            "Authorization": f"SharedAccessSignature {connection_string}"
+        # Prepare notification payload for iOS (APNS format)
+        apns_payload = {
+            "aps": {
+                "alert": {
+                    "title": title,
+                    "body": body
+                },
+                "badge": plant_count,
+                "sound": "default"
+            },
+            "customData": {
+                "type": "WATERING_REMINDER",
+                "businessId": business_id,
+                "plantCount": plant_count,
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+                "action": "open_watering_checklist"
+            }
         }
         
-        # Send to each device token
-        notification_endpoint = f"https://{hub_name}.servicebus.windows.net/messages/?direct"
+        # Send to specific device tokens (if you want to target specific devices)
+        success_count = 0
+        error_count = 0
         
         for token in device_tokens:
-            notification["to"] = token
-            payload = json.dumps(notification)
+            try:
+                # Try sending as Android notification first
+                android_success = send_notification_to_platform(
+                    namespace, hub_name, sas_token, fcm_payload, "gcm", tag=f"deviceToken:{token}"
+                )
+                
+                if android_success:
+                    success_count += 1
+                    logging.info(f"Android notification sent to device: {token}")
+                else:
+                    # Try sending as iOS notification
+                    ios_success = send_notification_to_platform(
+                        namespace, hub_name, sas_token, apns_payload, "apple", tag=f"deviceToken:{token}"
+                    )
+                    
+                    if ios_success:
+                        success_count += 1
+                        logging.info(f"iOS notification sent to device: {token}")
+                    else:
+                        error_count += 1
+                        logging.error(f"Failed to send notification to device: {token}")
             
-            response = requests.post(
-                notification_endpoint,
-                headers=headers,
-                data=payload
-            )
-            
-            if response.status_code == 201:
-                logging.info(f"Notification sent to device: {token}")
-            else:
-                logging.error(f"Error sending notification to device {token}: {response.status_code} - {response.text}")
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error sending notification to device {token}: {str(e)}")
+        
+        # Also send broadcast notification to all devices for this business
+        business_tag = f"businessId:{business_id}"
+        
+        # Send Android broadcast
+        send_notification_to_platform(
+            namespace, hub_name, sas_token, fcm_payload, "gcm", tag=business_tag
+        )
+        
+        # Send iOS broadcast
+        send_notification_to_platform(
+            namespace, hub_name, sas_token, apns_payload, "apple", tag=business_tag
+        )
+        
+        logging.info(f"Notification summary - Success: {success_count}, Errors: {error_count}")
     
     except Exception as e:
         logging.error(f"Error sending notifications: {str(e)}")
         raise
+
+def send_notification_to_platform(namespace, hub_name, sas_token, payload, platform, tag=None):
+    """Send notification to specific platform via Azure Notification Hub"""
+    try:
+        # Construct the API endpoint
+        endpoint = f"https://{namespace}.servicebus.windows.net/{hub_name}/messages/"
+        
+        # Add tag filter if provided
+        if tag:
+            endpoint += f"?api-version=2015-01"
+        else:
+            endpoint += "?api-version=2015-01"
+        
+        # Prepare headers
+        headers = {
+            "Authorization": sas_token,
+            "Content-Type": "application/json",
+            "ServiceBusNotification-Format": platform
+        }
+        
+        # Add tag header if provided
+        if tag:
+            headers["ServiceBusNotification-Tags"] = tag
+        
+        # Convert payload to JSON string
+        payload_json = json.dumps(payload)
+        
+        # Send the notification
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            data=payload_json,
+            timeout=30
+        )
+        
+        if response.status_code in [201, 202]:
+            logging.info(f"Notification sent successfully to {platform} platform")
+            return True
+        else:
+            logging.error(f"Failed to send {platform} notification: {response.status_code} - {response.text}")
+            return False
+    
+    except Exception as e:
+        logging.error(f"Error sending {platform} notification: {str(e)}")
+        return False

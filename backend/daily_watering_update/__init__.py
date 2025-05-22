@@ -5,6 +5,7 @@ import datetime
 import requests
 import os
 import json
+import traceback
 from azure.cosmos import CosmosClient, PartitionKey
 
 def main(mytimer: func.TimerRequest) -> None:
@@ -15,9 +16,9 @@ def main(mytimer: func.TimerRequest) -> None:
     
     try:
         # Initialize Cosmos client
-        endpoint = os.environ["COSMOSDB__MARKETPLACE_CONNECTION_STRING"]
-        key = os.environ["COSMOSDB_KEY"]
-        database_id = os.environ["COSMOSDB_MARKETPLACE_DATABASE_NAME"]
+        endpoint = os.environ.get("COSMOSDB__MARKETPLACE_CONNECTION_STRING")
+        key = os.environ.get("COSMOSDB_KEY")
+        database_id = os.environ.get("COSMOSDB_MARKETPLACE_DATABASE_NAME", "GreenerMarketplace")
         container_id = "inventory"
         
         client = CosmosClient(endpoint, key)
@@ -30,6 +31,8 @@ def main(mytimer: func.TimerRequest) -> None:
             query=business_query,
             enable_cross_partition_query=True
         ))
+        
+        logging.info(f"Found {len(businesses)} businesses with plants")
         
         for business in businesses:
             business_id = business['businessId']
@@ -50,15 +53,17 @@ def main(mytimer: func.TimerRequest) -> None:
             
             if not locations or 'gpsCoordinates' not in locations[0]:
                 logging.warning(f"No GPS coordinates found for business: {business_id}")
-                continue
-            
-            coordinates = locations[0]['gpsCoordinates']
-            
-            # Check weather for business location
-            weather_data = check_weather(coordinates['latitude'], coordinates['longitude'])
-            has_rained = did_it_rain(weather_data)
-            
-            logging.info(f"Weather check for {business_id}: Rain detected: {has_rained}")
+                # Try to continue with default coordinates or skip weather check
+                weather_data = None
+                has_rained = False
+            else:
+                coordinates = locations[0]['gpsCoordinates']
+                
+                # Check weather for business location
+                weather_data = check_weather(coordinates['latitude'], coordinates['longitude'])
+                has_rained = did_it_rain(weather_data)
+                
+                logging.info(f"Weather check for {business_id}: Rain detected: {has_rained}")
             
             # Update all plants for this business
             update_plants_watering_schedule(container, business_id, has_rained)
@@ -67,23 +72,38 @@ def main(mytimer: func.TimerRequest) -> None:
         
     except Exception as e:
         logging.error(f"Error in daily watering update: {str(e)}")
+        logging.error(traceback.format_exc())
         raise
 
 def check_weather(lat, lon):
-    """Check weather at specific coordinates using OpenWeatherMap API"""
+    """Check weather at specific coordinates using OpenWeatherMap API (Developer Plan)"""
     try:
-        api_key = os.environ["OPENWEATHER_API_KEY"]
-        url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}"
+        # Use the provided API key from environment variables
+        api_key = os.environ.get("OPENWEATHER_API_KEY", "b81c1f9ba90f1703b8856b039df48067")
         
-        response = requests.get(url)
+        # Use pro endpoint for Developer plan and units=metric to get temperature in Celsius
+        url = f"https://pro.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+        
+        logging.info(f"Fetching weather data for coordinates: {lat}, {lon}")
+        response = requests.get(url, timeout=10)  # Add timeout for reliability
+        
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            logging.info(f"Weather data received: {data.get('weather', [{}])[0].get('main', 'Unknown')}")
+            return data
         else:
-            logging.error(f"Error fetching weather data: {response.status_code}")
+            logging.error(f"Error fetching weather data: HTTP {response.status_code}")
+            logging.error(f"Response content: {response.text}")
             return None
     
+    except requests.exceptions.Timeout:
+        logging.error("Timeout while fetching weather data")
+        return None
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error checking weather: {str(e)}")
+        return None
     except Exception as e:
-        logging.error(f"Error checking weather: {str(e)}")
+        logging.error(f"Unexpected error checking weather: {str(e)}")
         return None
 
 def did_it_rain(weather_data):
@@ -93,9 +113,17 @@ def did_it_rain(weather_data):
     
     # Weather condition codes: https://openweathermap.org/weather-conditions
     weather_id = weather_data['weather'][0]['id']
+    weather_main = weather_data['weather'][0]['main'].lower()
     
     # 2xx: Thunderstorm, 3xx: Drizzle, 5xx: Rain
-    return 200 <= weather_id < 600
+    is_rain_code = (200 <= weather_id < 600)
+    
+    # Also check the main weather description
+    is_rain_desc = 'rain' in weather_main or 'drizzle' in weather_main or 'thunderstorm' in weather_main
+    
+    logging.info(f"Weather ID: {weather_id}, Main: {weather_main}, Is rain: {is_rain_code or is_rain_desc}")
+    
+    return is_rain_code or is_rain_desc
 
 def update_plants_watering_schedule(container, business_id, has_rained):
     """Update watering schedule for all plants of a business"""
@@ -112,6 +140,8 @@ def update_plants_watering_schedule(container, business_id, has_rained):
             parameters=[{"name": "@businessId", "value": business_id}],
             enable_cross_partition_query=True
         ))
+        
+        logging.info(f"Updating {len(plants)} plants for business {business_id}")
         
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         updates = []
@@ -131,22 +161,26 @@ def update_plants_watering_schedule(container, business_id, has_rained):
                     "weatherAffected": False
                 }
                 needs_update = True
+                logging.info(f"Initialized watering schedule for plant {plant.get('id')}")
             
             # If it rained, reset the countdown
             if has_rained:
-                plant['wateringSchedule']['activeWaterDays'] = plant['wateringSchedule']['waterDays']
+                plant['wateringSchedule']['activeWaterDays'] = plant['wateringSchedule'].get('waterDays', 7)
                 plant['wateringSchedule']['needsWatering'] = False
                 plant['wateringSchedule']['weatherAffected'] = True
                 plant['wateringSchedule']['lastWateringUpdate'] = today
                 needs_update = True
+                logging.info(f"Reset watering schedule due to rain for plant {plant.get('id')}")
             
             # Otherwise, decrease activeWaterDays by 1 if not updated today
             elif plant['wateringSchedule'].get('lastWateringUpdate') != today:
-                plant['wateringSchedule']['activeWaterDays'] = max(0, plant['wateringSchedule'].get('activeWaterDays', 0) - 1)
+                current_days = plant['wateringSchedule'].get('activeWaterDays', 0)
+                plant['wateringSchedule']['activeWaterDays'] = max(0, current_days - 1)
                 plant['wateringSchedule']['needsWatering'] = plant['wateringSchedule']['activeWaterDays'] <= 0
                 plant['wateringSchedule']['weatherAffected'] = False
                 plant['wateringSchedule']['lastWateringUpdate'] = today
                 needs_update = True
+                logging.info(f"Decreased activeWaterDays for plant {plant.get('id')} to {plant['wateringSchedule']['activeWaterDays']}")
             
             if needs_update:
                 updates.append({
@@ -160,14 +194,26 @@ def update_plants_watering_schedule(container, business_id, has_rained):
         for i in range(0, len(updates), BATCH_SIZE):
             batch = updates[i:i+BATCH_SIZE]
             for item in batch:
-                container.upsert_item({
-                    "id": item["id"],
-                    "businessId": item["businessId"],
-                    "wateringSchedule": item["wateringSchedule"]
-                }, partition_key=item["businessId"])
+                try:
+                    container.upsert_item({
+                        "id": item["id"],
+                        "businessId": item["businessId"],
+                        "wateringSchedule": item["wateringSchedule"]
+                    }, partition_key=item["businessId"])
+                except Exception as e:
+                    logging.error(f"Error updating plant {item['id']}: {str(e)}")
         
         logging.info(f"Updated {len(updates)} plants for business {business_id}")
+        
+        # If plants need watering, trigger notifications
+        needs_watering = [p for p in plants if p.get('wateringSchedule', {}).get('needsWatering', False)]
+        if needs_watering:
+            logging.info(f"{len(needs_watering)} plants need watering for business {business_id}. Scheduling notifications.")
+            # Note: Notifications are handled by the separate send_watering_notifications function
+        
+        return True
     
     except Exception as e:
         logging.error(f"Error updating plants for business {business_id}: {str(e)}")
-        raise
+        logging.error(traceback.format_exc())
+        return False

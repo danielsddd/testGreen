@@ -71,8 +71,10 @@ export default function TopSellingProductsList({
       console.log('Loading top selling products for business:', businessId);
       
       const headers = await getHeaders();
+      
+      // Call the correct API endpoint - business-analytics instead of business/analytics/top-products
       const response = await fetch(
-        `https://usersfunctions.azurewebsites.net/api/business/analytics/top-products?businessId=${businessId}&timeframe=${timeframe}&sortBy=${sortBy}&limit=${limit}`, 
+        `https://usersfunctions.azurewebsites.net/api/business-analytics?businessId=${businessId}&timeframe=${timeframe}&metrics=sales`, 
         {
           method: 'GET',
           headers,
@@ -89,9 +91,76 @@ export default function TopSellingProductsList({
         throw new Error(result.error || 'Failed to load top selling products');
       }
       
-      setProducts(result.data.products || []);
+      // Extract data from analytics response to build products list
+      // The business-analytics endpoint returns sales data which includes orders
+      // We need to transform this into a format the component expects
+      const salesData = result.data.sales || {};
+      const orders = salesData.orders || [];
       
-      console.log('Top selling products loaded:', result.data.products?.length || 0);
+      // Build product sales data from orders
+      const productSales = {};
+      
+      // Process orders to extract product sales data
+      orders.forEach(order => {
+        if (order.items && Array.isArray(order.items)) {
+          order.items.forEach(item => {
+            const productId = item.id || item.productId;
+            if (!productId) return;
+            
+            if (!productSales[productId]) {
+              productSales[productId] = {
+                id: productId,
+                name: item.name || item.title || "Unknown Product",
+                scientific_name: item.scientific_name,
+                productType: item.productType || 'product',
+                totalSold: 0,
+                totalRevenue: 0,
+                averagePrice: 0,
+                growthRate: 0
+              };
+            }
+            
+            const quantity = item.quantity || 0;
+            const price = item.price || 0;
+            const revenue = quantity * price;
+            
+            productSales[productId].totalSold += quantity;
+            productSales[productId].totalRevenue += revenue;
+          });
+        }
+      });
+      
+      // Convert to array and calculate averages
+      const productsArray = Object.values(productSales).map(product => {
+        product.averagePrice = product.totalSold > 0 ? product.totalRevenue / product.totalSold : 0;
+        return product;
+      });
+      
+      // Sort products based on sortBy parameter
+      let sortedProducts = [...productsArray];
+      switch (sortBy) {
+        case 'quantity':
+          sortedProducts.sort((a, b) => b.totalSold - a.totalSold);
+          break;
+        case 'revenue':
+          sortedProducts.sort((a, b) => b.totalRevenue - a.totalRevenue);
+          break;
+        case 'profit':
+          // Assuming profit is approximately 30% of revenue if not available
+          sortedProducts.sort((a, b) => {
+            const profitA = a.totalProfit || (a.totalRevenue * 0.3);
+            const profitB = b.totalProfit || (b.totalRevenue * 0.3);
+            return profitB - profitA;
+          });
+          break;
+      }
+      
+      // Limit to requested number of products
+      sortedProducts = sortedProducts.slice(0, limit);
+      
+      setProducts(sortedProducts);
+      
+      console.log('Top selling products processed:', sortedProducts.length);
       
       // Success animation
       Animated.parallel([

@@ -3,6 +3,9 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import NotificationSettings from './components/NotificationSettings';
+import BusinessAnalyticsScreen from './BusinessScreens/BusinessAnalyticsScreen';
+
 
 // Import Business Screens
 import BusinessWelcomeScreen from './BusinessScreens/BusinessWelcomeScreen';
@@ -120,6 +123,17 @@ const BusinessNavigation = () => {
         component={AddInventoryScreen}
         options={{ title: 'Edit Product' }}
       />
+      <Stack.Screen 
+        name="NotificationSettings" 
+        component={NotificationSettings} 
+        options={{ title: 'Notification Settings' }}
+      />
+      <Stack.Screen 
+        name="BusinessAnalyticsScreen" 
+        component={BusinessAnalyticsScreen} 
+        options={{ title: 'Analytics' }} 
+      />
+
     </Stack.Navigator>
   );
 };

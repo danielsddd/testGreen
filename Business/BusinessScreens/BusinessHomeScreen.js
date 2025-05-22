@@ -20,6 +20,8 @@ import {
 } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import NotificationBell from '../components/NotificationBell';
+import { useNotificationManager } from '../components/NotificationManager';
 
 // Import Business Components
 import KPIWidget from '../components/KPIWidget';
@@ -30,6 +32,27 @@ import OrderDetailModal from '../components/OrderDetailModal';
 
 // Import API services
 import { getBusinessDashboard } from '../services/businessApi';
+
+// Add inside BusinessHomeScreen component
+const {
+  hasNewNotifications,
+  notifications
+} = useNotificationManager(businessId, navigation);
+
+// Update header to include notification bell
+<View style={styles.headerActions}>
+  <NotificationBell
+    hasNotifications={hasNewNotifications}
+    notificationCount={notifications.length}
+    onPress={() => navigation.navigate('NotificationCenterScreen', { businessId })}
+  />
+  <TouchableOpacity style={styles.headerButton} onPress={handleAnalytics}>
+    <MaterialIcons name="analytics" size={20} color="#216a94" />
+  </TouchableOpacity>
+  <TouchableOpacity style={styles.headerButton} onPress={handleSettings}>
+    <MaterialIcons name="settings" size={20} color="#216a94" />
+  </TouchableOpacity>
+</View>
 
 export default function BusinessHomeScreen({ navigation }) {
   const [dashboardData, setDashboardData] = useState(null);

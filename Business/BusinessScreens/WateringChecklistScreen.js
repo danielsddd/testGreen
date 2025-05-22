@@ -12,13 +12,43 @@ import {
   Alert,
   Animated,
   Platform,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons, MaterialIcons, Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Haptics from 'expo-haptics';
+// Add to imports
+import { useNotificationManager } from '../components/NotificationManager';
+
+// Add inside WateringChecklistScreen component
+const {
+  hasNewNotifications,
+  notifications,
+  clearAllNotifications
+} = useNotificationManager(businessId, navigation);
+
+// Update notification button in header
+<TouchableOpacity 
+  style={styles.notificationButton}
+  onPress={() => navigation.navigate('NotificationCenterScreen', { businessId })}
+>
+  <NotificationBell
+    hasNotifications={hasNewNotifications}
+    notificationCount={notifications.length}
+    size={20}
+    color="#fff"
+  />
+</TouchableOpacity>
 
 // Import services
-import { getWateringChecklist, markPlantAsWatered, getOptimizedWateringRoute } from '../services/businessWateringApi';
+import { 
+  getWateringChecklist, 
+  markPlantAsWatered, 
+  getOptimizedWateringRoute,
+  getBusinessWeather 
+} from '../services/businessWateringApi';
 
 export default function WateringChecklistScreen({ navigation, route }) {
   // State management
@@ -30,16 +60,19 @@ export default function WateringChecklistScreen({ navigation, route }) {
   const [weatherInfo, setWeatherInfo] = useState(null);
   const [stats, setStats] = useState({
     totalCount: 0,
-    needsWateringCount: 0
+    needsWateringCount: 0,
+    completedCount: 0
   });
   const [optimizedRoute, setOptimizedRoute] = useState(null);
   const [showOptimizedRoute, setShowOptimizedRoute] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const headerHeightAnim = useRef(new Animated.Value(Platform.OS === 'ios' ? 120 : 100)).current;
   
   // Auto-refresh timer
   const refreshTimer = useRef(null);
@@ -54,12 +87,17 @@ export default function WateringChecklistScreen({ navigation, route }) {
           if (storedBusinessId) {
             setBusinessId(storedBusinessId);
             loadChecklist(storedBusinessId);
+            loadWeatherInfo(storedBusinessId);
             startAutoRefresh(storedBusinessId);
             startEntranceAnimation();
+          } else {
+            setError('Business ID not found. Please set up your business profile.');
+            setIsLoading(false);
           }
         } catch (error) {
           console.error('Error initializing:', error);
           setError('Failed to initialize checklist');
+          setIsLoading(false);
         }
       };
       
@@ -122,10 +160,22 @@ export default function WateringChecklistScreen({ navigation, route }) {
     }
     
     refreshTimer.current = setInterval(() => {
-      if (businessId) {
+      if (businessId && autoRefreshEnabled) {
         loadChecklist(businessId, true); // Silent refresh
       }
     }, autoRefreshInterval);
+  };
+  
+  // Load weather info
+  const loadWeatherInfo = async (businessId) => {
+    try {
+      const weather = await getBusinessWeather(businessId);
+      if (weather) {
+        setWeatherInfo(weather);
+      }
+    } catch (error) {
+      console.warn('Could not load weather info:', error);
+    }
   };
   
   // Load checklist data
@@ -138,16 +188,49 @@ export default function WateringChecklistScreen({ navigation, route }) {
     }
     
     try {
-      const data = await getWateringChecklist(businessId);
+      const data = await getWateringChecklist(businessId, silent);
       
-      setChecklist(data.checklist || []);
-      setStats({
-        totalCount: data.totalCount || 0,
-        needsWateringCount: data.needsWateringCount || 0
+      // Process and sort the checklist
+      let checklistData = data.checklist || [];
+      
+      // Sort: First plants that need watering, then by days remaining
+      checklistData.sort((a, b) => {
+        // First priority: plants that need watering
+        if (a.needsWatering && !b.needsWatering) return -1;
+        if (!a.needsWatering && b.needsWatering) return 1;
+        
+        // Second priority: days remaining (for plants that don't need watering)
+        if (!a.needsWatering && !b.needsWatering) {
+          return a.daysRemaining - b.daysRemaining;
+        }
+        
+        // Plants that both need watering - sort by location if available
+        if (a.location?.section && b.location?.section) {
+          if (a.location.section !== b.location.section) {
+            return a.location.section.localeCompare(b.location.section);
+          }
+          
+          if (a.location.aisle && b.location.aisle) {
+            return a.location.aisle.localeCompare(b.location.aisle);
+          }
+        }
+        
+        return 0;
       });
       
-      // Get optimized route if there are plants needing watering
-      if (data.needsWateringCount > 0) {
+      setChecklist(checklistData);
+      
+      // Calculate stats
+      const completedCount = checklistData.filter(plant => plant.completed).length;
+      
+      setStats({
+        totalCount: data.totalCount || checklistData.length || 0,
+        needsWateringCount: data.needsWateringCount || checklistData.filter(p => p.needsWatering).length || 0,
+        completedCount
+      });
+      
+      // Get optimized route if there are plants needing watering and not already shown
+      if (data.needsWateringCount > 0 && !optimizedRoute) {
         try {
           const routeData = await getOptimizedWateringRoute(businessId);
           setOptimizedRoute(routeData);
@@ -175,12 +258,18 @@ export default function WateringChecklistScreen({ navigation, route }) {
   const onRefresh = useCallback(() => {
     if (businessId) {
       loadChecklist(businessId);
+      loadWeatherInfo(businessId);
     }
   }, [businessId]);
   
   // Mark plant as watered
   const handleMarkWatered = async (plantId) => {
     try {
+      // Provide haptic feedback
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+      
       const result = await markPlantAsWatered(plantId, 'manual');
       
       if (result.success) {
@@ -194,7 +283,8 @@ export default function WateringChecklistScreen({ navigation, route }) {
         // Update stats
         setStats(prev => ({
           ...prev,
-          needsWateringCount: Math.max(0, prev.needsWateringCount - 1)
+          needsWateringCount: Math.max(0, prev.needsWateringCount - 1),
+          completedCount: prev.completedCount + 1
         }));
         
         // Show success feedback
@@ -265,24 +355,52 @@ export default function WateringChecklistScreen({ navigation, route }) {
   // Toggle optimized route view
   const toggleOptimizedRoute = () => {
     setShowOptimizedRoute(!showOptimizedRoute);
+    
+    // Animate header height
+    Animated.timing(headerHeightAnim, {
+      toValue: !showOptimizedRoute ? (Platform.OS === 'ios' ? 170 : 150) : (Platform.OS === 'ios' ? 120 : 100),
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  };
+  
+  // Toggle auto-refresh
+  const toggleAutoRefresh = async () => {
+    const newState = !autoRefreshEnabled;
+    setAutoRefreshEnabled(newState);
+    
+    if (newState) {
+      startAutoRefresh(businessId);
+    } else if (refreshTimer.current) {
+      clearInterval(refreshTimer.current);
+    }
+    
+    // Save preference
+    try {
+      await AsyncStorage.setItem('watering_auto_refresh', newState ? 'true' : 'false');
+    } catch (error) {
+      console.warn('Could not save auto-refresh preference:', error);
+    }
   };
   
   // Render loading state
   if (isLoading && checklist.length === 0) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Loading watering checklist...</Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
   
   // Render error state
   if (error && checklist.length === 0) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={64} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
@@ -290,42 +408,123 @@ export default function WateringChecklistScreen({ navigation, route }) {
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
   
+  // Calculate completion percentage
+  const completionPercentage = stats.needsWateringCount === 0 && stats.totalCount > 0 
+    ? 100 
+    : stats.totalCount > 0 
+      ? Math.round((stats.completedCount / stats.totalCount) * 100) 
+      : 0;
+  
   return (
-    <View style={styles.container}>
-      {/* Header */}
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
+      
+      {/* Animated Header */}
       <Animated.View 
         style={[
           styles.header,
           {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
+            height: headerHeightAnim,
+            transform: [{ translateX: shakeAnim }],
           }
         ]}
       >
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <MaterialIcons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Plant Watering</Text>
-          <Text style={styles.headerSubtitle}>
-            {stats.needsWateringCount} plants need watering
-          </Text>
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <MaterialIcons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          
+          <View style={styles.headerContent}>
+            <Text style={styles.headerTitle}>Plant Watering</Text>
+            <View style={styles.headerStats}>
+              <Text style={styles.headerSubtitle}>
+                {stats.needsWateringCount > 0 
+                  ? `${stats.needsWateringCount} plants need watering` 
+                  : 'All plants watered 🌱'}
+              </Text>
+              
+              <View style={styles.progressContainer}>
+                <View style={styles.progressBar}>
+                  <View style={[styles.progressFill, { width: `${completionPercentage}%` }]} />
+                </View>
+                <Text style={styles.progressText}>{completionPercentage}%</Text>
+              </View>
+            </View>
+          </View>
+          
+          <View style={styles.headerButtons}>
+            <TouchableOpacity 
+              style={styles.headerButton}
+              onPress={toggleAutoRefresh}
+            >
+              <MaterialIcons 
+                name={autoRefreshEnabled ? "sync" : "sync-disabled"} 
+                size={22} 
+                color="#fff" 
+              />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.headerButton}
+              onPress={() => navigation.navigate('NotificationSettings')}
+            >
+              <MaterialIcons name="notifications" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
         
-        <TouchableOpacity 
-          style={styles.notificationButton}
-          onPress={() => navigation.navigate('NotificationSettings')}
+        {/* Action Buttons */}
+        <Animated.View 
+          style={[
+            styles.actionButtonsContainer,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            }
+          ]}
         >
-          <MaterialIcons name="notifications" size={24} color="#fff" />
-        </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={handleScanBarcode}
+          >
+            <MaterialCommunityIcons name="barcode-scan" size={22} color="#fff" />
+            <Text style={styles.actionButtonText}>Scan</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[
+              styles.actionButton,
+              stats.needsWateringCount === 0 && styles.disabledButton
+            ]}
+            onPress={handleGPSNavigation}
+            disabled={stats.needsWateringCount === 0}
+          >
+            <MaterialIcons name="map" size={22} color="#fff" />
+            <Text style={styles.actionButtonText}>Navigate</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[
+              styles.actionButton,
+              stats.needsWateringCount === 0 && styles.disabledButton,
+              optimizedRoute?.route?.length > 0 && showOptimizedRoute && styles.activeButton
+            ]}
+            onPress={toggleOptimizedRoute}
+            disabled={stats.needsWateringCount === 0 || !optimizedRoute}
+          >
+            <MaterialIcons name="route" size={22} color="#fff" />
+            <Text style={styles.actionButtonText}>
+              {showOptimizedRoute ? 'Hide Route' : 'Show Route'}
+            </Text>
+          </TouchableOpacity>
+        </Animated.View>
       </Animated.View>
       
       {/* Weather Card */}
@@ -340,7 +539,11 @@ export default function WateringChecklistScreen({ navigation, route }) {
           ]}
         >
           <View style={styles.weatherIconContainer}>
-            <MaterialCommunityIcons name="weather-cloudy" size={40} color="#2196F3" />
+            <MaterialCommunityIcons 
+              name={getWeatherIcon(weatherInfo.condition)} 
+              size={40} 
+              color="#2196F3" 
+            />
           </View>
           
           <View style={styles.weatherInfo}>
@@ -349,63 +552,19 @@ export default function WateringChecklistScreen({ navigation, route }) {
             <Text style={styles.weatherCondition}>{weatherInfo.condition}</Text>
           </View>
           
-          <View style={styles.precipitation}>
-            <MaterialCommunityIcons name="water" size={16} color="#2196F3" />
-            <Text style={styles.precipitationText}>
-              {weatherInfo.precipitation}% chance of rain
-            </Text>
-          </View>
+          {weatherInfo.precipitation !== undefined && (
+            <View style={styles.precipitation}>
+              <MaterialCommunityIcons name="water" size={16} color="#2196F3" />
+              <Text style={styles.precipitationText}>
+                {weatherInfo.precipitation}% chance of rain
+              </Text>
+            </View>
+          )}
         </Animated.View>
       )}
       
-      {/* Action Buttons */}
-      <Animated.View 
-        style={[
-          styles.actionButtonsContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          }
-        ]}
-      >
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={handleScanBarcode}
-        >
-          <MaterialCommunityIcons name="barcode-scan" size={24} color="#fff" />
-          <Text style={styles.actionButtonText}>Scan Barcode</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.actionButton,
-            stats.needsWateringCount === 0 && styles.disabledButton
-          ]}
-          onPress={handleGPSNavigation}
-          disabled={stats.needsWateringCount === 0}
-        >
-          <MaterialIcons name="map" size={24} color="#fff" />
-          <Text style={styles.actionButtonText}>GPS Navigation</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[
-            styles.actionButton,
-            stats.needsWateringCount === 0 && styles.disabledButton,
-            optimizedRoute?.route?.length > 0 && showOptimizedRoute && styles.activeButton
-          ]}
-          onPress={toggleOptimizedRoute}
-          disabled={stats.needsWateringCount === 0 || !optimizedRoute}
-        >
-          <MaterialIcons name="route" size={24} color="#fff" />
-          <Text style={styles.actionButtonText}>
-            {showOptimizedRoute ? 'Hide Route' : 'Show Route'}
-          </Text>
-        </TouchableOpacity>
-      </Animated.View>
-      
       {/* Optimized Route View */}
-      {showOptimizedRoute && optimizedRoute && optimizedRoute.route && (
+      {showOptimizedRoute && optimizedRoute && optimizedRoute.route && optimizedRoute.route.length > 0 && (
         <Animated.View 
           style={[
             styles.optimizedRouteContainer,
@@ -431,9 +590,11 @@ export default function WateringChecklistScreen({ navigation, route }) {
                   </View>
                   
                   <View style={styles.routeStepInfo}>
-                    <Text style={styles.routeStepName}>{plant.name}</Text>
+                    <Text style={styles.routeStepName} numberOfLines={1}>
+                      {plant.name}
+                    </Text>
                     {plant.location && (
-                      <Text style={styles.routeStepLocation}>
+                      <Text style={styles.routeStepLocation} numberOfLines={1}>
                         {[
                           plant.location.section && `Section ${plant.location.section}`,
                           plant.location.aisle && `Aisle ${plant.location.aisle}`,
@@ -482,7 +643,14 @@ export default function WateringChecklistScreen({ navigation, route }) {
             transform: [{ translateY: slideAnim }],
           }}
         >
-          <Text style={styles.sectionTitle}>Watering Checklist</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Watering Checklist</Text>
+            <Text style={styles.sectionSubtitle}>
+              {stats.needsWateringCount === 0 
+                ? 'All caught up!' 
+                : `${stats.needsWateringCount} plants need attention`}
+            </Text>
+          </View>
           
           {checklist.length === 0 ? (
             <View style={styles.emptyContainer}>
@@ -504,18 +672,25 @@ export default function WateringChecklistScreen({ navigation, route }) {
                 ]}
               >
                 <View style={styles.plantInfo}>
-                  <View style={styles.plantIconContainer}>
+                  <View style={[
+                    styles.plantIconContainer,
+                    plant.needsWatering ? styles.needsWateringIcon : styles.normalIcon
+                  ]}>
                     <MaterialCommunityIcons 
                       name="leaf" 
                       size={28} 
-                      color={plant.needsWatering ? "#f44336" : "#4CAF50"} 
+                      color={plant.needsWatering ? "#fff" : "#4CAF50"} 
                     />
                   </View>
                   
                   <View style={styles.plantDetails}>
-                    <Text style={styles.plantName}>{plant.name}</Text>
+                    <Text style={styles.plantName} numberOfLines={1}>
+                      {plant.name}
+                    </Text>
                     {plant.scientificName && (
-                      <Text style={styles.scientificName}>{plant.scientificName}</Text>
+                      <Text style={styles.scientificName} numberOfLines={1}>
+                        {plant.scientificName}
+                      </Text>
                     )}
                     <View style={styles.plantMeta}>
                       {plant.needsWatering ? (
@@ -526,7 +701,7 @@ export default function WateringChecklistScreen({ navigation, route }) {
                       ) : (
                         <View style={styles.daysRemainingBadge}>
                           <Text style={styles.daysRemainingText}>
-                            {plant.daysRemaining} days remaining
+                            {plant.daysRemaining} day{plant.daysRemaining !== 1 ? 's' : ''} remaining
                           </Text>
                         </View>
                       )}
@@ -552,30 +727,85 @@ export default function WateringChecklistScreen({ navigation, route }) {
                     onPress={() => handleMarkWatered(plant.id)}
                   >
                     <MaterialCommunityIcons name="water" size={20} color="#fff" />
-                    <Text style={styles.waterButtonText}>Water</Text>
+                    <Text style={styles.waterButtonText}>Water Now</Text>
                   </TouchableOpacity>
                 )}
                 
                 {!plant.needsWatering && (
                   <View style={styles.lastWatered}>
+                    <MaterialCommunityIcons name="calendar-check" size={14} color="#4CAF50" />
                     <Text style={styles.lastWateredText}>
-                      Last watered: {new Date(plant.lastWatered).toLocaleDateString()}
+                      Last watered: {formatDate(plant.lastWatered)}
                     </Text>
                   </View>
                 )}
               </Animated.View>
             ))
           )}
+          
+          {/* Extra space at bottom */}
+          <View style={{ height: 80 }} />
         </Animated.View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
+
+// Helper function to get weather icon based on condition
+const getWeatherIcon = (condition) => {
+  if (!condition) return "weather";
+  
+  condition = condition.toLowerCase();
+  
+  if (condition.includes('rain') || condition.includes('drizzle')) {
+    return "weather-rainy";
+  } else if (condition.includes('snow')) {
+    return "weather-snowy";
+  } else if (condition.includes('cloud')) {
+    return "weather-cloudy";
+  } else if (condition.includes('clear') || condition.includes('sun')) {
+    return "weather-sunny";
+  } else if (condition.includes('storm') || condition.includes('thunder')) {
+    return "weather-lightning-rainy";
+  } else if (condition.includes('fog') || condition.includes('mist')) {
+    return "weather-fog";
+  } else if (condition.includes('wind')) {
+    return "weather-windy";
+  } else {
+    return "weather";
+  }
+};
+
+// Helper function to format date
+const formatDate = (dateString) => {
+  if (!dateString) return 'Never';
+  
+  try {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    }
+  } catch (error) {
+    return dateString;
+  }
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f5f7fa',
   },
   loadingContainer: {
     flex: 1,
@@ -611,34 +841,94 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#4CAF50',
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingTop: Platform.OS === 'ios' ? 0 : 8,
+    paddingBottom: 12,
     paddingHorizontal: 16,
-    paddingVertical: 16,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
   },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   backButton: {
     padding: 8,
   },
   headerContent: {
     flex: 1,
-    marginLeft: 16,
+    marginLeft: 8,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
   },
+  headerStats: {
+    marginTop: 4,
+  },
   headerSubtitle: {
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
   },
-  notificationButton: {
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  progressBar: {
+    flex: 1,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 2,
+    marginRight: 8,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#fff',
+    width: 36,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  headerButton: {
     padding: 8,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 8,
+  },
+  actionButton: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  activeButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    marginLeft: 6,
+    fontSize: 13,
   },
   weatherCard: {
     backgroundColor: '#fff',
@@ -685,42 +975,10 @@ const styles = StyleSheet.create({
     color: '#2196F3',
     marginLeft: 4,
   },
-  actionButtonsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    marginBottom: 16,
-    gap: 8,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#4CAF50',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  disabledButton: {
-    backgroundColor: '#bdbdbd',
-  },
-  activeButton: {
-    backgroundColor: '#2196F3',
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    marginLeft: 8,
-    fontSize: 12,
-  },
   optimizedRouteContainer: {
     backgroundColor: '#fff',
     margin: 16,
-    marginTop: 0,
+    marginTop: 8,
     marginBottom: 8,
     borderRadius: 12,
     padding: 16,
@@ -768,6 +1026,7 @@ const styles = StyleSheet.create({
   },
   routeStepInfo: {
     marginRight: 8,
+    maxWidth: 120,
   },
   routeStepName: {
     fontSize: 14,
@@ -802,12 +1061,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 24,
   },
+  sectionHeader: {
+    marginTop: 8,
+    marginBottom: 16,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#333',
-    marginTop: 8,
-    marginBottom: 16,
+  },
+  sectionSubtitle: {
+    fontSize: 14, 
+    color: '#666',
+    marginTop: 2,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -855,10 +1121,15 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#f0f9f3',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
+  },
+  needsWateringIcon: {
+    backgroundColor: '#f44336',
+  },
+  normalIcon: {
+    backgroundColor: '#f0f9f3',
   },
   plantDetails: {
     flex: 1,
@@ -931,11 +1202,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   lastWatered: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   lastWateredText: {
     fontSize: 12,
     color: '#666',
-    fontStyle: 'italic',
+    marginLeft: 4,
   },
 });
