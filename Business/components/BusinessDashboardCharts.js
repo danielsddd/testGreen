@@ -1,4 +1,4 @@
-// Business/components/BusinessDashboardCharts.js - FIXED WEB COMPATIBLE
+// Business/components/BusinessDashboardCharts.js - WEB & MOBILE COMPATIBLE
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -10,15 +10,28 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import { 
-  LineChart, 
-  BarChart, 
-  PieChart 
-} from 'react-native-chart-kit';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+
+// Import universal charts
+import {
+  UniversalLineChart,
+  UniversalBarChart,
+  UniversalPieChart,
+  UniversalMultiLineChart,
+  ChartWrapper
+} from './WebCompatibleCharts';
+
+// Import web utilities
+import { 
+  createWebShadow, 
+  createWebCursor, 
+  webAnimationConfig,
+  platformStyles
+} from '../utils/webStyles';
 
 const { width: screenWidth } = Dimensions.get('window');
 const chartWidth = screenWidth - 32;
+const isWeb = Platform.OS === 'web';
 
 export default function BusinessDashboardCharts({
   salesData = {},
@@ -44,13 +57,13 @@ export default function BusinessDashboardCharts({
     Animated.stagger(200, [
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 600,
-        useNativeDriver: Platform.OS !== 'web',
+        duration: webAnimationConfig.duration,
+        useNativeDriver: webAnimationConfig.useNativeDriver,
       }),
       Animated.timing(slideAnim, {
         toValue: 1,
-        duration: 500,
-        useNativeDriver: Platform.OS !== 'web',
+        duration: webAnimationConfig.duration,
+        useNativeDriver: webAnimationConfig.useNativeDriver,
       }),
     ]).start();
 
@@ -76,12 +89,12 @@ export default function BusinessDashboardCharts({
       Animated.timing(refreshAnim, {
         toValue: 1,
         duration: 300,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: webAnimationConfig.useNativeDriver,
       }),
       Animated.timing(refreshAnim, {
         toValue: 0,
         duration: 300,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: webAnimationConfig.useNativeDriver,
       }),
     ]).start();
     
@@ -102,117 +115,97 @@ export default function BusinessDashboardCharts({
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 200,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: webAnimationConfig.useNativeDriver,
       }),
       Animated.timing(slideAnim, {
         toValue: 1,
         duration: 200,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: webAnimationConfig.useNativeDriver,
       }),
     ]).start();
     
     setActiveChart(chartType);
   };
 
-  // Chart configurations - Web compatible
-  const chartConfig = {
-    backgroundColor: '#ffffff',
-    backgroundGradientFrom: '#ffffff',
-    backgroundGradientTo: '#ffffff',
-    decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
-    labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-    style: {
-      borderRadius: 16,
-    },
-    propsForDots: {
-      r: '6',
-      strokeWidth: '2',
-      stroke: '#4CAF50',
-    },
-    propsForLabels: {
-      fontSize: 12,
-    },
-  };
+  // Process sales data for charts
+  const getSalesChartData = () => {
+    const labels = salesData.labels || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const values = (salesData.values || [0, 0, 0, 0, 0, 0, 0]).map(value => 
+      isNaN(value) || !isFinite(value) ? 0 : Math.max(0, value)
+    );
 
-  // Sales Chart Data - Add fallback values to prevent NaN or Infinity
-  const salesChartData = {
-    labels: salesData.labels || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    datasets: [
-      {
-        data: (salesData.values || [0, 0, 0, 0, 0, 0, 0]).map(value => 
-          // Ensure we have valid numbers for the chart
-          isNaN(value) || !isFinite(value) ? 0 : Math.max(0, value)
-        ),
+    return {
+      labels,
+      datasets: [{
+        data: values,
         color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
         strokeWidth: 3,
-      },
-    ],
+      }],
+    };
   };
 
-  // Orders Chart Data
-  const ordersChartData = {
-    labels: ['Pending', 'Confirmed', 'Ready', 'Completed'],
-    datasets: [
+  // Process orders data for charts
+  const getOrdersChartData = () => {
+    const labels = ['Pending', 'Confirmed', 'Ready', 'Completed'];
+    const data = [
+      Math.max(0, ordersData.pending || 0),
+      Math.max(0, ordersData.confirmed || 0),
+      Math.max(0, ordersData.ready || 0),
+      Math.max(0, ordersData.completed || 0),
+    ];
+
+    return {
+      labels,
+      datasets: [{ data }],
+    };
+  };
+
+  // Process inventory data for pie chart
+  const getInventoryPieData = () => {
+    return [
       {
-        data: [
-          Math.max(0, ordersData.pending || 0),
-          Math.max(0, ordersData.confirmed || 0),
-          Math.max(0, ordersData.ready || 0),
-          Math.max(0, ordersData.completed || 0),
-        ],
+        name: 'In Stock',
+        population: Math.max(0, inventoryData.inStock || 0),
+        color: '#4CAF50',
+        legendFontColor: '#333',
+        legendFontSize: 12,
       },
-    ],
+      {
+        name: 'Low Stock',
+        population: Math.max(0, inventoryData.lowStock || 0),
+        color: '#FF9800',
+        legendFontColor: '#333',
+        legendFontSize: 12,
+      },
+      {
+        name: 'Out of Stock',
+        population: Math.max(0, inventoryData.outOfStock || 0),
+        color: '#F44336',
+        legendFontColor: '#333',
+        legendFontSize: 12,
+      },
+    ].filter(item => item.population > 0);
   };
-
-  // Inventory Chart Data - Ensure no negative values
-  const inventoryPieData = [
-    {
-      name: 'In Stock',
-      population: Math.max(0, inventoryData.inStock || 0),
-      color: '#4CAF50',
-      legendFontColor: '#333',
-      legendFontSize: 12,
-    },
-    {
-      name: 'Low Stock',
-      population: Math.max(0, inventoryData.lowStock || 0),
-      color: '#FF9800',
-      legendFontColor: '#333',
-      legendFontSize: 12,
-    },
-    {
-      name: 'Out of Stock',
-      population: Math.max(0, inventoryData.outOfStock || 0),
-      color: '#F44336',
-      legendFontColor: '#333',
-      legendFontSize: 12,
-    },
-  ].filter(item => item.population > 0); // Remove zero values for cleaner pie chart
 
   const renderChart = () => {
-    // Check if we have any data to display
     const hasData = (chartType) => {
       switch (chartType) {
         case 'sales':
-          return salesChartData.datasets[0].data.some(val => val > 0);
+          return getSalesChartData().datasets[0].data.some(val => val > 0);
         case 'orders':
-          return ordersChartData.datasets[0].data.some(val => val > 0);
+          return getOrdersChartData().datasets[0].data.some(val => val > 0);
         case 'inventory':
-          return inventoryPieData.length > 0 && inventoryPieData.some(item => item.population > 0);
+          return getInventoryPieData().length > 0;
         default:
           return false;
       }
     };
 
     const renderNoDataState = (title) => (
-      <View style={styles.chartContainer}>
-        <Text style={styles.chartTitle}>{title}</Text>
-        <View style={styles.noDataContainer}>
-          <MaterialCommunityIcons name="chart-line" size={64} color="#e0e0e0" />
-          <Text style={styles.noDataText}>No data available</Text>
-          <Text style={styles.noDataSubtext}>Data will appear here as your business grows</Text>
-        </View>
+      <View style={styles.noDataContainer}>
+        <MaterialCommunityIcons name="chart-line" size={64} color="#e0e0e0" />
+        <Text style={styles.noDataText}>No data available</Text>
+        <Text style={styles.noDataSubtext}>Data will appear here as your business grows</Text>
       </View>
     );
 
@@ -222,27 +215,22 @@ export default function BusinessDashboardCharts({
           return renderNoDataState('Sales This Week');
         }
         return (
-          <View style={styles.chartContainer}>
-            <Text style={styles.chartTitle}>Sales This Week</Text>
-            <LineChart
-              data={salesChartData}
-              width={chartWidth}
+          <ChartWrapper>
+            <UniversalLineChart
+              data={getSalesChartData()}
+              width={isWeb ? undefined : chartWidth}
               height={220}
-              chartConfig={chartConfig}
-              style={styles.chart}
-              bezier
-              withDots={true}
-              withShadow={false}
-              withInnerLines={true}
-              withOuterLines={true}
-              fromZero={true}
+              title="Sales This Week"
+              yAxisLabel="$"
+              showGrid={true}
+              showTooltip={true}
             />
             <View style={styles.chartInsights}>
               <Text style={styles.insightText}>
                 📈 Total: ${salesData.total || 0} | Avg: ${salesData.average || 0}/day
               </Text>
             </View>
-          </View>
+          </ChartWrapper>
         );
         
       case 'orders':
@@ -250,22 +238,21 @@ export default function BusinessDashboardCharts({
           return renderNoDataState('Orders by Status');
         }
         return (
-          <View style={styles.chartContainer}>
-            <Text style={styles.chartTitle}>Orders by Status</Text>
-            <BarChart
-              data={ordersChartData}
-              width={chartWidth}
+          <ChartWrapper>
+            <UniversalBarChart
+              data={getOrdersChartData()}
+              width={isWeb ? undefined : chartWidth}
               height={220}
-              chartConfig={chartConfig}
-              style={styles.chart}
-              verticalLabelRotation={0}
+              title="Orders by Status"
+              showGrid={true}
+              showTooltip={true}
             />
             <View style={styles.chartInsights}>
               <Text style={styles.insightText}>
                 📦 Total: {ordersData.total || 0} orders | Active: {(ordersData.pending || 0) + (ordersData.confirmed || 0) + (ordersData.ready || 0)}
               </Text>
             </View>
-          </View>
+          </ChartWrapper>
         );
         
       case 'inventory':
@@ -273,24 +260,20 @@ export default function BusinessDashboardCharts({
           return renderNoDataState('Inventory Status');
         }
         return (
-          <View style={styles.chartContainer}>
-            <Text style={styles.chartTitle}>Inventory Status</Text>
-            <PieChart
-              data={inventoryPieData}
-              width={chartWidth}
+          <ChartWrapper>
+            <UniversalPieChart
+              data={getInventoryPieData()}
+              width={isWeb ? undefined : chartWidth}
               height={220}
-              chartConfig={chartConfig}
-              accessor="population"
-              backgroundColor="transparent"
-              paddingLeft="15"
-              style={styles.chart}
+              title="Inventory Status"
+              showLegend={true}
             />
             <View style={styles.chartInsights}>
               <Text style={styles.insightText}>
                 📊 Total Items: {(inventoryData.inStock || 0) + (inventoryData.lowStock || 0) + (inventoryData.outOfStock || 0)}
               </Text>
             </View>
-          </View>
+          </ChartWrapper>
         );
         
       default:
@@ -304,7 +287,7 @@ export default function BusinessDashboardCharts({
         styles.container,
         {
           opacity: fadeAnim,
-          ...(Platform.OS !== 'web' && {
+          ...(!isWeb && {
             transform: [{ scale: slideAnim }],
           })
         }
@@ -348,7 +331,7 @@ export default function BusinessDashboardCharts({
           disabled={isRefreshing}
         >
           <Animated.View
-            style={Platform.OS === 'web' ? {} : {
+            style={isWeb ? {} : {
               transform: [{
                 rotate: refreshAnim.interpolate({
                   inputRange: [0, 1],
@@ -372,7 +355,7 @@ export default function BusinessDashboardCharts({
           styles.chartContent,
           {
             opacity: slideAnim,
-            ...(Platform.OS !== 'web' && {
+            ...(!isWeb && {
               transform: [{
                 translateX: slideAnim.interpolate({
                   inputRange: [0, 1],
@@ -402,17 +385,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     margin: 16,
     borderRadius: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...createWebShadow({
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+    }),
+    ...platformStyles.web({
+      maxWidth: 800,
+      alignSelf: 'center',
+    }),
   },
   chartTabs: {
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
     paddingHorizontal: 16,
+    ...platformStyles.web({
+      flexWrap: 'wrap',
+    }),
   },
   chartTab: {
     flex: 1,
@@ -421,6 +413,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 16,
     gap: 6,
+    ...createWebCursor('pointer'),
+    ...platformStyles.web({
+      minWidth: 120,
+      flex: 'none',
+    }),
   },
   activeChartTab: {
     borderBottomWidth: 2,
@@ -429,6 +426,9 @@ const styles = StyleSheet.create({
   chartTabText: {
     fontSize: 14,
     color: '#999',
+    ...platformStyles.web({
+      fontSize: 16,
+    }),
   },
   activeChartTabText: {
     color: '#4CAF50',
@@ -438,22 +438,13 @@ const styles = StyleSheet.create({
     padding: 16,
     justifyContent: 'center',
     alignItems: 'center',
+    ...createWebCursor('pointer'),
   },
   chartContent: {
     padding: 16,
-  },
-  chartContainer: {
-    alignItems: 'center',
-  },
-  chartTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  chart: {
-    borderRadius: 16,
+    ...platformStyles.web({
+      minHeight: 300,
+    }),
   },
   chartInsights: {
     marginTop: 16,

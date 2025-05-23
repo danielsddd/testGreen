@@ -1,4 +1,4 @@
-// Business/BusinessScreens/BusinessAnalyticsScreen.js - FULLY FIXED VERSION
+// Business/BusinessScreens/BusinessAnalyticsScreen.js - FIXED FOR WEB & ANDROID
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -20,7 +20,6 @@ import {
   MaterialIcons 
 } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Import REAL API services
@@ -34,8 +33,47 @@ import {
 // Import existing components
 import KPIWidget from '../components/KPIWidget';
 
+// Conditional chart imports for web compatibility
+let LineChart, BarChart, PieChart, chartConfig;
+
+if (Platform.OS === 'web') {
+  // For web, we'll create simple chart alternatives
+  LineChart = ({ data, width, height, style }) => (
+    <View style={[{ width, height, backgroundColor: '#f5f5f5', borderRadius: 16, justifyContent: 'center', alignItems: 'center' }, style]}>
+      <Text style={{ color: '#666' }}>Chart visualization available on mobile</Text>
+    </View>
+  );
+  BarChart = LineChart;
+  PieChart = LineChart;
+} else {
+  // For mobile, use the actual chart library
+  const ChartKit = require('react-native-chart-kit');
+  LineChart = ChartKit.LineChart;
+  BarChart = ChartKit.BarChart;
+  PieChart = ChartKit.PieChart;
+}
+
 const { width: screenWidth } = Dimensions.get('window');
-const chartWidth = screenWidth - 32;
+const chartWidth = Math.min(screenWidth - 32, 400); // Limit max width for web
+
+// Chart configuration for mobile
+const mobileChartConfig = {
+  backgroundColor: '#ffffff',
+  backgroundGradientFrom: '#ffffff',
+  backgroundGradientTo: '#ffffff',
+  decimalPlaces: 0,
+  color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
+  labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+  style: { borderRadius: 16 },
+  propsForDots: {
+    r: '4',
+    strokeWidth: '2',
+    stroke: '#4CAF50',
+  },
+  propsForLabels: {
+    fontSize: 10,
+  },
+};
 
 export default function BusinessAnalyticsScreen({ navigation, route }) {
   const { businessId: routeBusinessId } = route.params || {};
@@ -52,7 +90,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   
-  // ===== ANIMATION REFS =====
+  // ===== ANIMATION REFS - WITH PLATFORM CHECKS =====
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
@@ -110,17 +148,17 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
         setLastUpdated(new Date().toISOString());
         setError(null);
         
-        // Pulse animation for updates
+        // Pulse animation for updates - Platform safe
         Animated.sequence([
           Animated.timing(pulseAnim, {
             toValue: 1.05,
             duration: 200,
-            useNativeDriver: Platform.OS !== 'web',
+            useNativeDriver: Platform.select({ web: false, default: true }),
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
             duration: 200,
-            useNativeDriver: Platform.OS !== 'web',
+            useNativeDriver: Platform.select({ web: false, default: true }),
           }),
         ]).start();
       },
@@ -167,24 +205,24 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       setAnalyticsData(data.data);
       setLastUpdated(new Date().toISOString());
       
-      // Success animation
+      // Success animation - Platform safe
       if (showLoading) {
         Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 1,
             duration: 600,
-            useNativeDriver: Platform.OS !== 'web',
+            useNativeDriver: Platform.select({ web: false, default: true }),
           }),
           Animated.timing(slideAnim, {
             toValue: 0,
             duration: 500,
-            useNativeDriver: Platform.OS !== 'web',
+            useNativeDriver: Platform.select({ web: false, default: true }),
           }),
           Animated.spring(scaleAnim, {
             toValue: 1,
             tension: 100,
             friction: 8,
-            useNativeDriver: Platform.OS !== 'web',
+            useNativeDriver: Platform.select({ web: false, default: true }),
           }),
         ]).start();
       }
@@ -248,12 +286,12 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       Animated.timing(scaleAnim, {
         toValue: 0.95,
         duration: 150,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: Platform.select({ web: false, default: true }),
       }),
       Animated.timing(scaleAnim, {
         toValue: 1,
         duration: 150,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: Platform.select({ web: false, default: true }),
       }),
     ]).start();
     
@@ -270,12 +308,12 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       Animated.timing(fadeAnim, {
         toValue: 0.7,
         duration: 100,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: Platform.select({ web: false, default: true }),
       }),
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 100,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: Platform.select({ web: false, default: true }),
       }),
     ]).start();
     
@@ -345,12 +383,23 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     try {
       const reportSummary = createReportSummary(report, reportType);
       
-      const shareContent = {
-        title: `Business ${reportType} Report`,
-        message: reportSummary,
-      };
-      
-      await Share.share(shareContent);
+      if (Platform.OS === 'web') {
+        // For web, copy to clipboard
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(reportSummary);
+          Alert.alert('Success', 'Report copied to clipboard!');
+        } else {
+          Alert.alert('Info', 'Sharing is not available on web. Please copy the report manually.');
+        }
+      } else {
+        // For mobile, use Share API
+        const shareContent = {
+          title: `Business ${reportType} Report`,
+          message: reportSummary,
+        };
+        
+        await Share.share(shareContent);
+      }
     } catch (error) {
       console.error('Error sharing report:', error);
       Alert.alert('Share Error', 'Unable to share the report. Please try again.');
@@ -420,25 +469,6 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     };
   };
 
-  // ===== CHART CONFIGURATION - FIXED =====
-  const chartConfig = {
-    backgroundColor: '#ffffff',
-    backgroundGradientFrom: '#ffffff',
-    backgroundGradientTo: '#ffffff',
-    decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
-    labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
-    style: { borderRadius: 16 },
-    propsForDots: {
-      r: '4',
-      strokeWidth: '2',
-      stroke: '#4CAF50',
-    },
-    propsForLabels: {
-      fontSize: 10,
-    },
-  };
-
   // ===== RENDER TABS - FIXED =====
   const renderTabs = () => (
     <Animated.View 
@@ -472,17 +502,22 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
   const renderOverview = () => {
     if (!analyticsData) return renderNoData('overview');
     
+    const animatedStyle = Platform.select({
+      web: {
+        opacity: fadeAnim,
+        transform: [{ translateY: slideAnim }],
+      },
+      default: {
+        opacity: fadeAnim,
+        transform: [
+          { translateY: slideAnim },
+          { scale: pulseAnim }
+        ],
+      }
+    });
+    
     return (
-      <Animated.View style={[
-        styles.content, 
-        { 
-          opacity: fadeAnim, 
-          transform: [
-            { translateY: slideAnim },
-            { scale: pulseAnim }
-          ] 
-        }
-      ]}>
+      <Animated.View style={[styles.content, animatedStyle]}>
         {/* KPI Widgets */}
         <View style={styles.kpiGrid}>
           <KPIWidget
@@ -524,7 +559,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
         </View>
 
         {/* Sales Trend Chart */}
-        {analyticsData.sales && (
+        {analyticsData.sales && Platform.OS !== 'web' && (
           <View style={styles.chartContainer}>
             <View style={styles.chartHeader}>
               <Text style={styles.chartTitle}>Sales Trend - {timeframe}</Text>
@@ -535,7 +570,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
                 data={getProcessedChartData(analyticsData.sales)}
                 width={Math.max(chartWidth, 300)}
                 height={220}
-                chartConfig={chartConfig}
+                chartConfig={mobileChartConfig}
                 bezier
                 style={styles.chart}
                 withDots={true}
@@ -546,6 +581,27 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
                 fromZero={true}
               />
             </ScrollView>
+          </View>
+        )}
+
+        {/* Alternative for Web - Simple Stats Display */}
+        {analyticsData.sales && Platform.OS === 'web' && (
+          <View style={styles.chartContainer}>
+            <View style={styles.chartHeader}>
+              <Text style={styles.chartTitle}>Sales Trend - {timeframe}</Text>
+            </View>
+            
+            <View style={styles.webChartAlternative}>
+              <Text style={styles.webChartText}>
+                Total Revenue: ${(analyticsData.sales.totalRevenue || 0).toLocaleString()}
+              </Text>
+              <Text style={styles.webChartText}>
+                Orders: {analyticsData.sales.totalOrders || 0}
+              </Text>
+              <Text style={styles.webChartSubtext}>
+                (Chart visualization available on mobile app)
+              </Text>
+            </View>
           </View>
         )}
 
@@ -633,14 +689,15 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
           </View>
         </View>
 
-        {analyticsData.sales.trendData && (
+        {/* Chart for mobile only */}
+        {analyticsData.sales.trendData && Platform.OS !== 'web' && (
           <View style={styles.chartContainer}>
             <Text style={styles.chartTitle}>Revenue Trend</Text>
             <LineChart
               data={getProcessedChartData(analyticsData.sales)}
               width={chartWidth}
               height={220}
-              chartConfig={chartConfig}
+              chartConfig={mobileChartConfig}
               bezier
               style={styles.chart}
             />
@@ -1033,6 +1090,24 @@ const styles = StyleSheet.create({
   },
   chart: {
     borderRadius: 12,
+  },
+  webChartAlternative: {
+    padding: 20,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  webChartText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  webChartSubtext: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+    marginTop: 12,
   },
   noDataContainer: {
     alignItems: 'center',
