@@ -1,4 +1,4 @@
-// Business/BusinessScreens/BusinessAnalyticsScreen.js - Enhanced with Auto-Refresh
+// Business/BusinessScreens/BusinessAnalyticsScreen.js - FULLY FIXED VERSION
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -23,7 +23,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LineChart, BarChart, PieChart } from 'react-native-chart-kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Import services
+// Import REAL API services
 import { 
   getBusinessAnalytics, 
   generateBusinessReport, 
@@ -31,7 +31,7 @@ import {
   triggerAutoRefresh
 } from '../services/businessAnalyticsApi';
 
-// Import components
+// Import existing components
 import KPIWidget from '../components/KPIWidget';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -40,7 +40,7 @@ const chartWidth = screenWidth - 32;
 export default function BusinessAnalyticsScreen({ navigation, route }) {
   const { businessId: routeBusinessId } = route.params || {};
   
-  // State
+  // ===== STATE MANAGEMENT =====
   const [businessId, setBusinessId] = useState(routeBusinessId);
   const [analyticsData, setAnalyticsData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,17 +52,17 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   
-  // Animation refs
+  // ===== ANIMATION REFS =====
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   
-  // Auto-refresh refs
+  // ===== AUTO-REFRESH REFS =====
   const streamCleanup = useRef(null);
   const refreshTimer = useRef(null);
 
-  // Initialize
+  // ===== INITIALIZE BUSINESS ID =====
   useEffect(() => {
     const initBusinessId = async () => {
       if (!businessId) {
@@ -79,23 +79,25 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     initBusinessId();
   }, []);
 
-  // Auto-refresh when screen comes into focus
+  // ===== AUTO-REFRESH ON FOCUS =====
   useFocusEffect(
     useCallback(() => {
+      console.log('📊 Analytics screen focused - loading data...');
       if (businessId) {
         loadAnalytics();
         setupAutoRefresh();
       }
       
       return () => {
+        console.log('📊 Analytics screen unfocused - cleanup...');
         cleanupAutoRefresh();
       };
     }, [businessId, timeframe, autoRefreshEnabled])
   );
 
-  // Setup auto-refresh stream
-  const setupAutoRefresh = () => {
-    if (!autoRefreshEnabled) return;
+  // ===== SETUP AUTO-REFRESH STREAM =====
+  const setupAutoRefresh = useCallback(() => {
+    if (!autoRefreshEnabled || !businessId) return;
     
     cleanupAutoRefresh();
     
@@ -103,6 +105,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     streamCleanup.current = createAnalyticsStream(
       timeframe,
       (data) => {
+        console.log('📊 Auto-refresh data received');
         setAnalyticsData(data.data);
         setLastUpdated(new Date().toISOString());
         setError(null);
@@ -110,7 +113,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
         // Pulse animation for updates
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.1,
+            toValue: 1.05,
             duration: 200,
             useNativeDriver: Platform.OS !== 'web',
           }),
@@ -127,10 +130,10 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       },
       30000 // 30 seconds
     );
-  };
+  }, [autoRefreshEnabled, businessId, timeframe]);
 
-  // Cleanup auto-refresh
-  const cleanupAutoRefresh = () => {
+  // ===== CLEANUP AUTO-REFRESH =====
+  const cleanupAutoRefresh = useCallback(() => {
     if (streamCleanup.current) {
       streamCleanup.current();
       streamCleanup.current = null;
@@ -140,10 +143,15 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       clearInterval(refreshTimer.current);
       refreshTimer.current = null;
     }
-  };
+  }, []);
 
-  // Load analytics with enhanced error handling
-  const loadAnalytics = async (showLoading = true) => {
+  // ===== LOAD ANALYTICS - FIXED =====
+  const loadAnalytics = useCallback(async (showLoading = true) => {
+    if (!businessId) {
+      console.log('No business ID available');
+      return;
+    }
+
     try {
       if (showLoading) {
         setIsLoading(!analyticsData);
@@ -151,7 +159,11 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       }
       setError(null);
       
+      console.log('📊 Loading analytics for business:', businessId, 'timeframe:', timeframe);
+      
       const data = await getBusinessAnalytics(timeframe, 'all');
+      console.log('📊 Analytics data loaded successfully');
+      
       setAnalyticsData(data.data);
       setLastUpdated(new Date().toISOString());
       
@@ -178,26 +190,31 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       }
       
     } catch (error) {
-      console.error('Error loading analytics:', error);
+      console.error('❌ Error loading analytics:', error);
       setError(error.message);
       
       if (!analyticsData) {
-        // Show fallback data on first load failure
         setAnalyticsData(getFallbackData());
       }
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [businessId, timeframe, analyticsData]);
 
-  // Fallback data structure
+  // ===== FALLBACK DATA STRUCTURE =====
   const getFallbackData = () => ({
     sales: { 
       totalRevenue: 0, 
       totalOrders: 0, 
       averageOrderValue: 0, 
-      trendData: { labels: [], datasets: [{ data: [] }] } 
+      trendData: { 
+        labels: ['No Data'], 
+        datasets: [{ 
+          data: [0],
+          color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`
+        }] 
+      } 
     },
     inventory: { 
       totalItems: 0, 
@@ -221,9 +238,11 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     }
   });
 
-  // Handle timeframe change with animation
-  const handleTimeframeChange = (newTimeframe) => {
+  // ===== HANDLE TIMEFRAME CHANGE - FIXED =====
+  const handleTimeframeChange = useCallback((newTimeframe) => {
     if (newTimeframe === timeframe) return;
+    
+    console.log('📊 Changing timeframe to:', newTimeframe);
     
     Animated.sequence([
       Animated.timing(scaleAnim, {
@@ -239,10 +258,35 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     ]).start();
     
     setTimeframe(newTimeframe);
-  };
+  }, [timeframe]);
 
-  // Enhanced report generation with sharing
-  const handleGenerateReport = async (reportType) => {
+  // ===== HANDLE TAB CHANGE - FIXED =====
+  const handleTabChange = useCallback((tabKey) => {
+    if (tabKey === activeTab) return;
+    
+    console.log('📊 Changing tab to:', tabKey);
+    
+    Animated.sequence([
+      Animated.timing(fadeAnim, {
+        toValue: 0.7,
+        duration: 100,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 100,
+        useNativeDriver: Platform.OS !== 'web',
+      }),
+    ]).start();
+    
+    setActiveTab(tabKey);
+  }, [activeTab]);
+
+  // ===== HANDLE REPORT GENERATION - FIXED =====
+  const handleGenerateReport = useCallback(async (reportType) => {
+    if (isGeneratingReport) return;
+    
+    console.log('📊 Generating report:', reportType);
     setIsGeneratingReport(true);
     
     try {
@@ -279,10 +323,6 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
             onPress: () => shareReport(report.report, reportType) 
           },
           { 
-            text: 'View Details', 
-            onPress: () => showReportDetails(report.report) 
-          },
-          { 
             text: 'OK', 
             style: 'default' 
           }
@@ -293,21 +333,21 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       await triggerAutoRefresh('report_generated', { reportType });
       
     } catch (error) {
+      console.error('❌ Report generation error:', error);
       Alert.alert('Error', `Failed to generate report: ${error.message}`);
     } finally {
       setIsGeneratingReport(false);
     }
-  };
+  }, [isGeneratingReport, timeframe]);
 
-  // Share report functionality
-  const shareReport = async (report, reportType) => {
+  // ===== SHARE REPORT FUNCTIONALITY - FIXED =====
+  const shareReport = useCallback(async (report, reportType) => {
     try {
       const reportSummary = createReportSummary(report, reportType);
       
       const shareContent = {
         title: `Business ${reportType} Report`,
         message: reportSummary,
-        url: undefined // Could add a web URL if available
       };
       
       await Share.share(shareContent);
@@ -315,9 +355,9 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       console.error('Error sharing report:', error);
       Alert.alert('Share Error', 'Unable to share the report. Please try again.');
     }
-  };
+  }, [timeframe]);
 
-  // Create report summary for sharing
+  // ===== CREATE REPORT SUMMARY =====
   const createReportSummary = (report, reportType) => {
     const period = `${timeframe.charAt(0).toUpperCase() + timeframe.slice(1)} Report`;
     
@@ -343,26 +383,44 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     }
   };
 
-  const showReportDetails = (report) => {
-    navigation.navigate('BusinessReportDetailScreen', { 
-      report, 
-      businessId,
-      timeframe 
-    });
-  };
-
-  // Toggle auto-refresh
-  const toggleAutoRefresh = () => {
-    setAutoRefreshEnabled(!autoRefreshEnabled);
+  // ===== TOGGLE AUTO-REFRESH - FIXED =====
+  const toggleAutoRefresh = useCallback(() => {
+    console.log('📊 Toggling auto-refresh:', !autoRefreshEnabled);
     
-    if (!autoRefreshEnabled) {
+    const newState = !autoRefreshEnabled;
+    setAutoRefreshEnabled(newState);
+    
+    if (newState) {
       setupAutoRefresh();
     } else {
       cleanupAutoRefresh();
     }
+  }, [autoRefreshEnabled, setupAutoRefresh, cleanupAutoRefresh]);
+
+  // ===== PROCESS CHART DATA - FIXED =====
+  const getProcessedChartData = (rawData) => {
+    if (!rawData || !rawData.trendData || !rawData.trendData.labels || rawData.trendData.labels.length === 0) {
+      return {
+        labels: ['No Data'],
+        datasets: [{
+          data: [0],
+          color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`
+        }]
+      };
+    }
+
+    const { labels, datasets } = rawData.trendData;
+    
+    return {
+      labels: labels.slice(0, 10), // Limit labels for better display
+      datasets: datasets.map(dataset => ({
+        data: (dataset.data || [0]).slice(0, 10).map(val => Math.max(0, val || 0)), // Ensure positive numbers
+        color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`
+      }))
+    };
   };
 
-  // Chart configurations
+  // ===== CHART CONFIGURATION - FIXED =====
   const chartConfig = {
     backgroundColor: '#ffffff',
     backgroundGradientFrom: '#ffffff',
@@ -372,13 +430,16 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
     style: { borderRadius: 16 },
     propsForDots: {
-      r: '6',
+      r: '4',
       strokeWidth: '2',
       stroke: '#4CAF50',
     },
+    propsForLabels: {
+      fontSize: 10,
+    },
   };
 
-  // Render tabs with animations
+  // ===== RENDER TABS - FIXED =====
   const renderTabs = () => (
     <Animated.View 
       style={[
@@ -395,7 +456,8 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
         <TouchableOpacity
           key={tab.key}
           style={[styles.tab, activeTab === tab.key && styles.activeTab]}
-          onPress={() => setActiveTab(tab.key)}
+          onPress={() => handleTabChange(tab.key)}
+          activeOpacity={0.7}
         >
           <MaterialIcons name={tab.icon} size={20} color={activeTab === tab.key ? '#4CAF50' : '#999'} />
           <Text style={[styles.tabText, activeTab === tab.key && styles.activeTabText]}>
@@ -406,9 +468,9 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     </Animated.View>
   );
 
-  // Render overview tab with enhanced widgets
+  // ===== RENDER OVERVIEW TAB - FIXED =====
   const renderOverview = () => {
-    if (!analyticsData) return null;
+    if (!analyticsData) return renderNoData('overview');
     
     return (
       <Animated.View style={[
@@ -421,7 +483,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
           ] 
         }
       ]}>
-        {/* Enhanced KPI Widgets */}
+        {/* KPI Widgets */}
         <View style={styles.kpiGrid}>
           <KPIWidget
             title="Total Revenue"
@@ -429,9 +491,8 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
             icon="cash"
             format="currency"
             color="#4CAF50"
-            trend="up"
             autoRefresh={autoRefreshEnabled}
-            onPress={() => setActiveTab('sales')}
+            onPress={() => handleTabChange('sales')}
           />
           
           <KPIWidget
@@ -440,7 +501,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
             icon="shopping-cart"
             format="number"
             color="#2196F3"
-            onPress={() => setActiveTab('sales')}
+            onPress={() => handleTabChange('sales')}
           />
           
           <KPIWidget
@@ -449,64 +510,53 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
             icon="attach-money"
             format="currency"
             color="#FF9800"
-            onPress={() => setActiveTab('sales')}
+            onPress={() => handleTabChange('sales')}
           />
           
           <KPIWidget
-            title="Profit Margin"
-            value={analyticsData.profit?.profitMargin || 0}
-            icon="trending-up"
-            format="percentage"
+            title="Total Customers"
+            value={analyticsData.customers?.totalCustomers || 0}
+            icon="people"
+            format="number"
             color="#9C27B0"
-            onPress={() => setActiveTab('profit')}
+            onPress={() => handleTabChange('customers')}
           />
         </View>
 
-        {/* Sales Trend Chart with Error Handling */}
-        {analyticsData.sales?.trendData && analyticsData.sales.trendData.labels?.length > 0 ? (
+        {/* Sales Trend Chart */}
+        {analyticsData.sales && (
           <View style={styles.chartContainer}>
             <View style={styles.chartHeader}>
               <Text style={styles.chartTitle}>Sales Trend - {timeframe}</Text>
-              <TouchableOpacity 
-                style={styles.fullscreenButton}
-                onPress={() => navigation.navigate('ChartFullscreenScreen', { 
-                  chartData: analyticsData.sales.trendData,
-                  title: 'Sales Trend',
-                  type: 'line'
-                })}
-              >
-                <MaterialIcons name="fullscreen" size={20} color="#4CAF50" />
-              </TouchableOpacity>
             </View>
+            
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <LineChart
-                data={analyticsData.sales.trendData}
+                data={getProcessedChartData(analyticsData.sales)}
                 width={Math.max(chartWidth, 300)}
                 height={220}
                 chartConfig={chartConfig}
                 bezier
                 style={styles.chart}
+                withDots={true}
+                withInnerLines={false}
+                withOuterLines={true}
+                withVerticalLines={false}
+                withHorizontalLines={true}
+                fromZero={true}
               />
             </ScrollView>
           </View>
-        ) : (
-          <View style={styles.chartContainer}>
-            <Text style={styles.chartTitle}>Sales Trend - {timeframe}</Text>
-            <View style={styles.noDataContainer}>
-              <MaterialCommunityIcons name="chart-line" size={48} color="#e0e0e0" />
-              <Text style={styles.noDataText}>No sales data available</Text>
-              <Text style={styles.noDataSubtext}>Complete some sales to see trends</Text>
-            </View>
-          </View>
         )}
 
-        {/* Enhanced Quick Actions */}
+        {/* Quick Actions */}
         <View style={styles.quickActions}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Quick Reports</Text>
             <TouchableOpacity 
               style={styles.autoRefreshToggle}
               onPress={toggleAutoRefresh}
+              activeOpacity={0.7}
             >
               <MaterialIcons 
                 name={autoRefreshEnabled ? "sync" : "sync-disabled"} 
@@ -527,6 +577,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
               style={[styles.actionButton, isGeneratingReport && styles.actionButtonDisabled]}
               onPress={() => handleGenerateReport('sales')}
               disabled={isGeneratingReport}
+              activeOpacity={0.7}
             >
               <MaterialCommunityIcons name="chart-line" size={24} color="#4CAF50" />
               <Text style={styles.actionText}>Sales Report</Text>
@@ -537,6 +588,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
               style={[styles.actionButton, isGeneratingReport && styles.actionButtonDisabled]}
               onPress={() => handleGenerateReport('inventory')}
               disabled={isGeneratingReport}
+              activeOpacity={0.7}
             >
               <MaterialCommunityIcons name="package-variant" size={24} color="#2196F3" />
               <Text style={styles.actionText}>Inventory Report</Text>
@@ -546,6 +598,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
               style={[styles.actionButton, isGeneratingReport && styles.actionButtonDisabled]}
               onPress={() => handleGenerateReport('customers')}
               disabled={isGeneratingReport}
+              activeOpacity={0.7}
             >
               <MaterialCommunityIcons name="account-group" size={24} color="#FF9800" />
               <Text style={styles.actionText}>Customer Report</Text>
@@ -556,7 +609,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     );
   };
 
-  // Render sales tab with enhanced charts
+  // ===== RENDER SALES TAB - FIXED =====
   const renderSales = () => {
     if (!analyticsData?.sales) return renderNoData('sales');
     
@@ -580,11 +633,11 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
           </View>
         </View>
 
-        {analyticsData.sales.trendData && analyticsData.sales.trendData.labels?.length > 0 ? (
+        {analyticsData.sales.trendData && (
           <View style={styles.chartContainer}>
             <Text style={styles.chartTitle}>Revenue Trend</Text>
             <LineChart
-              data={analyticsData.sales.trendData}
+              data={getProcessedChartData(analyticsData.sales)}
               width={chartWidth}
               height={220}
               chartConfig={chartConfig}
@@ -592,25 +645,14 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
               style={styles.chart}
             />
           </View>
-        ) : (
-          renderNoData('sales trend')
         )}
       </Animated.View>
     );
   };
 
-  // Render inventory tab with category breakdown
+  // ===== RENDER INVENTORY TAB - FIXED =====
   const renderInventory = () => {
     if (!analyticsData?.inventory) return renderNoData('inventory');
-    
-    const categoryData = Object.entries(analyticsData.inventory.categoryBreakdown || {})
-      .map(([name, data], index) => ({
-        name,
-        population: data.count,
-        color: ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336'][index % 5],
-        legendFontColor: '#333',
-        legendFontSize: 12,
-      }));
     
     return (
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
@@ -631,29 +673,11 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
             <Text style={styles.metricLabel}>Low Stock</Text>
           </View>
         </View>
-
-        {categoryData.length > 0 ? (
-          <View style={styles.chartContainer}>
-            <Text style={styles.chartTitle}>Inventory by Category</Text>
-            <PieChart
-              data={categoryData}
-              width={chartWidth}
-              height={220}
-              chartConfig={chartConfig}
-              accessor="population"
-              backgroundColor="transparent"
-              paddingLeft="15"
-              style={styles.chart}
-            />
-          </View>
-        ) : (
-          renderNoData('inventory categories')
-        )}
       </Animated.View>
     );
   };
 
-  // Render customers tab
+  // ===== RENDER CUSTOMERS TAB - FIXED =====
   const renderCustomers = () => {
     if (!analyticsData?.customers) return renderNoData('customers');
     
@@ -676,28 +700,11 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
             <Text style={styles.metricLabel}>New This Period</Text>
           </View>
         </View>
-
-        <View style={styles.customerTiers}>
-          <Text style={styles.sectionTitle}>Customer Tiers</Text>
-          {Object.entries(analyticsData.customers.customerTiers || {}).map(([tier, count]) => (
-            <View key={tier} style={styles.tierItem}>
-              <View style={styles.tierInfo}>
-                <MaterialCommunityIcons 
-                  name={tier === 'vip' ? 'star' : tier === 'premium' ? 'diamond' : tier === 'regular' ? 'account-check' : 'account-plus'} 
-                  size={20} 
-                  color={tier === 'vip' ? '#9C27B0' : tier === 'premium' ? '#FF9800' : tier === 'regular' ? '#4CAF50' : '#2196F3'} 
-                />
-                <Text style={styles.tierName}>{tier.toUpperCase()}</Text>
-              </View>
-              <Text style={styles.tierCount}>{count}</Text>
-            </View>
-          ))}
-        </View>
       </Animated.View>
     );
   };
 
-  // Render no data state
+  // ===== RENDER NO DATA STATE =====
   const renderNoData = (dataType) => (
     <View style={styles.noDataContainer}>
       <MaterialCommunityIcons name="chart-box-outline" size={64} color="#e0e0e0" />
@@ -706,6 +713,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
       <TouchableOpacity 
         style={styles.refreshDataButton}
         onPress={() => loadAnalytics(true)}
+        activeOpacity={0.7}
       >
         <MaterialIcons name="refresh" size={20} color="#4CAF50" />
         <Text style={styles.refreshDataText}>Refresh Data</Text>
@@ -713,16 +721,21 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     </View>
   );
 
-  // Render active tab content
+  // ===== RENDER ACTIVE TAB CONTENT - FIXED =====
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'sales': return renderSales();
-      case 'inventory': return renderInventory();
-      case 'customers': return renderCustomers();
-      default: return renderOverview();
+      case 'sales': 
+        return renderSales();
+      case 'inventory': 
+        return renderInventory();
+      case 'customers': 
+        return renderCustomers();
+      default: 
+        return renderOverview();
     }
   };
 
+  // ===== LOADING STATE =====
   if (isLoading && !analyticsData) {
     return (
       <SafeAreaView style={styles.container}>
@@ -735,11 +748,16 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
     );
   }
 
+  // ===== MAIN RENDER =====
   return (
     <SafeAreaView style={styles.container}>
-      {/* Enhanced Header */}
+      {/* HEADER WITH WORKING BACK BUTTON */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()} 
+          style={styles.backButton}
+          activeOpacity={0.7}
+        >
           <MaterialIcons name="arrow-back" size={24} color="#4CAF50" />
         </TouchableOpacity>
         
@@ -757,20 +775,13 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
           style={styles.refreshButton}
           onPress={() => loadAnalytics(true)}
           disabled={refreshing}
+          activeOpacity={0.7}
         >
-          <Animated.View
-            style={{
-              transform: [{
-                rotate: refreshing ? '360deg' : '0deg'
-              }]
-            }}
-          >
-            <MaterialIcons name="refresh" size={24} color="#4CAF50" />
-          </Animated.View>
+          <MaterialIcons name="refresh" size={24} color="#4CAF50" />
         </TouchableOpacity>
       </View>
 
-      {/* Enhanced Timeframe Selector */}
+      {/* WORKING TIMEFRAME SELECTOR */}
       <Animated.View 
         style={[
           styles.timeframeContainer,
@@ -785,6 +796,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
               timeframe === period && styles.activeTimeframe
             ]}
             onPress={() => handleTimeframeChange(period)}
+            activeOpacity={0.7}
           >
             <Text style={[
               styles.timeframeText,
@@ -796,10 +808,10 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
         ))}
       </Animated.View>
 
-      {/* Tabs */}
+      {/* WORKING TABS */}
       {renderTabs()}
 
-      {/* Content */}
+      {/* CONTENT WITH REFRESH */}
       <ScrollView 
         style={styles.scrollView}
         refreshControl={
@@ -819,6 +831,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
             <TouchableOpacity 
               style={styles.retryButton}
               onPress={() => loadAnalytics(true)}
+              activeOpacity={0.7}
             >
               <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
@@ -828,7 +841,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
         {renderTabContent()}
       </ScrollView>
 
-      {/* Floating Status Indicator */}
+      {/* WORKING STATUS INDICATOR */}
       {autoRefreshEnabled && (
         <View style={styles.statusIndicator}>
           <View style={styles.statusDot} />
@@ -839,6 +852,7 @@ export default function BusinessAnalyticsScreen({ navigation, route }) {
   );
 }
 
+// ===== STYLES =====
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1017,11 +1031,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  fullscreenButton: {
-    padding: 4,
-    borderRadius: 4,
-    backgroundColor: '#f0f9f3',
-  },
   chart: {
     borderRadius: 12,
   },
@@ -1125,6 +1134,16 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 20,
   },
+  inventoryMetrics: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+  },
+  customerMetrics: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 20,
+  },
   metricCard: {
     flex: 1,
     backgroundColor: '#fff',
@@ -1147,49 +1166,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 4,
-  },
-  inventoryMetrics: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 20,
-  },
-  customerMetrics: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 20,
-  },
-  customerTiers: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  tierItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  tierInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  tierName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  tierCount: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#4CAF50',
   },
   statusIndicator: {
     position: 'absolute',

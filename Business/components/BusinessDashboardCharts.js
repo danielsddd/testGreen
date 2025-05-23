@@ -1,4 +1,4 @@
-// Business/components/BusinessDashboardCharts.js
+// Business/components/BusinessDashboardCharts.js - FIXED WEB COMPATIBLE
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -31,7 +31,7 @@ export default function BusinessDashboardCharts({
   const [activeChart, setActiveChart] = useState('sales');
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Animation refs
+  // Animation refs - Web compatible
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
   const refreshAnim = useRef(new Animated.Value(0)).current;
@@ -40,7 +40,7 @@ export default function BusinessDashboardCharts({
   const refreshTimer = useRef(null);
 
   useEffect(() => {
-    // Entrance animation
+    // Entrance animation - Web compatible
     Animated.stagger(200, [
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -71,7 +71,7 @@ export default function BusinessDashboardCharts({
   const handleAutoRefresh = async () => {
     setIsRefreshing(true);
     
-    // Refresh animation
+    // Refresh animation - Web compatible
     Animated.sequence([
       Animated.timing(refreshAnim, {
         toValue: 1,
@@ -97,7 +97,7 @@ export default function BusinessDashboardCharts({
   const handleChartChange = (chartType) => {
     if (chartType === activeChart) return;
     
-    // Slide animation for chart change
+    // Slide animation for chart change - Web compatible
     Animated.sequence([
       Animated.timing(slideAnim, {
         toValue: 0,
@@ -114,7 +114,7 @@ export default function BusinessDashboardCharts({
     setActiveChart(chartType);
   };
 
-  // Chart configurations
+  // Chart configurations - Web compatible
   const chartConfig = {
     backgroundColor: '#ffffff',
     backgroundGradientFrom: '#ffffff',
@@ -142,7 +142,7 @@ export default function BusinessDashboardCharts({
       {
         data: (salesData.values || [0, 0, 0, 0, 0, 0, 0]).map(value => 
           // Ensure we have valid numbers for the chart
-          isNaN(value) || !isFinite(value) ? 0 : value
+          isNaN(value) || !isFinite(value) ? 0 : Math.max(0, value)
         ),
         color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
         strokeWidth: 3,
@@ -156,43 +156,71 @@ export default function BusinessDashboardCharts({
     datasets: [
       {
         data: [
-          ordersData.pending || 0,
-          ordersData.confirmed || 0,
-          ordersData.ready || 0,
-          ordersData.completed || 0,
+          Math.max(0, ordersData.pending || 0),
+          Math.max(0, ordersData.confirmed || 0),
+          Math.max(0, ordersData.ready || 0),
+          Math.max(0, ordersData.completed || 0),
         ],
       },
     ],
   };
 
-  // Inventory Chart Data
+  // Inventory Chart Data - Ensure no negative values
   const inventoryPieData = [
     {
       name: 'In Stock',
-      population: inventoryData.inStock || 0,
+      population: Math.max(0, inventoryData.inStock || 0),
       color: '#4CAF50',
       legendFontColor: '#333',
       legendFontSize: 12,
     },
     {
       name: 'Low Stock',
-      population: inventoryData.lowStock || 0,
+      population: Math.max(0, inventoryData.lowStock || 0),
       color: '#FF9800',
       legendFontColor: '#333',
       legendFontSize: 12,
     },
     {
       name: 'Out of Stock',
-      population: inventoryData.outOfStock || 0,
+      population: Math.max(0, inventoryData.outOfStock || 0),
       color: '#F44336',
       legendFontColor: '#333',
       legendFontSize: 12,
     },
-  ];
+  ].filter(item => item.population > 0); // Remove zero values for cleaner pie chart
 
   const renderChart = () => {
+    // Check if we have any data to display
+    const hasData = (chartType) => {
+      switch (chartType) {
+        case 'sales':
+          return salesChartData.datasets[0].data.some(val => val > 0);
+        case 'orders':
+          return ordersChartData.datasets[0].data.some(val => val > 0);
+        case 'inventory':
+          return inventoryPieData.length > 0 && inventoryPieData.some(item => item.population > 0);
+        default:
+          return false;
+      }
+    };
+
+    const renderNoDataState = (title) => (
+      <View style={styles.chartContainer}>
+        <Text style={styles.chartTitle}>{title}</Text>
+        <View style={styles.noDataContainer}>
+          <MaterialCommunityIcons name="chart-line" size={64} color="#e0e0e0" />
+          <Text style={styles.noDataText}>No data available</Text>
+          <Text style={styles.noDataSubtext}>Data will appear here as your business grows</Text>
+        </View>
+      </View>
+    );
+
     switch (activeChart) {
       case 'sales':
+        if (!hasData('sales')) {
+          return renderNoDataState('Sales This Week');
+        }
         return (
           <View style={styles.chartContainer}>
             <Text style={styles.chartTitle}>Sales This Week</Text>
@@ -200,18 +228,7 @@ export default function BusinessDashboardCharts({
               data={salesChartData}
               width={chartWidth}
               height={220}
-              chartConfig={{
-                ...chartConfig,
-                propsForDots: {
-                  r: "6",
-                  strokeWidth: "2",
-                  stroke: "#4CAF50",
-                },
-                // Use camelCase for web compatibility
-                style: {
-                  borderRadius: 16,
-                }
-              }}
+              chartConfig={chartConfig}
               style={styles.chart}
               bezier
               withDots={true}
@@ -229,6 +246,9 @@ export default function BusinessDashboardCharts({
         );
         
       case 'orders':
+        if (!hasData('orders')) {
+          return renderNoDataState('Orders by Status');
+        }
         return (
           <View style={styles.chartContainer}>
             <Text style={styles.chartTitle}>Orders by Status</Text>
@@ -249,6 +269,9 @@ export default function BusinessDashboardCharts({
         );
         
       case 'inventory':
+        if (!hasData('inventory')) {
+          return renderNoDataState('Inventory Status');
+        }
         return (
           <View style={styles.chartContainer}>
             <Text style={styles.chartTitle}>Inventory Status</Text>
@@ -271,7 +294,7 @@ export default function BusinessDashboardCharts({
         );
         
       default:
-        return null;
+        return renderNoDataState('Chart');
     }
   };
 
@@ -281,7 +304,9 @@ export default function BusinessDashboardCharts({
         styles.container,
         {
           opacity: fadeAnim,
-          transform: [{ scale: slideAnim }],
+          ...(Platform.OS !== 'web' && {
+            transform: [{ scale: slideAnim }],
+          })
         }
       ]}
     >
@@ -323,7 +348,7 @@ export default function BusinessDashboardCharts({
           disabled={isRefreshing}
         >
           <Animated.View
-            style={{
+            style={Platform.OS === 'web' ? {} : {
               transform: [{
                 rotate: refreshAnim.interpolate({
                   inputRange: [0, 1],
@@ -347,12 +372,14 @@ export default function BusinessDashboardCharts({
           styles.chartContent,
           {
             opacity: slideAnim,
-            transform: [{
-              translateX: slideAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [50, 0],
-              })
-            }]
+            ...(Platform.OS !== 'web' && {
+              transform: [{
+                translateX: slideAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [50, 0],
+                })
+              }]
+            })
           }
         ]}
       >
@@ -438,6 +465,23 @@ const styles = StyleSheet.create({
   insightText: {
     fontSize: 14,
     color: '#666',
+    textAlign: 'center',
+  },
+  noDataContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  noDataText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 16,
+  },
+  noDataSubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
     textAlign: 'center',
   },
   autoRefreshIndicator: {
