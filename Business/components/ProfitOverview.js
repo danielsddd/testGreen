@@ -1,5 +1,5 @@
 // Business/components/ProfitOverview.js
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -18,18 +18,31 @@ import {
   MaterialIcons,
   Ionicons 
 } from '@expo/vector-icons';
-import { LineChart, PieChart, BarChart } from 'react-native-chart-kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BarChart, LineChart, PieChart } from 'react-native-chart-kit';
 
+// Get device width to scale charts
 const { width } = Dimensions.get('window');
 
-export default function ProfitOverview({
+/**
+ * ProfitOverview Component
+ * 
+ * Displays business profit analytics with various charts and metrics
+ * 
+ * @param {Object} props Component props
+ * @param {string} props.businessId Business identifier
+ * @param {boolean} props.refreshing Pull to refresh state
+ * @param {Function} props.onRefresh Pull to refresh callback
+ * @param {string} props.dateRange Date range for analytics (week, month, quarter, year)
+ * @param {Function} props.onDateRangeChange Callback when date range is changed
+ */
+const ProfitOverview = ({
   businessId,
   refreshing = false,
   onRefresh = () => {},
   dateRange = 'month', // 'week', 'month', 'quarter', 'year'
   onDateRangeChange = () => {},
-}) {
+}) => {
   // State
   const [profitData, setProfitData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,8 +56,17 @@ export default function ProfitOverview({
   const slideAnim = useRef(new Animated.Value(50)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   
+  // Check if charts can be rendered based on available data
+  const canRenderCharts = useMemo(() => (
+    trendData && 
+    trendData.labels && 
+    trendData.labels.length > 0 && 
+    trendData.datasets && 
+    trendData.datasets.length > 0
+  ), [trendData]);
+  
   // Get headers with authentication
-  const getHeaders = async () => {
+  const getHeaders = useCallback(async () => {
     try {
       const userEmail = await AsyncStorage.getItem('userEmail');
       const userType = await AsyncStorage.getItem('userType');
@@ -62,7 +84,7 @@ export default function ProfitOverview({
         'Content-Type': 'application/json',
       };
     }
-  };
+  }, [businessId]);
 
   // Load profit data from API
   const loadProfitData = useCallback(async () => {
@@ -73,19 +95,33 @@ export default function ProfitOverview({
       console.log('Loading profit data for business:', businessId, 'dateRange:', dateRange);
       
       const headers = await getHeaders();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
       const response = await fetch(
         `https://usersfunctions.azurewebsites.net/api/business/analytics/profit?businessId=${businessId}&range=${dateRange}`, 
         {
           method: 'GET',
           headers,
+          signal: controller.signal
         }
       );
+      
+      clearTimeout(timeoutId);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to load profit data`);
       }
       
-      const result = await response.json();
+      const responseText = await response.text();
+      let result;
+      
+      try {
+        result = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Error parsing JSON response:', parseError);
+        throw new Error('Invalid response format');
+      }
       
       if (!result.success) {
         throw new Error(result.error || 'Failed to load profit data');
@@ -94,10 +130,10 @@ export default function ProfitOverview({
       // Extract data from API response
       const data = result.data;
       setProfitData(data.overview);
-      setTrendData(data.trendData);
-      setCategoryData(data.categoryBreakdown);
+      setTrendData(prepareChartData(data.trendData));
+      setCategoryData(prepareCategoryData(data.categoryBreakdown));
       
-      console.log('Profit data loaded successfully:', data);
+      console.log('Profit data loaded successfully');
       
       // Success animation
       Animated.parallel([
@@ -119,23 +155,92 @@ export default function ProfitOverview({
         }),
       ]).start();
       
+      // Cache the data for offline access
+      cacheData(data);
+      
     } catch (error) {
       console.error('Error loading profit data:', error);
       setError(error.message);
-      setProfitData(null);
-      setTrendData(null);
-      setCategoryData(null);
+      
+      // Try to load cached data
+      try {
+        const cachedData = await AsyncStorage.getItem(`profit_data_${dateRange}`);
+        if (cachedData) {
+          const data = JSON.parse(cachedData);
+          setProfitData(data.overview);
+          setTrendData(prepareChartData(data.trendData));
+          setCategoryData(prepareCategoryData(data.categoryBreakdown));
+          
+          // Simpler animation for cached data
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: Platform.OS !== 'web',
+          }).start();
+        }
+      } catch (cacheError) {
+        console.error('Error loading cached data:', cacheError);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [businessId, dateRange]);
+  }, [businessId, dateRange, getHeaders, fadeAnim, slideAnim, scaleAnim]);
+
+  // Cache data for offline access
+  const cacheData = useCallback(async (data) => {
+    try {
+      await AsyncStorage.setItem(`profit_data_${dateRange}`, JSON.stringify(data));
+    } catch (error) {
+      console.error('Error caching profit data:', error);
+    }
+  }, [dateRange]);
+
+  // Prepare chart data for react-native-chart-kit
+  const prepareChartData = useCallback((rawData) => {
+    if (!rawData || !rawData.labels || !rawData.datasets || rawData.datasets.length === 0) {
+      return null;
+    }
+    
+    // For react-native-chart-kit
+    return {
+      labels: rawData.labels,
+      datasets: rawData.datasets.map(dataset => ({
+        data: dataset.data,
+        color: (opacity = 1) => dataset.color || `rgba(76, 175, 80, ${opacity})`,
+        strokeWidth: dataset.strokeWidth || 2,
+      })),
+      legend: rawData.datasets.map(dataset => dataset.label)
+    };
+  }, []);
+
+  // Prepare category data for pie chart
+  const prepareCategoryData = useCallback((rawData) => {
+    if (!rawData || !Array.isArray(rawData) || rawData.length === 0) {
+      return null;
+    }
+    
+    // Default colors if not provided
+    const defaultColors = [
+      '#4CAF50', '#2196F3', '#9C27B0', '#FF9800', '#F44336',
+      '#3F51B5', '#00BCD4', '#FFC107', '#795548', '#607D8B'
+    ];
+    
+    return rawData.map((item, index) => ({
+      name: item.name,
+      profit: item.profit,
+      percentage: item.percentage,
+      color: item.color || defaultColors[index % defaultColors.length],
+      legendFontColor: '#333',
+      legendFontSize: 12,
+    }));
+  }, []);
 
   // Initial load
   useEffect(() => {
     if (businessId) {
       loadProfitData();
     }
-  }, [loadProfitData]);
+  }, [loadProfitData, businessId]);
 
   // Handle refresh
   const handleRefresh = useCallback(() => {
@@ -144,36 +249,43 @@ export default function ProfitOverview({
   }, [loadProfitData, onRefresh]);
 
   // Handle date range change
-  const handleDateRangeChange = (newRange) => {
+  const handleDateRangeChange = useCallback((newRange) => {
     onDateRangeChange(newRange);
-  };
+  }, [onDateRangeChange]);
 
   // Format currency
-  const formatCurrency = (amount) => {
+  const formatCurrency = useCallback((amount) => {
+    if (amount === undefined || amount === null) return '$0.00';
+    
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-    }).format(amount || 0);
-  };
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  }, []);
 
   // Format percentage
-  const formatPercentage = (value) => {
-    return `${(value || 0).toFixed(1)}%`;
-  };
+  const formatPercentage = useCallback((value) => {
+    if (value === undefined || value === null) return '0%';
+    return `${(value).toFixed(1)}%`;
+  }, []);
 
   // Get trend color
-  const getTrendColor = (growth) => {
+  const getTrendColor = useCallback((growth) => {
+    if (!growth && growth !== 0) return '#757575';
     if (growth > 0) return '#4CAF50';
     if (growth < 0) return '#F44336';
     return '#FF9800';
-  };
+  }, []);
 
   // Get trend icon
-  const getTrendIcon = (growth) => {
+  const getTrendIcon = useCallback((growth) => {
+    if (!growth && growth !== 0) return 'trending-flat';
     if (growth > 0) return 'trending-up';
     if (growth < 0) return 'trending-down';
     return 'trending-flat';
-  };
+  }, []);
 
   // Render loading state
   if (isLoading) {
@@ -186,7 +298,7 @@ export default function ProfitOverview({
   }
 
   // Render error state
-  if (error) {
+  if (error && !profitData) {
     return (
       <View style={styles.errorContainer}>
         <MaterialIcons name="error-outline" size={48} color="#f44336" />
@@ -241,6 +353,7 @@ export default function ProfitOverview({
           horizontal 
           showsHorizontalScrollIndicator={false}
           style={styles.dateRangeContainer}
+          contentContainerStyle={styles.dateRangeContent}
         >
           {['week', 'month', 'quarter', 'year'].map((range) => (
             <TouchableOpacity
@@ -250,6 +363,9 @@ export default function ProfitOverview({
                 dateRange === range && styles.activeDateRange
               ]}
               onPress={() => handleDateRangeChange(range)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: dateRange === range }}
+              accessibilityLabel={`${range} view`}
             >
               <Text style={[
                 styles.dateRangeText,
@@ -273,6 +389,7 @@ export default function ProfitOverview({
           />
         }
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.contentContainer}
       >
         {/* Key Metrics Cards */}
         <View style={styles.metricsContainer}>
@@ -370,13 +487,27 @@ export default function ProfitOverview({
         </View>
 
         {/* Profit Trend Chart */}
-        {trendData && (
+        {canRenderCharts && (
           <View style={styles.chartSection}>
             <Text style={styles.chartTitle}>Profit Trend</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chartScrollContent}
+            >
               <LineChart
-                data={trendData}
-                width={Math.max(width - 40, 300)}
+                data={{
+                  labels: trendData.labels,
+                  datasets: [
+                    {
+                      data: trendData.datasets[0].data,
+                      color: trendData.datasets[0].color,
+                      strokeWidth: 2,
+                    }
+                  ],
+                  legend: trendData.legend || ['Profit']
+                }}
+                width={Math.max(width - 40, 350)}
                 height={220}
                 yAxisLabel="$"
                 yAxisSuffix=""
@@ -399,6 +530,10 @@ export default function ProfitOverview({
                 }}
                 bezier
                 style={styles.chart}
+                withShadow={false}
+                withInnerLines={false}
+                withOuterLines={true}
+                fromZero
               />
             </ScrollView>
           </View>
@@ -410,16 +545,14 @@ export default function ProfitOverview({
             <Text style={styles.chartTitle}>Profit by Category</Text>
             
             {/* Pie Chart */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chartScrollContent}
+            >
               <PieChart
-                data={categoryData.map(item => ({
-                  name: item.name,
-                  profit: item.profit,
-                  color: item.color,
-                  legendFontColor: '#333',
-                  legendFontSize: 12,
-                }))}
-                width={Math.max(width - 40, 300)}
+                data={categoryData}
+                width={Math.max(width - 40, 350)}
                 height={220}
                 chartConfig={{
                   color: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
@@ -428,6 +561,8 @@ export default function ProfitOverview({
                 backgroundColor="transparent"
                 paddingLeft="15"
                 style={styles.chart}
+                hasLegend={false}
+                center={[width > 400 ? 120 : 80, 0]}
               />
             </ScrollView>
             
@@ -459,23 +594,23 @@ export default function ProfitOverview({
             <Text style={styles.sectionTitle}>Top Profitable Products</Text>
             
             {profitData.topProfitableProducts.map((product, index) => (
-              <View key={product.id} style={styles.productItem}>
+              <View key={product.id || index} style={styles.productItem}>
                 <View style={styles.productRank}>
                   <Text style={styles.rankNumber}>{index + 1}</Text>
                 </View>
                 
                 <View style={styles.productInfo}>
                   <Text style={styles.productName} numberOfLines={1}>
-                    {product.name}
+                    {product.name || 'Unknown Product'}
                   </Text>
                   <Text style={styles.productSold}>
-                    {product.sold} sold • {formatPercentage(product.margin)} margin
+                    {product.sold || 0} sold • {formatPercentage(product.margin || 0)} margin
                   </Text>
                 </View>
                 
                 <View style={styles.productProfit}>
                   <Text style={styles.productProfitValue}>
-                    {formatCurrency(product.profit)}
+                    {formatCurrency(product.profit || 0)}
                   </Text>
                 </View>
               </View>
@@ -484,7 +619,7 @@ export default function ProfitOverview({
         )}
 
         {/* Expense Breakdown */}
-        {profitData.expenses && (
+        {profitData.expenses && Object.keys(profitData.expenses).length > 0 && (
           <View style={styles.expensesSection}>
             <Text style={styles.sectionTitle}>
               <MaterialCommunityIcons name="credit-card-outline" size={16} color="#F44336" />
@@ -522,17 +657,20 @@ export default function ProfitOverview({
       </ScrollView>
     </Animated.View>
   );
+}
 
-  // Helper function to get expense category icon
-  function getExpenseIcon(category) {
-    switch (category.toLowerCase()) {
-      case 'inventory': return 'package-variant';
-      case 'utilities': return 'lightning-bolt';
-      case 'marketing': return 'bullhorn';
-      case 'rent': return 'home';
-      case 'staff': return 'account-group';
-      default: return 'receipt';
-    }
+// Helper function to get expense category icon
+function getExpenseIcon(category) {
+  switch (category.toLowerCase()) {
+    case 'inventory': return 'package-variant';
+    case 'utilities': return 'lightning-bolt';
+    case 'marketing': return 'bullhorn';
+    case 'rent': return 'home';
+    case 'staff': return 'account-group';
+    case 'shipping': return 'truck-delivery';
+    case 'software': return 'laptop';
+    case 'taxes': return 'bank';
+    default: return 'receipt';
   }
 }
 
@@ -575,7 +713,7 @@ const styles = StyleSheet.create({
   retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f44336',
+    backgroundColor: '#4CAF50',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
@@ -635,6 +773,9 @@ const styles = StyleSheet.create({
   dateRangeContainer: {
     flexDirection: 'row',
   },
+  dateRangeContent: {
+    paddingRight: 16,
+  },
   dateRangeButton: {
     paddingVertical: 8,
     paddingHorizontal: 16,
@@ -656,6 +797,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 40,
   },
   metricsContainer: {
     flexDirection: 'row',
@@ -717,8 +861,13 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 16,
   },
+  chartScrollContent: {
+    paddingRight: 16,
+    alignItems: 'center',
+  },
   chart: {
     borderRadius: 12,
+    marginVertical: 8,
   },
   categoryDetails: {
     marginTop: 16,
@@ -728,6 +877,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   categoryInfo: {
     flexDirection: 'row',
@@ -838,6 +989,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
   expenseInfo: {
     flexDirection: 'row',
@@ -873,3 +1026,5 @@ const styles = StyleSheet.create({
     color: '#F44336',
   },
 });
+
+export default memo(ProfitOverview);

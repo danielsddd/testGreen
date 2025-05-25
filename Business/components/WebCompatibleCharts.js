@@ -1,29 +1,17 @@
-// Business/components/WebCompatibleCharts.js - Universal Charts for Web & Mobile
+// Business/components/WebCompatibleCharts.js
 import React from 'react';
 import { View, Text, StyleSheet, Platform, Dimensions } from 'react-native';
 import { 
-  LineChart as RNLineChart, 
-  BarChart as RNBarChart, 
-  PieChart as RNPieChart 
-} from 'react-native-chart-kit';
-import { 
   LineChart, 
   BarChart, 
-  PieChart, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  ResponsiveContainer,
-  Cell
-} from 'recharts';
+  PieChart 
+} from 'react-native-chart-kit';
 
 const { width: screenWidth } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 
-// Web-compatible chart configuration
-const webChartConfig = {
+// Chart configuration
+const chartConfig = {
   backgroundColor: '#ffffff',
   backgroundGradientFrom: '#ffffff',
   backgroundGradientTo: '#ffffff',
@@ -36,11 +24,6 @@ const webChartConfig = {
     strokeWidth: '2',
     stroke: '#4CAF50',
   },
-};
-
-// Mobile chart configuration
-const mobileChartConfig = {
-  ...webChartConfig,
   propsForLabels: {
     fontSize: 12,
   },
@@ -62,49 +45,27 @@ export const UniversalLineChart = ({
   showGrid = true,
   showTooltip = true 
 }) => {
+  // For web, we need to create a custom LineChart implementation
   if (isWeb) {
-    // Web version using Recharts
-    const processedData = data.labels?.map((label, index) => ({
-      name: label,
-      value: data.datasets?.[0]?.data?.[index] || 0,
-    })) || [];
-
     return (
       <View style={styles.chartContainer}>
         {title && <Text style={styles.chartTitle}>{title}</Text>}
-        <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={processedData}>
-            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />}
-            <XAxis 
-              dataKey="name" 
-              tick={{ fontSize: 12, fill: '#666' }}
-              axisLine={{ stroke: '#e0e0e0' }}
-            />
-            <YAxis 
-              tick={{ fontSize: 12, fill: '#666' }}
-              axisLine={{ stroke: '#e0e0e0' }}
-              label={{ value: yAxisLabel, angle: -90, position: 'insideLeft' }}
-            />
-            {showTooltip && (
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                }}
+        <View style={styles.webChartPlaceholder}>
+          <Text style={styles.webChartText}>
+            {title || 'Line Chart'} - Web Version
+          </Text>
+          <Text style={styles.webChartLabels}>
+            Labels: {data.labels?.join(', ') || 'No Data'}
+          </Text>
+          <View style={styles.webChartLine}>
+            {data.datasets?.[0]?.data?.map((value, index) => (
+              <View 
+                key={index} 
+                style={[styles.webChartBar, { height: Math.max(value * 0.5, 10) }]} 
               />
-            )}
-            <LineChart.Line 
-              type="monotone" 
-              dataKey="value" 
-              stroke="#4CAF50" 
-              strokeWidth={3}
-              dot={{ fill: '#4CAF50', strokeWidth: 2, r: 6 }}
-              activeDot={{ r: 8, fill: '#4CAF50' }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+            ))}
+          </View>
+        </View>
       </View>
     );
   }
@@ -113,17 +74,18 @@ export const UniversalLineChart = ({
   return (
     <View style={styles.chartContainer}>
       {title && <Text style={styles.chartTitle}>{title}</Text>}
-      <RNLineChart
+      <LineChart
         data={data}
         width={width}
         height={height}
-        chartConfig={mobileChartConfig}
+        chartConfig={chartConfig}
         bezier
         style={styles.chart}
         withDots={true}
         withShadow={false}
         withInnerLines={true}
         withOuterLines={true}
+        yAxisLabel={yAxisLabel}
         fromZero={true}
       />
     </View>
@@ -139,45 +101,34 @@ export const UniversalBarChart = ({
   showGrid = true,
   showTooltip = true 
 }) => {
+  // For web, we need to create a custom BarChart implementation
   if (isWeb) {
-    // Web version using Recharts
-    const processedData = data.labels?.map((label, index) => ({
-      name: label,
-      value: data.datasets?.[0]?.data?.[index] || 0,
-    })) || [];
-
     return (
       <View style={styles.chartContainer}>
         {title && <Text style={styles.chartTitle}>{title}</Text>}
-        <ResponsiveContainer width="100%" height={height}>
-          <BarChart data={processedData}>
-            {showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />}
-            <XAxis 
-              dataKey="name" 
-              tick={{ fontSize: 12, fill: '#666' }}
-              axisLine={{ stroke: '#e0e0e0' }}
-            />
-            <YAxis 
-              tick={{ fontSize: 12, fill: '#666' }}
-              axisLine={{ stroke: '#e0e0e0' }}
-            />
-            {showTooltip && (
-              <Tooltip 
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e0e0e0',
-                  borderRadius: '8px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                }}
-              />
-            )}
-            <BarChart.Bar 
-              dataKey="value" 
-              fill="#4CAF50"
-              radius={[4, 4, 0, 0]}
-            />
-          </BarChart>
-        </ResponsiveContainer>
+        <View style={styles.webChartPlaceholder}>
+          <Text style={styles.webChartText}>
+            {title || 'Bar Chart'} - Web Version
+          </Text>
+          <Text style={styles.webChartLabels}>
+            Labels: {data.labels?.join(', ') || 'No Data'}
+          </Text>
+          <View style={styles.webChartBars}>
+            {data.datasets?.[0]?.data?.map((value, index) => (
+              <View key={index} style={styles.webBarContainer}>
+                <View 
+                  style={[
+                    styles.webChartBar, 
+                    { height: Math.max(value * 0.5, 10) }
+                  ]} 
+                />
+                <Text style={styles.webBarLabel}>
+                  {data.labels?.[index]?.substring(0, 3) || ''}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
       </View>
     );
   }
@@ -186,13 +137,14 @@ export const UniversalBarChart = ({
   return (
     <View style={styles.chartContainer}>
       {title && <Text style={styles.chartTitle}>{title}</Text>}
-      <RNBarChart
+      <BarChart
         data={data}
         width={width}
         height={height}
-        chartConfig={mobileChartConfig}
+        chartConfig={chartConfig}
         style={styles.chart}
         verticalLabelRotation={0}
+        fromZero={true}
       />
     </View>
   );
@@ -206,42 +158,49 @@ export const UniversalPieChart = ({
   title,
   showLegend = true 
 }) => {
+  // For web, we need to create a custom PieChart implementation
   if (isWeb) {
-    // Web version using Recharts
-    const processedData = data.map((item, index) => ({
-      name: item.name,
-      value: item.population || item.value,
-      color: item.color || chartColors[index % chartColors.length]
-    }));
-
     return (
       <View style={styles.chartContainer}>
         {title && <Text style={styles.chartTitle}>{title}</Text>}
-        <ResponsiveContainer width="100%" height={height}>
-          <PieChart>
-            <PieChart.Pie
-              data={processedData}
-              cx="50%"
-              cy="50%"
-              outerRadius={80}
-              dataKey="value"
-              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-            >
-              {processedData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
+        <View style={styles.webChartPlaceholder}>
+          <Text style={styles.webChartText}>
+            {title || 'Pie Chart'} - Web Version
+          </Text>
+          <View style={styles.webPieContainer}>
+            <View style={styles.webPieChart}>
+              {data.map((item, index) => (
+                <View 
+                  key={index} 
+                  style={[
+                    styles.webPieSegment, 
+                    { 
+                      backgroundColor: item.color,
+                      width: `${Math.max((item.population / getTotalPopulation(data)) * 100, 5)}%`
+                    }
+                  ]} 
+                />
               ))}
-            </PieChart.Pie>
-            {showLegend && <Legend />}
-            <Tooltip 
-              contentStyle={{
-                backgroundColor: '#fff',
-                border: '1px solid #e0e0e0',
-                borderRadius: '8px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-              }}
-            />
-          </PieChart>
-        </ResponsiveContainer>
+            </View>
+          </View>
+          {showLegend && (
+            <View style={styles.webChartLegend}>
+              {data.map((item, index) => (
+                <View key={index} style={styles.webLegendItem}>
+                  <View 
+                    style={[
+                      styles.webLegendColor, 
+                      { backgroundColor: item.color }
+                    ]} 
+                  />
+                  <Text style={styles.webLegendText}>
+                    {item.name}: {item.population}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
       </View>
     );
   }
@@ -250,21 +209,22 @@ export const UniversalPieChart = ({
   return (
     <View style={styles.chartContainer}>
       {title && <Text style={styles.chartTitle}>{title}</Text>}
-      <RNPieChart
+      <PieChart
         data={data}
         width={width}
         height={height}
-        chartConfig={mobileChartConfig}
+        chartConfig={chartConfig}
         accessor="population"
         backgroundColor="transparent"
         paddingLeft="15"
+        absolute
         style={styles.chart}
       />
     </View>
   );
 };
 
-// Multi-Line Chart for comparisons
+// Multi-Line Chart for comparisons (simplified)
 export const UniversalMultiLineChart = ({ 
   data, 
   width = screenWidth - 32, 
@@ -272,104 +232,7 @@ export const UniversalMultiLineChart = ({
   title,
   lines = []
 }) => {
-  if (isWeb) {
-    const processedData = data.labels?.map((label, index) => {
-      const point = { name: label };
-      lines.forEach((line, lineIndex) => {
-        point[line.key] = data.datasets?.[lineIndex]?.data?.[index] || 0;
-      });
-      return point;
-    }) || [];
-
-    return (
-      <View style={styles.chartContainer}>
-        {title && <Text style={styles.chartTitle}>{title}</Text>}
-        <ResponsiveContainer width="100%" height={height}>
-          <LineChart data={processedData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis 
-              dataKey="name" 
-              tick={{ fontSize: 12, fill: '#666' }}
-            />
-            <YAxis tick={{ fontSize: 12, fill: '#666' }} />
-            <Tooltip 
-              contentStyle={{
-                backgroundColor: '#fff',
-                border: '1px solid #e0e0e0',
-                borderRadius: '8px'
-              }}
-            />
-            <Legend />
-            {lines.map((line, index) => (
-              <LineChart.Line 
-                key={line.key}
-                type="monotone" 
-                dataKey={line.key} 
-                stroke={line.color || chartColors[index]}
-                strokeWidth={2}
-                dot={{ r: 4 }}
-                name={line.name}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </View>
-    );
-  }
-
-  // For mobile, fallback to single line or create custom component
-  return (
-    <UniversalLineChart 
-      data={data} 
-      width={width} 
-      height={height} 
-      title={title} 
-    />
-  );
-};
-
-// Area Chart Component
-export const UniversalAreaChart = ({ 
-  data, 
-  width = screenWidth - 32, 
-  height = 220, 
-  title 
-}) => {
-  if (isWeb) {
-    const processedData = data.labels?.map((label, index) => ({
-      name: label,
-      value: data.datasets?.[0]?.data?.[index] || 0,
-    })) || [];
-
-    return (
-      <View style={styles.chartContainer}>
-        {title && <Text style={styles.chartTitle}>{title}</Text>}
-        <ResponsiveContainer width="100%" height={height}>
-          <AreaChart data={processedData}>
-            <defs>
-              <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#4CAF50" stopOpacity={0.8}/>
-                <stop offset="95%" stopColor="#4CAF50" stopOpacity={0.1}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#666' }} />
-            <YAxis tick={{ fontSize: 12, fill: '#666' }} />
-            <Tooltip />
-            <AreaChart.Area 
-              type="monotone" 
-              dataKey="value" 
-              stroke="#4CAF50" 
-              fillOpacity={1} 
-              fill="url(#colorValue)" 
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </View>
-    );
-  }
-
-  // Fallback to line chart for mobile
+  // For both web and mobile, we'll use a simplified version
   return (
     <UniversalLineChart 
       data={data} 
@@ -389,20 +252,26 @@ export const ChartWrapper = ({ children, fallback }) => {
   );
 };
 
+// Helper function to calculate total for pie chart
+const getTotalPopulation = (data) => {
+  return data.reduce((sum, item) => sum + (item.population || 0), 0);
+};
+
 const styles = StyleSheet.create({
   chartContainer: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginVertical: 8,
-    ...(Platform.OS === 'web' ? {
-      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-    } : {
+    ...(Platform.OS !== 'web' ? {
       elevation: 2,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 1 },
       shadowOpacity: 0.1,
       shadowRadius: 2,
+    } : {
+      borderWidth: 1,
+      borderColor: '#e0e0e0',
     }),
   },
   chartTitle: {
@@ -418,6 +287,91 @@ const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
   },
+  // Web-specific styles
+  webChartPlaceholder: {
+    height: 220,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 16,
+  },
+  webChartText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4CAF50',
+    marginBottom: 8,
+  },
+  webChartLabels: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 16,
+  },
+  webChartLine: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 100,
+    width: '100%',
+    justifyContent: 'space-around',
+  },
+  webChartBars: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 100,
+    width: '100%',
+    justifyContent: 'space-around',
+  },
+  webBarContainer: {
+    alignItems: 'center',
+  },
+  webChartBar: {
+    width: 20,
+    backgroundColor: '#4CAF50',
+    borderRadius: 4,
+    marginHorizontal: 4,
+  },
+  webBarLabel: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 4,
+  },
+  webPieContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    marginBottom: 16,
+  },
+  webPieChart: {
+    flexDirection: 'row',
+    height: 40,
+    width: '80%',
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  webPieSegment: {
+    height: '100%',
+  },
+  webChartLegend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  webLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 4,
+  },
+  webLegendColor: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 4,
+  },
+  webLegendText: {
+    fontSize: 12,
+    color: '#666',
+  },
 });
 
 export default {
@@ -425,6 +379,5 @@ export default {
   UniversalBarChart,
   UniversalPieChart,
   UniversalMultiLineChart,
-  UniversalAreaChart,
   ChartWrapper
 };

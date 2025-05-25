@@ -1,8 +1,9 @@
-// Business/BusinessNavigation.js - FIXED VERSION
-import React from 'react';
+// Business/BusinessNavigation.js
+import React, { memo } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
 
 // Import Business Screens
 import BusinessWelcomeScreen from './BusinessScreens/BusinessWelcomeScreen';
@@ -27,30 +28,41 @@ import NotificationSettings from './components/NotificationSettings';
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-// Business Tabs Navigator
-const BusinessTabs = () => {
+/**
+ * Business Tabs Navigator
+ * 
+ * Bottom tab navigation for the main business app screens
+ */
+const BusinessTabs = memo(() => {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarIcon: ({ focused, color, size }) => {
           let iconName;
-          let iconType = 'MaterialIcons';
+          let IconComponent = MaterialIcons;
 
-          if (route.name === 'BusinessDashboard') {
-            iconName = 'dashboard';
-          } else if (route.name === 'BusinessInventory') {
-            iconName = 'inventory';
-          } else if (route.name === 'BusinessOrders') {
-            iconName = 'receipt';
-          } else if (route.name === 'BusinessProfile') {
-            iconName = 'person';
-          } else if (route.name === 'WateringChecklist') {
-            iconName = 'water-drop';
-            iconType = 'MaterialCommunityIcons';
+          switch (route.name) {
+            case 'BusinessDashboard':
+              iconName = 'dashboard';
+              break;
+            case 'BusinessInventory':
+              iconName = 'inventory';
+              break;
+            case 'BusinessOrders':
+              iconName = 'receipt';
+              break;
+            case 'BusinessProfile':
+              iconName = 'person';
+              break;
+            case 'WateringChecklist':
+              iconName = 'water-outline';
+              IconComponent = MaterialCommunityIcons;
+              break;
+            default:
+              iconName = 'help-outline';
           }
 
-          const IconComponent = iconType === 'MaterialIcons' ? MaterialIcons : MaterialCommunityIcons;
           return <IconComponent name={iconName} size={size} color={color} />;
         },
         tabBarActiveTintColor: '#216a94',
@@ -62,44 +74,68 @@ const BusinessTabs = () => {
           height: 60,
           paddingBottom: 8,
           paddingTop: 8,
+          elevation: 8,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 3,
         },
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
         },
+        tabBarHideOnKeyboard: true,
       })}
     >
       <Tab.Screen 
         name="BusinessDashboard" 
         component={BusinessHomeScreen}
-        options={{ title: 'Dashboard' }}
+        options={{ 
+          title: 'Dashboard',
+          tabBarAccessibilityLabel: "Business Dashboard"
+        }}
       />
       <Tab.Screen 
         name="BusinessInventory" 
-        component={AddInventoryScreen}
-        options={{ title: 'Inventory' }}
-        initialParams={{ businessId: null, showInventory: true }}
+        component={BusinessInventoryScreen}
+        options={{ 
+          title: 'Inventory',
+          tabBarAccessibilityLabel: "Business Inventory"
+        }}
       />
       <Tab.Screen 
         name="WateringChecklist" 
         component={WateringChecklistScreen}
-        options={{ title: 'Watering' }}
+        options={{ 
+          title: 'Watering',
+          tabBarAccessibilityLabel: "Plant Watering Checklist"
+        }}
       />
       <Tab.Screen 
         name="BusinessOrders" 
         component={BusinessOrdersScreen}
-        options={{ title: 'Orders' }}
+        options={{ 
+          title: 'Orders',
+          tabBarAccessibilityLabel: "Business Orders"
+        }}
       />
       <Tab.Screen 
         name="BusinessProfile" 
         component={BusinessProfileScreen}
-        options={{ title: 'Profile' }}
+        options={{ 
+          title: 'Profile',
+          tabBarAccessibilityLabel: "Business Profile"
+        }}
       />
     </Tab.Navigator>
   );
-};
+});
 
-// Main Business Stack Navigator
+/**
+ * Main Business Stack Navigator
+ * 
+ * Root navigation for the business section of the app
+ */
 const BusinessNavigation = () => {
   return (
     <Stack.Navigator
@@ -107,7 +143,14 @@ const BusinessNavigation = () => {
       screenOptions={{
         headerShown: false,
         gestureEnabled: true,
-        animation: 'slide_from_right',
+        animation: Platform.OS === 'ios' ? 'default' : 'slide_from_right',
+        contentStyle: { backgroundColor: '#fff' },
+        // Default screen transitions
+        animationTypeForReplace: 'push',
+        ...(Platform.OS === 'android' && {
+          animation: 'slide_from_right',
+          statusBarTranslucent: true,
+        }),
       }}
     >
       {/* Auth Flow */}
@@ -129,17 +172,13 @@ const BusinessNavigation = () => {
       
       {/* Setup Flow */}
       <Stack.Screen 
-        name="BusinessInventoryScreen" 
+        name="BusinessInventorySetupScreen" 
         component={BusinessInventoryScreen}
         options={{ title: 'Setup Inventory' }}
+        initialParams={{ setupMode: true }}
       />
       
       {/* Main App Flow - Tab Navigator */}
-      <Stack.Screen 
-        name="BusinessHomeScreen" 
-        component={BusinessHomeScreen}
-        options={{ title: 'Dashboard' }}
-      />
       <Stack.Screen 
         name="BusinessTabs" 
         component={BusinessTabs}
@@ -172,11 +211,11 @@ const BusinessNavigation = () => {
       <Stack.Screen 
         name="AddInventoryScreen" 
         component={AddInventoryScreen}
-        options={{ title: 'Manage Inventory' }}
+        options={{ title: 'Add Product' }}
       />
       <Stack.Screen 
         name="InventoryScreen" 
-        component={AddInventoryScreen}
+        component={BusinessInventoryScreen}
         options={{ title: 'Inventory' }}
       />
       <Stack.Screen 
@@ -195,7 +234,14 @@ const BusinessNavigation = () => {
       <Stack.Screen 
         name="BarcodeScannerScreen" 
         component={BarcodeScannerScreen}
-        options={{ title: 'Scan Barcode' }}
+        options={{ 
+          title: 'Scan Barcode',
+          // Present as modal on iOS
+          ...(Platform.OS === 'ios' && {
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }),
+        }}
       />
       <Stack.Screen 
         name="GPSWateringNavigator" 
@@ -217,7 +263,14 @@ const BusinessNavigation = () => {
       <Stack.Screen 
         name="NotificationSettings" 
         component={NotificationSettings} 
-        options={{ title: 'Notification Settings' }}
+        options={{ 
+          title: 'Notification Settings',
+          // Present as modal on iOS
+          ...(Platform.OS === 'ios' && {
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }),
+        }}
       />
       
       {/* Additional Screens */}

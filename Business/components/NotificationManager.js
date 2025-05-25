@@ -1,15 +1,77 @@
 // Business/components/NotificationManager.js
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Alert, AppState } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Alert, AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { 
-  startNotificationPolling, 
-  markNotificationAsRead,
-  getCachedNotifications,
-  setCachedNotifications 
-} from '../services/notificationPollingApi';
+import { useNavigation } from '@react-navigation/native';
 
-export const useNotificationManager = (businessId, navigation) => {
+// Mock service functions until actual implementation is ready
+const mockNotificationService = {
+  getPendingNotifications: async (businessId) => {
+    // Return mock data for now
+    return {
+      notifications: [
+        {
+          id: '1',
+          title: 'Low Stock Alert',
+          message: 'You have 5 items that are running low on stock.',
+          type: 'LOW_STOCK_ALERT',
+          timestamp: new Date().toISOString(),
+          action: 'open_inventory',
+          itemCount: 5,
+          urgent: true,
+        },
+        {
+          id: '2',
+          title: 'Watering Reminder',
+          message: 'Don\'t forget to water your plants today!',
+          type: 'WATERING_REMINDER',
+          timestamp: new Date().toISOString(),
+          action: 'open_watering_checklist',
+          plantCount: 8,
+          urgent: false,
+        }
+      ],
+      hasNotifications: true,
+      summary: {
+        plantsNeedingWater: 8,
+        plantsWateredToday: 3,
+        lowStockItems: 5,
+        unprocessedOrders: 2
+      },
+      timestamp: new Date().toISOString()
+    };
+  },
+  
+  markNotificationAsRead: async (notificationId, notificationType) => {
+    // Mock successful response
+    return { success: true };
+  },
+  
+  getCachedNotifications: async () => {
+    try {
+      const cached = await AsyncStorage.getItem('notifications_cache');
+      return cached ? JSON.parse(cached).data : [];
+    } catch (error) {
+      console.error('Error getting cached notifications:', error);
+      return [];
+    }
+  },
+  
+  setCachedNotifications: async (notifications) => {
+    try {
+      const cacheObject = {
+        data: notifications,
+        timestamp: Date.now()
+      };
+      await AsyncStorage.setItem('notifications_cache', JSON.stringify(cacheObject));
+    } catch (error) {
+      console.error('Error caching notifications:', error);
+    }
+  }
+};
+
+// The hook that components will use
+export const useNotificationManager = (businessId) => {
   const [notifications, setNotifications] = useState([]);
   const [hasNewNotifications, setHasNewNotifications] = useState(false);
   const [notificationSummary, setNotificationSummary] = useState(null);
@@ -18,12 +80,13 @@ export const useNotificationManager = (businessId, navigation) => {
   const pollingRef = useRef(null);
   const appStateRef = useRef(AppState.currentState);
   const lastNotificationCheck = useRef(new Date());
+  const navigation = useNavigation();
   
   // Handle new notifications
   const handleNewNotifications = useCallback(async (newNotifications, summary) => {
     try {
       // Get cached notifications to check for duplicates
-      const cachedNotifications = await getCachedNotifications();
+      const cachedNotifications = await mockNotificationService.getCachedNotifications();
       const cachedIds = cachedNotifications.map(n => n.id);
       
       // Filter out already seen notifications
@@ -38,12 +101,13 @@ export const useNotificationManager = (businessId, navigation) => {
         const urgentNotifications = unseenNotifications.filter(n => n.urgent);
         if (urgentNotifications.length > 0) {
           showUrgentNotificationAlert(urgentNotifications[0]);
-        } else if (unseenNotifications.length > 0) {
+        } else if (unseenNotifications.length > 0 && Platform.OS !== 'web') {
+          // Only show non-urgent notification alerts on mobile
           showNotificationAlert(unseenNotifications[0]);
         }
         
         // Cache notifications
-        await setCachedNotifications(newNotifications);
+        await mockNotificationService.setCachedNotifications(newNotifications);
       }
     } catch (error) {
       console.error('Error handling new notifications:', error);
@@ -52,6 +116,8 @@ export const useNotificationManager = (businessId, navigation) => {
   
   // Show urgent notification alert
   const showUrgentNotificationAlert = (notification) => {
+    if (Platform.OS === 'web') return; // Skip alerts on web
+    
     Alert.alert(
       '🚨 ' + notification.title,
       notification.message,
@@ -75,6 +141,8 @@ export const useNotificationManager = (businessId, navigation) => {
   
   // Show regular notification alert
   const showNotificationAlert = (notification) => {
+    if (Platform.OS === 'web') return; // Skip alerts on web
+    
     Alert.alert(
       notification.title,
       notification.message,
@@ -116,15 +184,15 @@ export const useNotificationManager = (businessId, navigation) => {
   // Mark notification as read
   const markAsRead = async (notificationId, notificationType) => {
     try {
-      await markNotificationAsRead(notificationId, notificationType);
+      await mockNotificationService.markNotificationAsRead(notificationId, notificationType);
       
       // Remove from local state
       setNotifications(prev => prev.filter(n => n.id !== notificationId));
       
       // Update cache
-      const cachedNotifications = await getCachedNotifications();
+      const cachedNotifications = await mockNotificationService.getCachedNotifications();
       const updatedCache = cachedNotifications.filter(n => n.id !== notificationId);
-      await setCachedNotifications(updatedCache);
+      await mockNotificationService.setCachedNotifications(updatedCache);
       
       // Check if any notifications remain
       if (notifications.length <= 1) {
@@ -135,24 +203,54 @@ export const useNotificationManager = (businessId, navigation) => {
     }
   };
   
-  // Start polling
+  // Start polling - simulate polling with interval
   const startPolling = useCallback(() => {
     if (pollingRef.current || !businessId) return;
     
     console.log('🔔 Starting notification polling for business:', businessId);
     setIsPolling(true);
     
-    pollingRef.current = startNotificationPolling(
-      handleNewNotifications,
-      60000 // Poll every minute
-    );
+    // Poll every minute
+    pollingRef.current = setInterval(async () => {
+      try {
+        const businessId = await AsyncStorage.getItem('businessId');
+        if (businessId) {
+          const data = await mockNotificationService.getPendingNotifications(businessId);
+          
+          if (data.hasNotifications) {
+            handleNewNotifications(data.notifications, data.summary);
+          }
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }, 60000);
+    
+    // Initial poll
+    (async () => {
+      try {
+        const data = await mockNotificationService.getPendingNotifications(businessId);
+        if (data.hasNotifications) {
+          handleNewNotifications(data.notifications, data.summary);
+        }
+      } catch (error) {
+        console.error('Initial polling error:', error);
+      }
+    })();
+    
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
   }, [businessId, handleNewNotifications]);
   
   // Stop polling
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
       console.log('🔕 Stopping notification polling');
-      pollingRef.current();
+      clearInterval(pollingRef.current);
       pollingRef.current = null;
       setIsPolling(false);
     }
@@ -174,11 +272,14 @@ export const useNotificationManager = (businessId, navigation) => {
       appStateRef.current = nextAppState;
     };
     
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    
-    return () => {
-      subscription?.remove();
-    };
+    // Only set up app state listener for mobile platforms
+    if (Platform.OS !== 'web') {
+      const subscription = AppState.addEventListener('change', handleAppStateChange);
+      
+      return () => {
+        subscription?.remove();
+      };
+    }
   }, [startPolling, stopPolling]);
   
   // Initialize polling
@@ -211,4 +312,5 @@ export const useNotificationManager = (businessId, navigation) => {
   };
 };
 
+// Export a simpler version for direct import
 export default useNotificationManager;

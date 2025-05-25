@@ -1,10 +1,9 @@
-// Business/components/BusinessDashboardCharts.js - WEB & MOBILE COMPATIBLE
+// Business/components/BusinessDashboardCharts.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Animated,
   Platform,
@@ -17,17 +16,8 @@ import {
   UniversalLineChart,
   UniversalBarChart,
   UniversalPieChart,
-  UniversalMultiLineChart,
   ChartWrapper
 } from './WebCompatibleCharts';
-
-// Import web utilities
-import { 
-  createWebShadow, 
-  createWebCursor, 
-  webAnimationConfig,
-  platformStyles
-} from '../utils/webStyles';
 
 const { width: screenWidth } = Dimensions.get('window');
 const chartWidth = screenWidth - 32;
@@ -44,26 +34,26 @@ export default function BusinessDashboardCharts({
   const [activeChart, setActiveChart] = useState('sales');
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Animation refs - Web compatible
+  // Animation refs
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(1)).current;
   const refreshAnim = useRef(new Animated.Value(0)).current;
   
   // Auto-refresh timer
   const refreshTimer = useRef(null);
 
   useEffect(() => {
-    // Entrance animation - Web compatible
+    // Entrance animation
     Animated.stagger(200, [
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: webAnimationConfig.duration,
-        useNativeDriver: webAnimationConfig.useNativeDriver,
+        duration: 300,
+        useNativeDriver: Platform.OS !== 'web',
       }),
       Animated.timing(slideAnim, {
         toValue: 1,
-        duration: webAnimationConfig.duration,
-        useNativeDriver: webAnimationConfig.useNativeDriver,
+        duration: 300,
+        useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
 
@@ -84,19 +74,21 @@ export default function BusinessDashboardCharts({
   const handleAutoRefresh = async () => {
     setIsRefreshing(true);
     
-    // Refresh animation - Web compatible
-    Animated.sequence([
-      Animated.timing(refreshAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: webAnimationConfig.useNativeDriver,
-      }),
-      Animated.timing(refreshAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: webAnimationConfig.useNativeDriver,
-      }),
-    ]).start();
+    // Refresh animation
+    if (Platform.OS !== 'web') {
+      Animated.sequence([
+        Animated.timing(refreshAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(refreshAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
     
     try {
       await onRefresh();
@@ -110,19 +102,21 @@ export default function BusinessDashboardCharts({
   const handleChartChange = (chartType) => {
     if (chartType === activeChart) return;
     
-    // Slide animation for chart change - Web compatible
-    Animated.sequence([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: webAnimationConfig.useNativeDriver,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: webAnimationConfig.useNativeDriver,
-      }),
-    ]).start();
+    // Slide animation for chart change
+    if (Platform.OS !== 'web') {
+      Animated.sequence([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
     
     setActiveChart(chartType);
   };
@@ -285,12 +279,10 @@ export default function BusinessDashboardCharts({
     <Animated.View 
       style={[
         styles.container,
-        {
+        Platform.OS !== 'web' ? {
           opacity: fadeAnim,
-          ...(!isWeb && {
-            transform: [{ scale: slideAnim }],
-          })
-        }
+          transform: [{ scale: slideAnim }],
+        } : {}
       ]}
     >
       {/* Chart Navigation */}
@@ -330,22 +322,30 @@ export default function BusinessDashboardCharts({
           onPress={handleAutoRefresh}
           disabled={isRefreshing}
         >
-          <Animated.View
-            style={isWeb ? {} : {
-              transform: [{
-                rotate: refreshAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0deg', '360deg'],
-                })
-              }]
-            }}
-          >
+          {Platform.OS !== 'web' ? (
+            <Animated.View
+              style={{
+                transform: [{
+                  rotate: refreshAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ['0deg', '360deg'],
+                  })
+                }]
+              }}
+            >
+              <MaterialIcons 
+                name="refresh" 
+                size={20} 
+                color={isRefreshing ? '#4CAF50' : '#999'} 
+              />
+            </Animated.View>
+          ) : (
             <MaterialIcons 
               name="refresh" 
               size={20} 
               color={isRefreshing ? '#4CAF50' : '#999'} 
             />
-          </Animated.View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -353,17 +353,15 @@ export default function BusinessDashboardCharts({
       <Animated.View
         style={[
           styles.chartContent,
-          {
+          Platform.OS !== 'web' ? {
             opacity: slideAnim,
-            ...(!isWeb && {
-              transform: [{
-                translateX: slideAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [50, 0],
-                })
-              }]
-            })
-          }
+            transform: [{
+              translateX: slideAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [50, 0],
+              })
+            }]
+          } : {}
         ]}
       >
         {renderChart()}
@@ -385,16 +383,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     margin: 16,
     borderRadius: 16,
-    ...createWebShadow({
+    ...(Platform.OS !== 'web' ? {
       elevation: 2,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.1,
       shadowRadius: 4,
-    }),
-    ...platformStyles.web({
-      maxWidth: 800,
-      alignSelf: 'center',
+    } : {
+      borderWidth: 1,
+      borderColor: '#e0e0e0',
     }),
   },
   chartTabs: {
@@ -402,9 +399,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
     paddingHorizontal: 16,
-    ...platformStyles.web({
-      flexWrap: 'wrap',
-    }),
   },
   chartTab: {
     flex: 1,
@@ -413,11 +407,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 16,
     gap: 6,
-    ...createWebCursor('pointer'),
-    ...platformStyles.web({
-      minWidth: 120,
-      flex: 'none',
-    }),
   },
   activeChartTab: {
     borderBottomWidth: 2,
@@ -426,9 +415,6 @@ const styles = StyleSheet.create({
   chartTabText: {
     fontSize: 14,
     color: '#999',
-    ...platformStyles.web({
-      fontSize: 16,
-    }),
   },
   activeChartTabText: {
     color: '#4CAF50',
@@ -438,13 +424,9 @@ const styles = StyleSheet.create({
     padding: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    ...createWebCursor('pointer'),
   },
   chartContent: {
     padding: 16,
-    ...platformStyles.web({
-      minHeight: 300,
-    }),
   },
   chartInsights: {
     marginTop: 16,

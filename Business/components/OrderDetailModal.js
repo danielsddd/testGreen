@@ -1,5 +1,5 @@
 // Business/components/OrderDetailModal.js
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,22 @@ import {
   Ionicons 
 } from '@expo/vector-icons';
 
-export default function OrderDetailModal({
+/**
+ * OrderDetailModal Component
+ * 
+ * A detailed modal for viewing and managing business orders
+ * 
+ * @param {Object} props Component props
+ * @param {boolean} props.visible Controls modal visibility
+ * @param {Object} props.order Order data object
+ * @param {Function} props.onClose Callback when modal is closed
+ * @param {Function} props.onUpdateStatus Callback to update order status
+ * @param {Function} props.onContactCustomer Callback to contact customer
+ * @param {Function} props.onPrintReceipt Callback to print receipt
+ * @param {boolean} props.isLoading Loading state indicator
+ * @param {Object} props.businessInfo Business information object
+ */
+const OrderDetailModal = ({
   visible = false,
   order = null,
   onClose = () => {},
@@ -30,7 +45,8 @@ export default function OrderDetailModal({
   onPrintReceipt = () => {},
   isLoading = false,
   businessInfo = {}
-}) {
+}) => {
+  // State management
   const [isUpdating, setIsUpdating] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   
@@ -39,6 +55,7 @@ export default function OrderDetailModal({
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const statusMenuAnim = useRef(new Animated.Value(0)).current;
   
+  // Entry/exit animations
   useEffect(() => {
     if (visible && order) {
       // Entrance animation
@@ -69,10 +86,15 @@ export default function OrderDetailModal({
         }),
       ]).start();
     }
-  }, [visible, order]);
+  }, [visible, order, slideAnim, fadeAnim]);
 
   // Handle status update
-  const handleStatusUpdate = async (newStatus) => {
+  const handleStatusUpdate = useCallback(async (newStatus) => {
+    if (!order || !order.id) {
+      console.error('Cannot update status: order is undefined or missing ID');
+      return;
+    }
+    
     setIsUpdating(true);
     setShowStatusMenu(false);
     
@@ -87,14 +109,17 @@ export default function OrderDetailModal({
       );
       
     } catch (error) {
-      Alert.alert('Error', `Failed to update status: ${error.message}`);
+      console.error('Error updating order status:', error);
+      Alert.alert('Error', `Failed to update status: ${error.message || 'Unknown error'}`);
     } finally {
       setIsUpdating(false);
     }
-  };
+  }, [order, onUpdateStatus]);
 
   // Handle contact customer
-  const handleContactCustomer = () => {
+  const handleContactCustomer = useCallback(() => {
+    if (!order) return;
+    
     if (!order.customerPhone && !order.customerEmail) {
       Alert.alert('No Contact Info', 'Customer contact information is not available');
       return;
@@ -106,13 +131,21 @@ export default function OrderDetailModal({
       options.push({
         text: '📱 Call Customer',
         onPress: () => Linking.openURL(`tel:${order.customerPhone}`)
+          .catch(err => {
+            console.error('Error opening phone app:', err);
+            Alert.alert('Error', 'Could not open phone app');
+          })
       });
       
       options.push({
         text: '💬 Send SMS',
         onPress: () => {
           const message = `Hi ${order.customerName}, your order ${order.confirmationNumber} is ready for pickup at ${businessInfo.businessName || 'our store'}!`;
-          Linking.openURL(`sms:${order.customerPhone}?body=${encodeURIComponent(message)}`);
+          Linking.openURL(`sms:${order.customerPhone}?body=${encodeURIComponent(message)}`)
+            .catch(err => {
+              console.error('Error opening SMS app:', err);
+              Alert.alert('Error', 'Could not open SMS app');
+            });
         }
       });
     }
@@ -123,7 +156,11 @@ export default function OrderDetailModal({
         onPress: () => {
           const subject = `Order ${order.confirmationNumber} Update`;
           const body = `Hi ${order.customerName},\n\nYour order is ready for pickup!\n\nOrder: ${order.confirmationNumber}\nTotal: $${order.total.toFixed(2)}\n\nThank you,\n${businessInfo.businessName || 'Your Plant Store'}`;
-          Linking.openURL(`mailto:${order.customerEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+          Linking.openURL(`mailto:${order.customerEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
+            .catch(err => {
+              console.error('Error opening email app:', err);
+              Alert.alert('Error', 'Could not open email app');
+            });
         }
       });
     }
@@ -140,27 +177,39 @@ export default function OrderDetailModal({
     Alert.alert(
       `Contact ${order.customerName}`,
       `Choose how to contact the customer about order ${order.confirmationNumber}`,
-      options
+      options,
+      { cancelable: true }
     );
-  };
+  }, [order, businessInfo, onContactCustomer]);
 
   // Handle share order
-  const handleShareOrder = async () => {
+  const handleShareOrder = useCallback(async () => {
+    if (!order) return;
+    
     try {
+      const formatItemLine = (item) => {
+        const price = item.totalPrice?.toFixed(2) || 
+          ((item.price || 0) * (item.quantity || 1)).toFixed(2);
+        return `• ${item.quantity}x ${item.name} - $${price}`;
+      };
+      
       const shareContent = {
-        message: `Order Summary\n\nOrder: ${order.confirmationNumber}\nCustomer: ${order.customerName}\nTotal: $${order.total.toFixed(2)}\nStatus: ${order.status.toUpperCase()}\n\nItems:\n${order.items?.map(item => `• ${item.quantity}x ${item.name} - $${item.totalPrice.toFixed(2)}`).join('\n')}`,
+        message: `Order Summary\n\nOrder: ${order.confirmationNumber}\nCustomer: ${order.customerName}\nTotal: $${order.total.toFixed(2)}\nStatus: ${order.status.toUpperCase()}\n\nItems:\n${order.items?.map(formatItemLine).join('\n') || 'No items'}`,
         title: `Order ${order.confirmationNumber}`
       };
       
       await Share.share(shareContent);
     } catch (error) {
       console.error('Error sharing order:', error);
+      Alert.alert('Error', 'Failed to share order details');
     }
-  };
+  }, [order]);
 
   // Get status color
-  const getStatusColor = (status) => {
-    switch (status) {
+  const getStatusColor = useCallback((status) => {
+    if (!status) return '#757575';
+    
+    switch (status.toLowerCase()) {
       case 'pending': return '#FFA000';
       case 'confirmed': return '#2196F3';
       case 'ready': return '#9C27B0';
@@ -168,11 +217,13 @@ export default function OrderDetailModal({
       case 'cancelled': return '#F44336';
       default: return '#757575';
     }
-  };
+  }, []);
 
   // Get status icon
-  const getStatusIcon = (status) => {
-    switch (status) {
+  const getStatusIcon = useCallback((status) => {
+    if (!status) return 'help-outline';
+    
+    switch (status.toLowerCase()) {
       case 'pending': return 'hourglass-empty';
       case 'confirmed': return 'check-circle-outline';
       case 'ready': return 'shopping-bag';
@@ -180,11 +231,13 @@ export default function OrderDetailModal({
       case 'cancelled': return 'cancel';
       default: return 'help-outline';
     }
-  };
+  }, []);
 
-  // Get next status options
-  const getNextStatusOptions = (currentStatus) => {
-    switch (currentStatus) {
+  // Get next status options based on current status
+  const getNextStatusOptions = useCallback((currentStatus) => {
+    if (!currentStatus) return [];
+    
+    switch (currentStatus.toLowerCase()) {
       case 'pending':
         return [
           { status: 'confirmed', label: 'Confirm Order', icon: 'check-circle-outline', color: '#2196F3' },
@@ -199,38 +252,58 @@ export default function OrderDetailModal({
         return [
           { status: 'completed', label: 'Complete Order', icon: 'check-circle', color: '#4CAF50' }
         ];
+      case 'completed':
+        return []; // No further status changes once completed
+      case 'cancelled':
+        return [
+          { status: 'pending', label: 'Reopen Order', icon: 'refresh', color: '#FFA000' }
+        ];
       default:
         return [];
     }
-  };
+  }, []);
 
   // Format date
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  const formatDate = useCallback((dateString) => {
+    if (!dateString) return 'N/A';
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return dateString;
+    }
+  }, []);
 
   // Calculate time ago
-  const getTimeAgo = (dateString) => {
-    const now = new Date();
-    const date = new Date(dateString);
-    const diffMs = now - date;
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
+  const getTimeAgo = useCallback((dateString) => {
+    if (!dateString) return '';
     
-    if (diffDays > 0) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-    if (diffHours > 0) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    return 'Just now';
-  };
+    try {
+      const now = new Date();
+      const date = new Date(dateString);
+      const diffMs = now - date;
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffHours / 24);
+      
+      if (diffDays > 0) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+      if (diffHours > 0) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+      return 'Just now';
+    } catch (error) {
+      console.error('Error calculating time ago:', error);
+      return '';
+    }
+  }, []);
 
   // Render order item
-  const renderOrderItem = ({ item, index }) => (
+  const renderOrderItem = useCallback(({ item, index }) => (
     <View style={[styles.orderItem, index === 0 && styles.firstOrderItem]}>
       <View style={styles.itemIcon}>
         <MaterialCommunityIcons 
@@ -242,28 +315,36 @@ export default function OrderDetailModal({
       
       <View style={styles.itemDetails}>
         <Text style={styles.itemName} numberOfLines={2}>
-          {item.name}
+          {item.name || 'Unknown Item'}
         </Text>
         <Text style={styles.itemUnit}>
-          ${item.unitPrice?.toFixed(2) || '0.00'} each
+          ${item.unitPrice?.toFixed(2) || (item.price || 0).toFixed(2)} each
         </Text>
       </View>
       
       <View style={styles.itemQuantity}>
         <Text style={styles.quantityLabel}>Qty</Text>
-        <Text style={styles.quantityValue}>{item.quantity}</Text>
+        <Text style={styles.quantityValue}>{item.quantity || 1}</Text>
       </View>
       
       <View style={styles.itemTotal}>
         <Text style={styles.totalValue}>
-          ${item.totalPrice?.toFixed(2) || '0.00'}
+          ${item.totalPrice?.toFixed(2) || ((item.price || 0) * (item.quantity || 1)).toFixed(2)}
         </Text>
       </View>
     </View>
-  );
+  ), []);
 
+  // Keyextractor for FlatList
+  const keyExtractor = useCallback((item, index) => `${item.id || ''}-${index}`, []);
+
+  // Separator component for FlatList
+  const ItemSeparatorComponent = useCallback(() => <View style={styles.itemSeparator} />, []);
+
+  // Early return if no data or not visible
   if (!visible || !order) return null;
 
+  // Get available status options for this order
   const statusOptions = getNextStatusOptions(order.status);
 
   return (
@@ -272,6 +353,7 @@ export default function OrderDetailModal({
       animationType="none"
       transparent={true}
       onRequestClose={onClose}
+      statusBarTranslucent={true}
     >
       <View style={styles.overlay}>
         <Animated.View 
@@ -290,7 +372,7 @@ export default function OrderDetailModal({
                 <MaterialIcons name={getStatusIcon(order.status)} size={20} color="#fff" />
               </View>
               <View>
-                <Text style={styles.headerTitle}>#{order.confirmationNumber}</Text>
+                <Text style={styles.headerTitle}>#{order.confirmationNumber || 'New Order'}</Text>
                 <Text style={styles.headerSubtitle}>
                   {formatDate(order.orderDate)} • {getTimeAgo(order.orderDate)}
                 </Text>
@@ -301,6 +383,8 @@ export default function OrderDetailModal({
               <TouchableOpacity 
                 style={styles.headerAction}
                 onPress={handleShareOrder}
+                accessibilityLabel="Share order"
+                accessibilityRole="button"
               >
                 <MaterialIcons name="share" size={20} color="#666" />
               </TouchableOpacity>
@@ -308,6 +392,8 @@ export default function OrderDetailModal({
               <TouchableOpacity 
                 style={styles.headerAction}
                 onPress={onPrintReceipt}
+                accessibilityLabel="Print receipt"
+                accessibilityRole="button"
               >
                 <MaterialIcons name="print" size={20} color="#666" />
               </TouchableOpacity>
@@ -315,13 +401,19 @@ export default function OrderDetailModal({
               <TouchableOpacity 
                 style={styles.closeButton}
                 onPress={onClose}
+                accessibilityLabel="Close order details"
+                accessibilityRole="button"
               >
                 <MaterialIcons name="close" size={20} color="#666" />
               </TouchableOpacity>
             </View>
           </View>
 
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.content} 
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.contentContainer}
+          >
             {/* Order Status */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Order Status</Text>
@@ -329,7 +421,7 @@ export default function OrderDetailModal({
                 <View style={[styles.statusBadge, { backgroundColor: getStatusColor(order.status) }]}>
                   <MaterialIcons name={getStatusIcon(order.status)} size={16} color="#fff" />
                   <Text style={styles.statusText}>
-                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                    {order.status ? order.status.charAt(0).toUpperCase() + order.status.slice(1) : 'Unknown'}
                   </Text>
                 </View>
                 
@@ -338,6 +430,9 @@ export default function OrderDetailModal({
                     style={styles.updateStatusButton}
                     onPress={() => setShowStatusMenu(true)}
                     disabled={isUpdating}
+                    accessibilityLabel="Update order status"
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isUpdating }}
                   >
                     {isUpdating ? (
                       <ActivityIndicator size="small" color="#4CAF50" />
@@ -361,8 +456,8 @@ export default function OrderDetailModal({
                     <MaterialIcons name="person" size={24} color="#4CAF50" />
                   </View>
                   <View style={styles.customerInfo}>
-                    <Text style={styles.customerName}>{order.customerName}</Text>
-                    <Text style={styles.customerEmail}>{order.customerEmail}</Text>
+                    <Text style={styles.customerName}>{order.customerName || 'Unknown Customer'}</Text>
+                    <Text style={styles.customerEmail}>{order.customerEmail || 'No email provided'}</Text>
                     {order.customerPhone && (
                       <Text style={styles.customerPhone}>{order.customerPhone}</Text>
                     )}
@@ -370,6 +465,8 @@ export default function OrderDetailModal({
                   <TouchableOpacity 
                     style={styles.contactButton}
                     onPress={handleContactCustomer}
+                    accessibilityLabel="Contact customer"
+                    accessibilityRole="button"
                   >
                     <MaterialIcons name="phone" size={18} color="#4CAF50" />
                   </TouchableOpacity>
@@ -394,13 +491,21 @@ export default function OrderDetailModal({
               </Text>
               
               <View style={styles.itemsContainer}>
-                <FlatList
-                  data={order.items || []}
-                  renderItem={renderOrderItem}
-                  keyExtractor={(item, index) => `${item.id}-${index}`}
-                  scrollEnabled={false}
-                  ItemSeparatorComponent={() => <View style={styles.itemSeparator} />}
-                />
+                {order.items && order.items.length > 0 ? (
+                  <FlatList
+                    data={order.items}
+                    renderItem={renderOrderItem}
+                    keyExtractor={keyExtractor}
+                    scrollEnabled={false}
+                    ItemSeparatorComponent={ItemSeparatorComponent}
+                    removeClippedSubviews={false}
+                    initialNumToRender={10}
+                  />
+                ) : (
+                  <View style={styles.emptyItems}>
+                    <Text style={styles.emptyItemsText}>No items in this order</Text>
+                  </View>
+                )}
               </View>
             </View>
 
@@ -411,18 +516,18 @@ export default function OrderDetailModal({
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>Subtotal:</Text>
                   <Text style={styles.summaryValue}>
-                    ${(order.total || 0).toFixed(2)}
+                    ${(order.subtotal || order.total || 0).toFixed(2)}
                   </Text>
                 </View>
                 
-                {order.tax && order.tax > 0 && (
+                {order.tax > 0 && (
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>Tax:</Text>
                     <Text style={styles.summaryValue}>${order.tax.toFixed(2)}</Text>
                   </View>
                 )}
                 
-                {order.discount && order.discount > 0 && (
+                {order.discount > 0 && (
                   <View style={styles.summaryRow}>
                     <Text style={styles.summaryLabel}>Discount:</Text>
                     <Text style={[styles.summaryValue, styles.discountValue]}>
@@ -477,15 +582,21 @@ export default function OrderDetailModal({
 
           {/* Status Update Menu */}
           {showStatusMenu && (
-            <View style={styles.statusMenuOverlay}>
+            <View 
+              style={styles.statusMenuOverlay}
+              accessibilityLabel="Status update menu"
+              accessibilityRole="menu"
+            >
               <View style={styles.statusMenu}>
                 <Text style={styles.statusMenuTitle}>Update Order Status</Text>
                 
-                {statusOptions.map((option, index) => (
+                {statusOptions.map((option) => (
                   <TouchableOpacity
                     key={option.status}
                     style={[styles.statusOption, { borderLeftColor: option.color }]}
                     onPress={() => handleStatusUpdate(option.status)}
+                    accessibilityLabel={option.label}
+                    accessibilityRole="menuitem"
                   >
                     <MaterialIcons name={option.icon} size={20} color={option.color} />
                     <Text style={styles.statusOptionText}>{option.label}</Text>
@@ -495,6 +606,8 @@ export default function OrderDetailModal({
                 <TouchableOpacity
                   style={styles.statusCancel}
                   onPress={() => setShowStatusMenu(false)}
+                  accessibilityLabel="Cancel status update"
+                  accessibilityRole="button"
                 >
                   <Text style={styles.statusCancelText}>Cancel</Text>
                 </TouchableOpacity>
@@ -505,7 +618,7 @@ export default function OrderDetailModal({
       </View>
     </Modal>
   );
-}
+};
 
 const styles = StyleSheet.create({
   overlay: {
@@ -520,6 +633,7 @@ const styles = StyleSheet.create({
     width: '95%',
     maxHeight: '90%',
     maxWidth: 500,
+    overflow: 'hidden',
   },
   header: {
     flexDirection: 'row',
@@ -569,6 +683,9 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  contentContainer: {
+    paddingBottom: 20,
   },
   section: {
     marginBottom: 24,
@@ -732,6 +849,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
     marginHorizontal: 16,
   },
+  emptyItems: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  emptyItemsText: {
+    fontSize: 14,
+    color: '#999',
+  },
   summaryContainer: {
     backgroundColor: '#f9f9f9',
     borderRadius: 12,
@@ -814,6 +939,11 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '80%',
     maxWidth: 300,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   statusMenuTitle: {
     fontSize: 16,
@@ -848,3 +978,5 @@ const styles = StyleSheet.create({
     color: '#666',
   },
 });
+
+export default memo(OrderDetailModal);

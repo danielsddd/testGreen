@@ -1,5 +1,5 @@
 // Business/components/NotificationSettings.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -14,12 +14,28 @@ import {
   ScrollView,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { registerForWateringNotifications } from '../services/businessWateringApi';
 
-export default function NotificationSettings({ visible, onClose }) {
+// Import DateTimePicker dynamically to handle case when library is not installed
+let DateTimePicker = null;
+try {
+  DateTimePicker = require('@react-native-community/datetimepicker').default;
+} catch (error) {
+  console.warn('@react-native-community/datetimepicker is not installed. Time picker will not be available.');
+}
+
+/**
+ * NotificationSettings Component
+ * 
+ * Handles notification preferences for watering reminders
+ * 
+ * @param {Object} props Component props
+ * @param {boolean} props.visible Controls modal visibility
+ * @param {Function} props.onClose Callback when modal is closed
+ */
+const NotificationSettings = ({ visible, onClose }) => {
   // State management
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -28,6 +44,7 @@ export default function NotificationSettings({ visible, onClose }) {
   const [notificationTime, setNotificationTime] = useState(new Date());
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [deviceToken, setDeviceToken] = useState(null);
+  const [libraryAvailable, setLibraryAvailable] = useState(!!DateTimePicker);
   
   // Initialize when modal opens
   useEffect(() => {
@@ -38,7 +55,7 @@ export default function NotificationSettings({ visible, onClose }) {
   }, [visible]);
   
   // Check notification permissions
-  const checkPermissions = async () => {
+  const checkPermissions = useCallback(async () => {
     try {
       const { status } = await Notifications.getPermissionsAsync();
       const hasPermission = status === 'granted';
@@ -66,10 +83,10 @@ export default function NotificationSettings({ visible, onClose }) {
     } catch (error) {
       console.error('Error checking notification permissions:', error);
     }
-  };
+  }, []);
   
   // Request notification permissions
-  const requestPermissions = async () => {
+  const requestPermissions = useCallback(async () => {
     try {
       const { status } = await Notifications.requestPermissionsAsync();
       const newPermission = status === 'granted';
@@ -82,31 +99,39 @@ export default function NotificationSettings({ visible, onClose }) {
     } catch (error) {
       console.error('Error requesting notification permissions:', error);
     }
-  };
+  }, []);
   
   // Get device token
-  const getDeviceToken = async () => {
+  const getDeviceToken = useCallback(async () => {
     try {
       // Check if we have a stored token
       const storedToken = await AsyncStorage.getItem('devicePushToken');
       if (storedToken) return storedToken;
       
       // Get a new token
-      const { data: token } = await Notifications.getExpoPushTokenAsync({
-        projectId: 'your-expo-project-id', // Replace with your actual project ID
-      });
-      
-      // Store the token
-      await AsyncStorage.setItem('devicePushToken', token);
-      return token;
+      try {
+        const { data: token } = await Notifications.getExpoPushTokenAsync({
+          projectId: 'your-expo-project-id', // Replace with your actual project ID
+        });
+        
+        // Store the token
+        await AsyncStorage.setItem('devicePushToken', token);
+        return token;
+      } catch (tokenError) {
+        console.error('Error getting push token:', tokenError);
+        // Fallback to a device identifier if push token fails
+        const deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+        await AsyncStorage.setItem('devicePushToken', deviceId);
+        return deviceId;
+      }
     } catch (error) {
-      console.error('Error getting push token:', error);
+      console.error('Error in getDeviceToken:', error);
       return null;
     }
-  };
+  }, []);
   
   // Load saved settings
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       setIsLoading(true);
       
@@ -133,10 +158,10 @@ export default function NotificationSettings({ visible, onClose }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
   
   // Save settings
-  const saveSettings = async () => {
+  const saveSettings = useCallback(async () => {
     if (!hasPermission && enableNotifications) {
       Alert.alert(
         'Permission Required',
@@ -163,13 +188,25 @@ export default function NotificationSettings({ visible, onClose }) {
       
       // Register with backend if enabled
       if (enableNotifications && deviceToken) {
-        await registerForWateringNotifications(deviceToken, timeString);
+        await registerForWateringNotifications(deviceToken, timeString)
+          .catch(error => {
+            console.error('Error registering with backend:', error);
+            // Continue with local notifications even if backend registration fails
+          });
         
         // Schedule local notification as backup
-        await scheduleLocalNotification(notificationTime);
-      } else {
+        await scheduleLocalNotification(notificationTime)
+          .catch(error => {
+            console.error('Error scheduling local notification:', error);
+            Alert.alert(
+              'Notification Warning',
+              'Could not schedule local notifications. You may still receive server notifications.'
+            );
+          });
+      } else if (!enableNotifications) {
         // Cancel local notifications
-        await Notifications.cancelAllScheduledNotificationsAsync();
+        await Notifications.cancelAllScheduledNotificationsAsync()
+          .catch(error => console.error('Error canceling notifications:', error));
       }
       
       Alert.alert(
@@ -186,10 +223,10 @@ export default function NotificationSettings({ visible, onClose }) {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [hasPermission, enableNotifications, notificationTime, deviceToken, onClose, requestPermissions]);
   
   // Schedule local notification
-  const scheduleLocalNotification = async (time) => {
+  const scheduleLocalNotification = useCallback(async (time) => {
     try {
       // Cancel existing notifications
       await Notifications.cancelAllScheduledNotificationsAsync();
@@ -226,20 +263,21 @@ export default function NotificationSettings({ visible, onClose }) {
       console.log('Local notification scheduled successfully');
     } catch (error) {
       console.error('Error scheduling notification:', error);
+      throw error;
     }
-  };
+  }, [enableNotifications]);
   
   // Handle time picker change
-  const handleTimeChange = (event, selectedTime) => {
+  const handleTimeChange = useCallback((event, selectedTime) => {
     setShowTimePicker(Platform.OS === 'ios');
     
     if (selectedTime) {
       setNotificationTime(selectedTime);
     }
-  };
+  }, []);
   
   // Send test notification
-  const sendTestNotification = async () => {
+  const sendTestNotification = useCallback(async () => {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -257,12 +295,28 @@ export default function NotificationSettings({ visible, onClose }) {
       console.error('Error sending test notification:', error);
       Alert.alert('Error', 'Failed to send test notification');
     }
-  };
+  }, []);
   
   // Format time for display
-  const formatTime = (date) => {
+  const formatTime = useCallback((date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  }, []);
+  
+  // Render missing library warning
+  const renderMissingLibraryWarning = () => (
+    <View style={styles.warningContainer}>
+      <MaterialIcons name="warning" size={48} color="#FF9800" />
+      <Text style={styles.warningTitle}>Missing Library</Text>
+      <Text style={styles.warningText}>
+        The DateTimePicker library is required for time selection. Please install it with:
+      </Text>
+      <View style={styles.codeBlock}>
+        <Text style={styles.code}>
+          expo install @react-native-community/datetimepicker
+        </Text>
+      </View>
+    </View>
+  );
   
   if (!visible) return null;
   
@@ -278,6 +332,7 @@ export default function NotificationSettings({ visible, onClose }) {
           <TouchableOpacity 
             style={styles.closeButton}
             onPress={onClose}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <MaterialIcons name="close" size={24} color="#333" />
           </TouchableOpacity>
@@ -288,6 +343,7 @@ export default function NotificationSettings({ visible, onClose }) {
             style={styles.saveButton}
             onPress={saveSettings}
             disabled={isSaving}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             {isSaving ? (
               <ActivityIndicator size="small" color="#4CAF50" />
@@ -302,8 +358,10 @@ export default function NotificationSettings({ visible, onClose }) {
             <ActivityIndicator size="large" color="#4CAF50" />
             <Text style={styles.loadingText}>Loading settings...</Text>
           </View>
+        ) : !libraryAvailable ? (
+          renderMissingLibraryWarning()
         ) : (
-          <ScrollView style={styles.content}>
+          <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>
                 <MaterialIcons name="notifications" size={20} color="#4CAF50" />
@@ -323,6 +381,7 @@ export default function NotificationSettings({ visible, onClose }) {
                   onValueChange={setEnableNotifications}
                   trackColor={{ false: '#ccc', true: '#a5d6a7' }}
                   thumbColor={enableNotifications ? '#4CAF50' : '#f0f0f0'}
+                  ios_backgroundColor="#ccc"
                 />
               </View>
               
@@ -354,6 +413,7 @@ export default function NotificationSettings({ visible, onClose }) {
                     is24Hour={false}
                     display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                     onChange={handleTimeChange}
+                    themeVariant="light"
                   />
                   
                   {Platform.OS === 'ios' && (
@@ -426,7 +486,7 @@ export default function NotificationSettings({ visible, onClose }) {
       </SafeAreaView>
     </Modal>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -450,6 +510,8 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
   },
   headerTitle: {
     fontSize: 18,
@@ -458,6 +520,8 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
   },
   loadingContainer: {
     flex: 1,
@@ -471,6 +535,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 40,
   },
   section: {
     backgroundColor: '#fff',
@@ -647,4 +714,36 @@ const styles = StyleSheet.create({
     color: '#1B5E20',
     lineHeight: 20,
   },
+  warningContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  warningTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  warningText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  codeBlock: {
+    backgroundColor: '#f0f0f0',
+    padding: 12,
+    borderRadius: 8,
+    alignSelf: 'stretch',
+    marginTop: 8,
+  },
+  code: {
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontSize: 14,
+  },
 });
+
+export default memo(NotificationSettings);

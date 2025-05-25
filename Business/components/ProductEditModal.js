@@ -15,7 +15,6 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-import { updateInventoryItem } from '../services/businessApi';
 
 export default function ProductEditModal({
   visible,
@@ -61,7 +60,7 @@ export default function ProductEditModal({
       setErrors({});
       setHasUnsavedChanges(false);
       
-      // Entrance animation
+      // Entrance animation - safe for web
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: 0,
@@ -106,6 +105,7 @@ export default function ProductEditModal({
   };
 
   const performClose = () => {
+    // Exit animation - safe for web
     Animated.parallel([
       Animated.timing(slideAnim, {
         toValue: 300,
@@ -195,23 +195,23 @@ export default function ProductEditModal({
 
     setErrors(newErrors);
 
-    // Shake animation on validation error
-    if (Object.keys(newErrors).length > 0) {
+    // Shake animation on validation error - skip on web
+    if (Object.keys(newErrors).length > 0 && Platform.OS !== 'web') {
       Animated.sequence([
         Animated.timing(shakeAnim, {
           toValue: 10,
           duration: 100,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: true,
         }),
         Animated.timing(shakeAnim, {
           toValue: -10,
           duration: 100,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: true,
         }),
         Animated.timing(shakeAnim, {
           toValue: 0,
           duration: 100,
-          useNativeDriver: Platform.OS !== 'web',
+          useNativeDriver: true,
         }),
       ]).start();
     }
@@ -243,24 +243,18 @@ export default function ProductEditModal({
       };
 
       console.log('Updating product:', product.id, updateData);
-      await updateInventoryItem(product.id, updateData);
+      
+      // Call the parent's onSave function with the updated data
+      onSave({
+        ...product,
+        ...updateData,
+        finalPrice: calculateFinalPrice()
+      });
 
       Alert.alert(
         '✅ Success',
         'Product updated successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              onSave && onSave({
-                ...product,
-                ...updateData,
-                finalPrice: calculateFinalPrice()
-              });
-              performClose();
-            }
-          }
-        ]
+        [{ text: 'OK' }]
       );
 
     } catch (error) {
@@ -280,14 +274,7 @@ export default function ProductEditModal({
       transparent={true}
       onRequestClose={handleClose}
     >
-      <Animated.View 
-        style={[
-          styles.overlay,
-          {
-            opacity: fadeAnim,
-          }
-        ]}
-      >
+      <View style={styles.overlay}>
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardAvoid}
@@ -296,10 +283,16 @@ export default function ProductEditModal({
             style={[
               styles.modalContainer,
               {
-                transform: [
-                  { translateY: slideAnim },
-                  { translateX: shakeAnim }
-                ],
+                opacity: fadeAnim,
+                ...(Platform.OS !== 'web' ? {
+                  transform: [
+                    { translateY: slideAnim },
+                    { translateX: shakeAnim }
+                  ]
+                } : {
+                  // Web-safe transform
+                  top: Platform.OS === 'web' ? slideAnim : 0
+                })
               }
             ]}
           >
@@ -516,7 +509,7 @@ export default function ProductEditModal({
             </View>
           </Animated.View>
         </KeyboardAvoidingView>
-      </Animated.View>
+      </View>
     </Modal>
   );
 }
@@ -537,6 +530,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     maxHeight: '90%',
     minHeight: '60%',
+    ...(Platform.OS === 'web' ? {
+      width: '90%',
+      maxWidth: 600,
+      alignSelf: 'center',
+      borderRadius: 20,
+      position: 'relative',
+    } : {})
   },
   header: {
     flexDirection: 'row',

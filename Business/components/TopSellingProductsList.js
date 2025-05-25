@@ -1,4 +1,4 @@
-// Business/components/TopSellingProductsList.js - FIXED VERSION - NO MOCK DATA
+// Business/components/TopSellingProductsList.js - FIXED - NO WEB UTILS
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -21,14 +21,38 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getBusinessDashboard } from '../services/businessApi';
 
+// Web compatibility utilities - implemented directly
+const createWebShadow = (styles) => {
+  if (Platform.OS === 'web') {
+    return {
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+    };
+  }
+  return styles;
+};
+
+const createWebCursor = (cursor) => {
+  if (Platform.OS === 'web') {
+    return { cursor };
+  }
+  return {};
+};
+
+const webAnimationConfig = {
+  duration: Platform.OS === 'web' ? 300 : 250,
+  useNativeDriver: Platform.OS !== 'web',
+};
+
 export default function TopSellingProductsList({
   businessId,
   refreshing = false,
   onRefresh = () => {},
-  timeframe = 'month', // 'week', 'month', 'quarter', 'year'
+  timeframe = 'month',
   onTimeframeChange = () => {},
   onProductPress = () => {},
   limit = 10,
+  autoRefresh = true,
+  refreshInterval = 60000,
 }) {
   // State
   const [products, setProducts] = useState([]);
@@ -36,12 +60,15 @@ export default function TopSellingProductsList({
   const [error, setError] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [sortBy, setSortBy] = useState('quantity'); // 'quantity', 'revenue', 'profit'
+  const [sortBy, setSortBy] = useState('quantity');
   
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   
+  // Auto-refresh timer
+  const refreshTimer = useRef(null);
+
   // Get headers with authentication
   const getHeaders = async () => {
     try {
@@ -63,10 +90,10 @@ export default function TopSellingProductsList({
     }
   };
 
-  // Load top selling products using multiple API sources - NO MOCK DATA
-  const loadTopSellingProducts = useCallback(async () => {
+  // Load top selling products - REAL DATA ONLY
+  const loadTopSellingProducts = useCallback(async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       setError(null);
       
       console.log('Loading top selling products for business:', businessId);
@@ -74,21 +101,18 @@ export default function TopSellingProductsList({
       let productData = [];
       
       try {
-        // First try to get analytics data which should have sales information
+        // First try to get analytics data
         const { getBusinessAnalytics } = await import('../services/businessAnalyticsApi');
         const analyticsData = await getBusinessAnalytics(timeframe, 'sales');
         
         if (analyticsData?.data?.sales?.topProducts) {
           productData = analyticsData.data.sales.topProducts;
           console.log('Got top products from analytics:', productData.length);
-        } else if (analyticsData?.data?.sales?.productPerformance) {
-          productData = analyticsData.data.sales.productPerformance;
-          console.log('Got product performance from analytics:', productData.length);
         }
       } catch (analyticsError) {
         console.warn('Analytics API failed, trying orders API:', analyticsError.message);
         
-        // Fallback to orders API to build product sales data
+        // Fallback to orders API
         try {
           const { getBusinessOrders } = await import('../services/businessOrderApi');
           const ordersData = await getBusinessOrders(businessId, { status: 'completed' });
@@ -126,10 +150,9 @@ export default function TopSellingProductsList({
               }
             });
             
-            // Convert to array and calculate averages
             productData = Object.values(productSales).map(product => {
               product.averagePrice = product.totalSold > 0 ? product.totalRevenue / product.totalSold : 0;
-              product.totalProfit = product.totalRevenue * 0.3; // Estimate 30% profit margin
+              product.totalProfit = product.totalRevenue * 0.3;
               return product;
             });
             
@@ -138,14 +161,12 @@ export default function TopSellingProductsList({
         } catch (ordersError) {
           console.warn('Orders API also failed, trying dashboard fallback:', ordersError.message);
           
-          // Last resort: try dashboard API
+          // Last resort: dashboard API
           const dashboardData = await getBusinessDashboard();
           
           if (dashboardData?.topProducts) {
             productData = dashboardData.topProducts;
-            console.log('Got products from dashboard:', productData.length);
           } else if (dashboardData?.recentOrders) {
-            // Build from recent orders as before
             const productSales = {};
             
             dashboardData.recentOrders.forEach(order => {
@@ -181,21 +202,19 @@ export default function TopSellingProductsList({
               product.averagePrice = product.totalSold > 0 ? product.totalRevenue / product.totalSold : 0;
               return product;
             });
-            
-            console.log('Built product data from dashboard orders:', productData.length);
           }
         }
       }
       
-      // REMOVED MOCK DATA CREATION - If no data, show empty state
+      // If no data, show empty state
       if (!productData || productData.length === 0) {
         console.log('No sales data available - showing empty state');
         setProducts([]);
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
         return;
       }
       
-      // Sort products based on sortBy parameter
+      // Sort products
       let sortedProducts = [...productData];
       switch (sortBy) {
         case 'quantity':
@@ -205,7 +224,6 @@ export default function TopSellingProductsList({
           sortedProducts.sort((a, b) => (b.totalRevenue || 0) - (a.totalRevenue || 0));
           break;
         case 'profit':
-          // Assuming profit is approximately 30% of revenue if not available
           sortedProducts.sort((a, b) => {
             const profitA = a.totalProfit || ((a.totalRevenue || 0) * 0.3);
             const profitB = b.totalProfit || ((b.totalRevenue || 0) * 0.3);
@@ -214,37 +232,48 @@ export default function TopSellingProductsList({
           break;
       }
       
-      // Limit to requested number of products
       sortedProducts = sortedProducts.slice(0, limit);
-      
       setProducts(sortedProducts);
       
-      console.log('Top selling products processed:', sortedProducts.length);
-      
       // Success animation
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 500,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start();
+      if (!silent) {
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: webAnimationConfig.duration,
+            useNativeDriver: webAnimationConfig.useNativeDriver,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: webAnimationConfig.duration,
+            useNativeDriver: webAnimationConfig.useNativeDriver,
+          }),
+        ]).start();
+      }
       
     } catch (error) {
       console.error('Error loading top selling products:', error);
       setError(`Failed to load products: ${error.message}`);
-      
-      // Set empty products - NO MOCK DATA
       setProducts([]);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [businessId, timeframe, sortBy, limit]);
+
+  // Auto-refresh effect
+  useEffect(() => {
+    if (autoRefresh && products.length > 0) {
+      refreshTimer.current = setInterval(() => {
+        loadTopSellingProducts(true); // Silent refresh
+      }, refreshInterval);
+      
+      return () => {
+        if (refreshTimer.current) {
+          clearInterval(refreshTimer.current);
+        }
+      };
+    }
+  }, [autoRefresh, refreshInterval, loadTopSellingProducts, products.length]);
 
   // Initial load
   useEffect(() => {
@@ -292,9 +321,9 @@ export default function TopSellingProductsList({
   // Get rank badge color
   const getRankBadgeColor = (rank) => {
     switch (rank) {
-      case 1: return '#FFD700'; // Gold
-      case 2: return '#C0C0C0'; // Silver
-      case 3: return '#CD7F32'; // Bronze
+      case 1: return '#FFD700';
+      case 2: return '#C0C0C0';
+      case 3: return '#CD7F32';
       default: return '#4CAF50';
     }
   };
@@ -333,12 +362,14 @@ export default function TopSellingProductsList({
           styles.productCard,
           {
             opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
+            ...(Platform.OS !== 'web' && {
+              transform: [{ translateY: slideAnim }],
+            })
           }
         ]}
       >
         <TouchableOpacity 
-          style={styles.productContent}
+          style={[styles.productContent, createWebCursor('pointer')]}
           onPress={() => handleProductPress(item)}
           activeOpacity={0.7}
         >
@@ -419,7 +450,7 @@ export default function TopSellingProductsList({
           
           {/* Action Button */}
           <TouchableOpacity 
-            style={styles.actionButton}
+            style={[styles.actionButton, createWebCursor('pointer')]}
             onPress={() => handleProductPress(item)}
           >
             <MaterialIcons name="arrow-forward" size={20} color="#4CAF50" />
@@ -432,7 +463,7 @@ export default function TopSellingProductsList({
   // Render loading state
   if (isLoading && products.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, createWebShadow({})]}>
         <ActivityIndicator size="large" color="#4CAF50" />
         <Text style={styles.loadingText}>Loading top products...</Text>
       </View>
@@ -442,11 +473,14 @@ export default function TopSellingProductsList({
   // Render error state
   if (error && products.length === 0) {
     return (
-      <View style={styles.errorContainer}>
+      <View style={[styles.errorContainer, createWebShadow({})]}>
         <MaterialIcons name="error-outline" size={48} color="#f44336" />
         <Text style={styles.errorTitle}>Unable to Load Top Products</Text>
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
+        <TouchableOpacity 
+          style={[styles.retryButton, createWebCursor('pointer')]} 
+          onPress={handleRefresh}
+        >
           <MaterialIcons name="refresh" size={20} color="#fff" />
           <Text style={styles.retryButtonText}>Try Again</Text>
         </TouchableOpacity>
@@ -455,7 +489,13 @@ export default function TopSellingProductsList({
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, createWebShadow({
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+    })]}>
       {/* Header with Controls */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>
@@ -463,7 +503,7 @@ export default function TopSellingProductsList({
           {' '}Top Selling Products
         </Text>
         
-        {/* Only show controls if we have products */}
+        {/* Controls */}
         {products.length > 0 && (
           <>
             {/* Timeframe Selector */}
@@ -475,7 +515,8 @@ export default function TopSellingProductsList({
                     key={period}
                     style={[
                       styles.timeframeButton,
-                      timeframe === period && styles.activeTimeframe
+                      timeframe === period && styles.activeTimeframe,
+                      createWebCursor('pointer')
                     ]}
                     onPress={() => handleTimeframeChange(period)}
                   >
@@ -503,7 +544,8 @@ export default function TopSellingProductsList({
                     key={sort.key}
                     style={[
                       styles.sortButton,
-                      sortBy === sort.key && styles.activeSortButton
+                      sortBy === sort.key && styles.activeSortButton,
+                      createWebCursor('pointer')
                     ]}
                     onPress={() => handleSortChange(sort.key)}
                   >
@@ -550,16 +592,6 @@ export default function TopSellingProductsList({
               Complete some sales to see your top selling products here. 
               Start by adding inventory and processing orders.
             </Text>
-            <TouchableOpacity 
-              style={styles.emptyActionButton} 
-              onPress={() => {
-                // Navigate to inventory or orders
-                console.log('Navigate to add inventory or create orders');
-              }}
-            >
-              <MaterialIcons name="add-business" size={20} color="#4CAF50" />
-              <Text style={styles.emptyActionText}>Get Started</Text>
-            </TouchableOpacity>
           </View>
         }
       />
@@ -572,10 +604,13 @@ export default function TopSellingProductsList({
         onRequestClose={() => setDetailModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+          <View style={[styles.modalContainer, createWebShadow({})]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Product Details</Text>
-              <TouchableOpacity onPress={() => setDetailModalVisible(false)}>
+              <TouchableOpacity 
+                onPress={() => setDetailModalVisible(false)}
+                style={createWebCursor('pointer')}
+              >
                 <MaterialIcons name="close" size={24} color="#666" />
               </TouchableOpacity>
             </View>
@@ -633,10 +668,9 @@ export default function TopSellingProductsList({
                 </View>
                 
                 <TouchableOpacity 
-                  style={styles.viewFullDetailsButton}
+                  style={[styles.viewFullDetailsButton, createWebCursor('pointer')]}
                   onPress={() => {
                     setDetailModalVisible(false);
-                    // Navigate to full product details screen
                     onProductPress(selectedProduct);
                   }}
                 >
@@ -657,11 +691,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     margin: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...(Platform.OS === 'web' && {
+      maxWidth: 800,
+      alignSelf: 'center',
+    }),
   },
   loadingContainer: {
     flex: 1,
@@ -738,6 +771,7 @@ const styles = StyleSheet.create({
   timeframeContainer: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
   },
   timeframeButton: {
     paddingVertical: 6,
@@ -759,6 +793,7 @@ const styles = StyleSheet.create({
   sortContainer: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
   },
   sortButton: {
     flexDirection: 'row',
@@ -842,6 +877,7 @@ const styles = StyleSheet.create({
   productStats: {
     flexDirection: 'row',
     gap: 12,
+    flexWrap: 'wrap',
   },
   statItem: {
     flexDirection: 'row',
@@ -890,21 +926,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 24,
   },
-  emptyActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f9f3',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#4CAF50',
-  },
-  emptyActionText: {
-    color: '#4CAF50',
-    fontWeight: '600',
-    marginLeft: 8,
-  },
   // Modal Styles
   modalOverlay: {
     flex: 1,
@@ -917,6 +938,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     width: '90%',
     maxHeight: '80%',
+    ...(Platform.OS === 'web' && {
+      maxWidth: 500,
+    }),
   },
   modalHeader: {
     flexDirection: 'row',

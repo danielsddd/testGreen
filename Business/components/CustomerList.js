@@ -1,5 +1,5 @@
 // Business/components/CustomerList.js
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, memo, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,22 @@ import {
 import CustomerDetailModal from './CustomerDetailModal';
 import CustomerSearchBar from './CustomerSearchBar';
 
-export default function CustomerList({
+/**
+ * CustomerList Component
+ * 
+ * Displays a list of business customers with filtering, sorting, and search capabilities
+ * 
+ * @param {Object} props Component props
+ * @param {Array} props.customers Array of customer objects
+ * @param {boolean} props.isLoading Loading state indicator
+ * @param {boolean} props.refreshing Pull to refresh state
+ * @param {Function} props.onRefresh Pull to refresh callback
+ * @param {Function} props.onCustomerPress Callback when customer is pressed
+ * @param {Function} props.onContactCustomer Callback to contact customer
+ * @param {Function} props.onViewOrders Callback to view customer orders
+ * @param {string} props.businessId Business identifier
+ */
+const CustomerList = ({
   customers = [],
   isLoading = false,
   refreshing = false,
@@ -31,7 +46,7 @@ export default function CustomerList({
   onContactCustomer = () => {},
   onViewOrders = () => {},
   businessId
-}) {
+}) => {
   // State
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('lastOrder');
@@ -44,9 +59,10 @@ export default function CustomerList({
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
   
-  // Filter and sort customers
-  const filteredCustomers = customers
-    .filter(customer => {
+  // Filter and sort customers - memoized to prevent recalculating on every render
+  const filteredCustomers = useMemo(() => {
+    // First apply search query and filter
+    const filtered = customers.filter(customer => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -69,16 +85,18 @@ export default function CustomerList({
         case 'recent':
           return daysSinceLastOrder <= 30;
         case 'regular':
-          return customer.orderCount >= 3;
+          return (customer.orderCount || 0) >= 3;
         case 'vip':
-          return customer.totalSpent >= 200;
+          return (customer.totalSpent || 0) >= 200;
         case 'inactive':
           return daysSinceLastOrder > 90;
         default:
           return true;
       }
-    })
-    .sort((a, b) => {
+    });
+    
+    // Then sort the filtered results
+    return [...filtered].sort((a, b) => {
       let valueA, valueB;
       
       switch (sortBy) {
@@ -106,9 +124,10 @@ export default function CustomerList({
       if (valueA > valueB) return sortOrder === 'asc' ? 1 : -1;
       return 0;
     });
+  }, [customers, searchQuery, filterBy, sortBy, sortOrder]);
 
   // Handle sort
-  const handleSort = (field) => {
+  const handleSort = useCallback((field) => {
     if (sortBy === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
@@ -129,17 +148,17 @@ export default function CustomerList({
         useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
-  };
+  }, [sortBy, sortOrder, fadeAnim]);
 
   // Handle customer detail view
-  const handleCustomerPress = (customer) => {
+  const handleCustomerPress = useCallback((customer) => {
     setSelectedCustomer(customer);
     setDetailModalVisible(true);
     onCustomerPress(customer);
-  };
+  }, [onCustomerPress]);
 
   // Handle contact customer
-  const handleContactCustomer = (customer, method = 'auto') => {
+  const handleContactCustomer = useCallback((customer, method = 'auto') => {
     if (method === 'auto') {
       // Show contact options
       const options = [];
@@ -172,15 +191,18 @@ export default function CustomerList({
       Alert.alert(
         `Contact ${customer.name}`,
         'Choose contact method',
-        options
+        options,
+        { cancelable: true }
       );
     } else {
       onContactCustomer(customer, method);
     }
-  };
+  }, [onContactCustomer]);
 
   // Get customer tier
-  const getCustomerTier = (customer) => {
+  const getCustomerTier = useCallback((customer) => {
+    if (!customer) return 'new';
+    
     const totalSpent = customer.totalSpent || 0;
     const orderCount = customer.orderCount || 0;
     
@@ -188,10 +210,10 @@ export default function CustomerList({
     if (totalSpent >= 200 || orderCount >= 5) return 'premium';
     if (orderCount >= 2) return 'regular';
     return 'new';
-  };
+  }, []);
 
   // Get tier color
-  const getTierColor = (tier) => {
+  const getTierColor = useCallback((tier) => {
     switch (tier) {
       case 'vip': return '#9C27B0';
       case 'premium': return '#FF9800';
@@ -199,10 +221,10 @@ export default function CustomerList({
       case 'new': return '#2196F3';
       default: return '#757575';
     }
-  };
+  }, []);
 
   // Get tier icon
-  const getTierIcon = (tier) => {
+  const getTierIcon = useCallback((tier) => {
     switch (tier) {
       case 'vip': return 'star';
       case 'premium': return 'diamond';
@@ -210,10 +232,10 @@ export default function CustomerList({
       case 'new': return 'account-plus';
       default: return 'account';
     }
-  };
+  }, []);
 
   // Format last order date
-  const formatLastOrder = (dateString) => {
+  const formatLastOrder = useCallback((dateString) => {
     if (!dateString) return 'Never';
     
     const date = new Date(dateString);
@@ -226,16 +248,32 @@ export default function CustomerList({
     if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
     if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
     return `${Math.floor(diffDays / 365)} years ago`;
-  };
+  }, []);
 
   // Get sort icon
-  const getSortIcon = (field) => {
+  const getSortIcon = useCallback((field) => {
     if (sortBy !== field) return 'sort';
     return sortOrder === 'asc' ? 'keyboard-arrow-up' : 'keyboard-arrow-down';
-  };
+  }, [sortBy, sortOrder]);
 
-  // Render customer item
-  const renderCustomerItem = ({ item, index }) => {
+  // Memoize filter counts to avoid recalculation
+  const filterCounts = useMemo(() => {
+    const now = new Date();
+    
+    return {
+      all: customers.length,
+      recent: customers.filter(c => {
+        const days = c.lastOrderDate ? 
+          Math.floor((now - new Date(c.lastOrderDate)) / (1000 * 60 * 60 * 24)) : Infinity;
+        return days <= 30;
+      }).length,
+      regular: customers.filter(c => (c.orderCount || 0) >= 3).length,
+      vip: customers.filter(c => (c.totalSpent || 0) >= 200).length,
+    };
+  }, [customers]);
+
+  // Render customer item - extracted as separate memoized component
+  const CustomerItem = memo(({ item, index, onPress, onContact, onViewOrders }) => {
     const tier = getCustomerTier(item);
     const tierColor = getTierColor(tier);
     
@@ -251,8 +289,11 @@ export default function CustomerList({
       >
         <TouchableOpacity 
           style={styles.customerContent}
-          onPress={() => handleCustomerPress(item)}
+          onPress={() => onPress(item)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Customer ${item.name || 'Unknown'}`}
+          accessibilityHint="Double tap to view customer details"
         >
           {/* Customer Avatar */}
           <View style={[styles.customerAvatar, { borderColor: tierColor }]}>
@@ -280,7 +321,7 @@ export default function CustomerList({
             </View>
             
             <Text style={styles.customerEmail} numberOfLines={1}>
-              {item.email}
+              {item.email || 'No email'}
             </Text>
             
             {item.phone && (
@@ -317,7 +358,9 @@ export default function CustomerList({
           <View style={styles.customerActions}>
             <TouchableOpacity 
               style={styles.actionButton}
-              onPress={() => handleContactCustomer(item)}
+              onPress={() => onContact(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`Contact ${item.name}`}
             >
               <MaterialIcons name="phone" size={18} color="#4CAF50" />
             </TouchableOpacity>
@@ -325,6 +368,8 @@ export default function CustomerList({
             <TouchableOpacity 
               style={styles.actionButton}
               onPress={() => onViewOrders(item)}
+              accessibilityRole="button"
+              accessibilityLabel={`View orders for ${item.name}`}
             >
               <MaterialIcons name="receipt" size={18} color="#2196F3" />
             </TouchableOpacity>
@@ -332,29 +377,40 @@ export default function CustomerList({
         </TouchableOpacity>
       </Animated.View>
     );
-  };
+  });
+
+  // Keyextractor for FlatList
+  const keyExtractor = useCallback(item => item.id || item.email, []);
+
+  // Item separator component
+  const ItemSeparatorComponent = useCallback(() => <View style={styles.separator} />, []);
+
+  // Handle search
+  const handleSearch = useCallback((text) => {
+    setSearchQuery(text);
+  }, []);
 
   // Render header
-  const renderHeader = () => (
+  const renderHeader = useCallback(() => (
     <View style={styles.header}>
       {/* Search Bar */}
       <CustomerSearchBar
         value={searchQuery}
-        onChangeText={setSearchQuery}
+        onChangeText={handleSearch}
         placeholder="Search customers by name, email, or phone..."
+        showFilters={true}
+        onFilterPress={() => {
+          // Could add additional filter dialog here
+        }}
       />
       
       {/* Filter Tabs */}
       <View style={styles.filterTabs}>
         {[
-          { key: 'all', label: 'All', count: customers.length },
-          { key: 'recent', label: 'Recent', count: customers.filter(c => {
-            const days = c.lastOrderDate ? 
-              Math.floor((new Date() - new Date(c.lastOrderDate)) / (1000 * 60 * 60 * 24)) : Infinity;
-            return days <= 30;
-          }).length },
-          { key: 'regular', label: 'Regular', count: customers.filter(c => (c.orderCount || 0) >= 3).length },
-          { key: 'vip', label: 'VIP', count: customers.filter(c => (c.totalSpent || 0) >= 200).length },
+          { key: 'all', label: 'All', count: filterCounts.all },
+          { key: 'recent', label: 'Recent', count: filterCounts.recent },
+          { key: 'regular', label: 'Regular', count: filterCounts.regular },
+          { key: 'vip', label: 'VIP', count: filterCounts.vip },
         ].map(filter => (
           <TouchableOpacity
             key={filter.key}
@@ -363,6 +419,9 @@ export default function CustomerList({
               filterBy === filter.key && styles.activeFilterTab
             ]}
             onPress={() => setFilterBy(filter.key)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: filterBy === filter.key }}
+            accessibilityLabel={`${filter.label} customers: ${filter.count}`}
           >
             <Text style={[
               styles.filterTabText,
@@ -391,6 +450,9 @@ export default function CustomerList({
                 sortBy === sort.key && styles.activeSortOption
               ]}
               onPress={() => handleSort(sort.key)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: sortBy === sort.key }}
+              accessibilityLabel={`Sort by ${sort.label}, currently ${sortOrder === 'asc' ? 'ascending' : 'descending'}`}
             >
               <Text style={[
                 styles.sortOptionText,
@@ -398,13 +460,11 @@ export default function CustomerList({
               ]}>
                 {sort.label}
               </Text>
-              {sortBy === sort.key && (
-                <MaterialIcons 
-                  name={getSortIcon(sort.key)} 
-                  size={14} 
-                  color="#4CAF50" 
-                />
-              )}
+              <MaterialIcons 
+                name={getSortIcon(sort.key)} 
+                size={14} 
+                color={sortBy === sort.key ? "#4CAF50" : "#757575"} 
+              />
             </TouchableOpacity>
           ))}
         </View>
@@ -417,10 +477,21 @@ export default function CustomerList({
         </Text>
       </View>
     </View>
-  );
+  ), [
+    searchQuery, 
+    filterBy, 
+    handleSearch, 
+    filterCounts, 
+    sortBy, 
+    sortOrder, 
+    getSortIcon, 
+    handleSort,
+    filteredCustomers.length,
+    customers.length
+  ]);
 
   // Render empty state
-  const renderEmptyState = () => (
+  const renderEmptyState = useCallback(() => (
     <View style={styles.emptyContainer}>
       <MaterialCommunityIcons name="account-group-outline" size={64} color="#e0e0e0" />
       <Text style={styles.emptyTitle}>
@@ -442,28 +513,45 @@ export default function CustomerList({
             setSearchQuery('');
             setFilterBy('all');
           }}
+          accessibilityRole="button"
+          accessibilityLabel="Clear all filters"
         >
           <Text style={styles.clearFiltersText}>Clear Filters</Text>
         </TouchableOpacity>
       )}
     </View>
-  );
+  ), [searchQuery, filterBy]);
 
+  // Render loading state
+  const renderLoading = useCallback(() => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#4CAF50" />
+      <Text style={styles.loadingText}>Loading customers...</Text>
+    </View>
+  ), []);
+
+  // Render item function
+  const renderItem = useCallback(({ item, index }) => (
+    <CustomerItem 
+      item={item} 
+      index={index} 
+      onPress={handleCustomerPress}
+      onContact={handleContactCustomer}
+      onViewOrders={onViewOrders}
+    />
+  ), [handleCustomerPress, handleContactCustomer, onViewOrders]);
+
+  // If loading and no customers yet, show loading screen
   if (isLoading && customers.length === 0) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Loading customers...</Text>
-      </View>
-    );
+    return renderLoading();
   }
 
   return (
     <View style={styles.container}>
       <FlatList
         data={filteredCustomers}
-        renderItem={renderCustomerItem}
-        keyExtractor={item => item.id || item.email}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={renderEmptyState}
         refreshControl={
@@ -474,9 +562,13 @@ export default function CustomerList({
             tintColor="#4CAF50"
           />
         }
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={filteredCustomers.length === 0 ? styles.emptyListContent : styles.listContent}
         showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        ItemSeparatorComponent={ItemSeparatorComponent}
+        initialNumToRender={8}
+        maxToRenderPerBatch={10}
+        windowSize={10}
+        removeClippedSubviews={Platform.OS !== 'web'}
       />
       
       {/* Customer Detail Modal */}
@@ -493,7 +585,7 @@ export default function CustomerList({
       />
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -519,13 +611,14 @@ const styles = StyleSheet.create({
   filterTabs: {
     flexDirection: 'row',
     marginBottom: 16,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   filterTab: {
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 16,
     backgroundColor: '#f5f5f5',
-    marginRight: 8,
   },
   activeFilterTab: {
     backgroundColor: '#4CAF50',
@@ -567,6 +660,7 @@ const styles = StyleSheet.create({
   sortOptionText: {
     fontSize: 12,
     color: '#666',
+    marginRight: 4,
   },
   activeSortOptionText: {
     color: '#4CAF50',
@@ -584,6 +678,9 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: 20,
   },
+  emptyListContent: {
+    flexGrow: 1,
+  },
   customerCard: {
     backgroundColor: '#fff',
     marginHorizontal: 16,
@@ -594,6 +691,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
+    overflow: 'hidden',
   },
   customerContent: {
     flexDirection: 'row',
@@ -637,6 +735,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#333',
     flex: 1,
+    marginRight: 8,
   },
   tierLabel: {
     paddingHorizontal: 6,
@@ -661,6 +760,7 @@ const styles = StyleSheet.create({
   customerStats: {
     flexDirection: 'row',
     gap: 12,
+    flexWrap: 'wrap',
   },
   statItem: {
     flexDirection: 'row',
@@ -699,6 +799,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#666',
     marginTop: 16,
+    marginBottom: 8,
     textAlign: 'center',
   },
   emptyText: {
@@ -720,3 +821,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default memo(CustomerList);

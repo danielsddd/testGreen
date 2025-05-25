@@ -1,5 +1,5 @@
 // Business/components/PlantBarcodeGenerator.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,14 +15,43 @@ import {
 } from 'react-native';
 import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
-import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import QRCode from 'react-native-qrcode-svg';
+import { useCallback as useCallbackIfAvailable } from 'react';
+
+// For QR code generation, you need to install: npm install react-native-qrcode-svg
+// Import dynamically to handle case when library is not installed
+let QRCode = null;
+try {
+  QRCode = require('react-native-qrcode-svg').default;
+} catch (error) {
+  console.warn('react-native-qrcode-svg is not installed. QR codes will not be displayed.');
+}
+
+// For PDF generation, you need to install: expo install expo-print
+// Import dynamically to handle case when library is not installed
+let Print = null;
+try {
+  Print = require('expo-print');
+} catch (error) {
+  console.warn('expo-print is not installed. PDF generation will not be available.');
+}
 
 // Import API services
 import { getPlantBarcodeUrl } from '../services/businessWateringApi';
 
+/**
+ * PlantBarcodeGenerator Component
+ * 
+ * Generates and displays a QR code and barcode for plant identification.
+ * Allows sharing/printing the barcode as a PDF.
+ * 
+ * @param {Object} props Component props
+ * @param {boolean} props.visible Controls modal visibility
+ * @param {Function} props.onClose Callback when modal is closed
+ * @param {Object} props.plant Plant data object
+ * @param {string} props.businessId Business identifier
+ */
 export default function PlantBarcodeGenerator({ 
   visible, 
   onClose, 
@@ -36,6 +65,21 @@ export default function PlantBarcodeGenerator({
   const [pdfUrl, setPdfUrl] = useState(null);
   const [qrCodeValue, setQrCodeValue] = useState(null);
   const [mode, setMode] = useState('download'); // 'download' or 'generate'
+  const [librariesAvailable, setLibrariesAvailable] = useState({
+    qrCode: !!QRCode,
+    print: !!Print
+  });
+  
+  // Create memoized plant info to avoid unnecessary re-renders
+  const plantInfo = useMemo(() => {
+    if (!plant) return { name: '', scientific_name: '', barcode: '' };
+    
+    return {
+      name: plant.name || plant.common_name || 'Plant',
+      scientific_name: plant.scientificName || plant.scientific_name || '',
+      barcode: plant.barcode || `PLT-${plant.id}`
+    };
+  }, [plant]);
   
   // Effect to generate QR code when modal opens
   useEffect(() => {
@@ -47,10 +91,10 @@ export default function PlantBarcodeGenerator({
       const qrData = {
         type: 'plant',
         id: plant.id,
-        name: plant.name || plant.common_name,
-        scientific_name: plant.scientificName || plant.scientific_name,
+        name: plantInfo.name,
+        scientific_name: plantInfo.scientific_name,
         businessId: businessId,
-        barcode: plant.barcode || `PLT-${plant.id}`
+        barcode: plantInfo.barcode
       };
       
       setQrCodeValue(JSON.stringify(qrData));
@@ -58,10 +102,10 @@ export default function PlantBarcodeGenerator({
       // Get PDF URL from server
       getBarcodePdfUrl();
     }
-  }, [visible, plant, businessId]);
+  }, [visible, plant, businessId, plantInfo]);
   
-  // Get barcode PDF URL from server
-  const getBarcodePdfUrl = async () => {
+  // Get barcode PDF URL from server - using useCallback for performance
+  const getBarcodePdfUrl = useCallback(async () => {
     try {
       if (!plant || !plant.id || !businessId) {
         throw new Error('Missing plant information');
@@ -78,19 +122,23 @@ export default function PlantBarcodeGenerator({
       setMode('generate');
       setIsLoading(false);
     }
-  };
+  }, [plant, businessId]);
   
   // Download and share PDF
-  const downloadAndSharePdf = async () => {
-    if (!pdfUrl) return;
+  const downloadAndSharePdf = useCallback(async () => {
+    if (!pdfUrl) {
+      Alert.alert('Error', 'PDF URL not available');
+      return;
+    }
     
     setIsDownloading(true);
     
     try {
       // Generate a filename
-      const plantName = (plant.name || plant.common_name || 'plant')
+      const plantName = (plantInfo.name)
         .toLowerCase()
-        .replace(/\s+/g, '-');
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '');
       const filename = `${plantName}-barcode.pdf`;
       
       // Get the file URI
@@ -105,7 +153,7 @@ export default function PlantBarcodeGenerator({
           // On iOS, use Share API
           await Share.share({
             url: fileUri,
-            title: `${plant.name || plant.common_name} Barcode`,
+            title: `${plantInfo.name} Barcode`,
           });
         } else {
           // On Android, use Sharing
@@ -119,18 +167,26 @@ export default function PlantBarcodeGenerator({
           }
         }
       } else {
-        throw new Error('Failed to download PDF');
+        throw new Error(`Failed to download PDF: Status ${downloadResult.status}`);
       }
     } catch (error) {
       console.error('Error downloading and sharing PDF:', error);
-      Alert.alert('Error', 'Failed to download and share PDF');
+      Alert.alert('Error', `Failed to download and share PDF: ${error.message}`);
     } finally {
       setIsDownloading(false);
     }
-  };
+  }, [pdfUrl, plantInfo.name]);
   
   // Generate and print barcode PDF locally
-  const generateAndPrintPdf = async () => {
+  const generateAndPrintPdf = useCallback(async () => {
+    if (!Print) {
+      Alert.alert(
+        'Library Missing',
+        'The expo-print library is required for PDF generation. Please install it with: expo install expo-print'
+      );
+      return;
+    }
+    
     setIsDownloading(true);
     
     try {
@@ -151,17 +207,19 @@ export default function PlantBarcodeGenerator({
       }
     } catch (error) {
       console.error('Error generating and printing PDF:', error);
-      Alert.alert('Error', 'Failed to generate and print barcode');
+      Alert.alert('Error', `Failed to generate and print barcode: ${error.message}`);
     } finally {
       setIsDownloading(false);
     }
-  };
+  }, [plantInfo]);
   
   // Generate HTML content for PDF
-  const generateHtml = () => {
-    const plantName = plant.name || plant.common_name || 'Plant';
-    const scientificName = plant.scientificName || plant.scientific_name || '';
-    const barcode = plant.barcode || `PLT-${plant.id}`;
+  const generateHtml = useCallback(() => {
+    // Get plant care information safely
+    const waterDays = plant?.waterDays || plant?.water_days || 'Not specified';
+    const light = plant?.light || 'Not specified';
+    const temperature = plant?.temperature || 'Not specified';
+    const humidity = plant?.humidity || 'Not specified';
     
     // Create HTML with inline styles
     return `
@@ -169,7 +227,7 @@ export default function PlantBarcodeGenerator({
       <html>
         <head>
           <meta charset="utf-8">
-          <title>${plantName} Barcode</title>
+          <title>${plantInfo.name} Barcode</title>
           <style>
             body {
               font-family: 'Helvetica', Arial, sans-serif;
@@ -248,8 +306,8 @@ export default function PlantBarcodeGenerator({
         <body>
           <div class="container">
             <div class="header">
-              <h1 class="title">${plantName}</h1>
-              ${scientificName ? `<p class="subtitle">${scientificName}</p>` : ''}
+              <h1 class="title">${plantInfo.name}</h1>
+              ${plantInfo.scientific_name ? `<p class="subtitle">${plantInfo.scientific_name}</p>` : ''}
             </div>
             
             <div class="qr-placeholder">
@@ -260,15 +318,15 @@ export default function PlantBarcodeGenerator({
             <div class="care-info">
               <h2>Care Information</h2>
               <table>
-                ${plant.waterDays ? `<tr><td>Water every:</td><td>${plant.waterDays} days</td></tr>` : ''}
-                ${plant.light ? `<tr><td>Light:</td><td>${plant.light}</td></tr>` : ''}
-                ${plant.temperature ? `<tr><td>Temperature:</td><td>${plant.temperature}</td></tr>` : ''}
-                ${plant.humidity ? `<tr><td>Humidity:</td><td>${plant.humidity}</td></tr>` : ''}
+                <tr><td>Water every:</td><td>${waterDays} days</td></tr>
+                <tr><td>Light:</td><td>${light}</td></tr>
+                <tr><td>Temperature:</td><td>${temperature}</td></tr>
+                <tr><td>Humidity:</td><td>${humidity}</td></tr>
               </table>
             </div>
             
             <div class="barcode">
-              <p>${barcode}</p>
+              <p>${plantInfo.barcode}</p>
             </div>
             
             <div class="footer">
@@ -278,9 +336,62 @@ export default function PlantBarcodeGenerator({
         </body>
       </html>
     `;
-  };
+  }, [plant, plantInfo]);
   
+  // Check for available libraries
+  useEffect(() => {
+    const checkLibraries = async () => {
+      try {
+        // Check if QRCode is available
+        if (!QRCode) {
+          console.warn('react-native-qrcode-svg is not installed');
+          setLibrariesAvailable(prev => ({ ...prev, qrCode: false }));
+        }
+        
+        // Check if Print is available
+        if (!Print) {
+          console.warn('expo-print is not installed');
+          setLibrariesAvailable(prev => ({ ...prev, print: false }));
+        }
+      } catch (error) {
+        console.error('Error checking libraries:', error);
+      }
+    };
+    
+    checkLibraries();
+  }, []);
+  
+  // Early return if not visible
   if (!visible) return null;
+  
+  // Library missing warning component
+  const renderLibraryWarning = () => (
+    <View style={styles.warningContainer}>
+      <MaterialIcons name="warning" size={48} color="#FF9800" />
+      <Text style={styles.warningTitle}>Missing Libraries</Text>
+      <Text style={styles.warningText}>
+        This component requires additional libraries:
+      </Text>
+      {!librariesAvailable.qrCode && (
+        <Text style={styles.warningItem}>
+          • react-native-qrcode-svg (for QR code generation)
+        </Text>
+      )}
+      {!librariesAvailable.print && (
+        <Text style={styles.warningItem}>
+          • expo-print (for PDF generation)
+        </Text>
+      )}
+      <Text style={styles.warningInstruction}>
+        Install them using:
+      </Text>
+      <View style={styles.codeBlock}>
+        <Text style={styles.code}>
+          {`expo install ${!librariesAvailable.qrCode ? 'react-native-qrcode-svg ' : ''}${!librariesAvailable.print ? 'expo-print' : ''}`}
+        </Text>
+      </View>
+    </View>
+  );
   
   return (
     <Modal
@@ -294,6 +405,7 @@ export default function PlantBarcodeGenerator({
           <TouchableOpacity 
             style={styles.closeButton}
             onPress={onClose}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <MaterialIcons name="close" size={24} color="#333" />
           </TouchableOpacity>
@@ -304,7 +416,9 @@ export default function PlantBarcodeGenerator({
         </View>
         
         <View style={styles.content}>
-          {isLoading ? (
+          {(!librariesAvailable.qrCode || !librariesAvailable.print) ? (
+            renderLibraryWarning()
+          ) : isLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#4CAF50" />
               <Text style={styles.loadingText}>Generating barcode...</Text>
@@ -316,6 +430,7 @@ export default function PlantBarcodeGenerator({
               <TouchableOpacity 
                 style={styles.retryButton}
                 onPress={getBarcodePdfUrl}
+                activeOpacity={0.7}
               >
                 <Text style={styles.retryButtonText}>Try Again</Text>
               </TouchableOpacity>
@@ -325,18 +440,18 @@ export default function PlantBarcodeGenerator({
               <View style={styles.barcodeCard}>
                 <View style={styles.plantInfo}>
                   <Text style={styles.plantName}>
-                    {plant?.name || plant?.common_name || 'Plant'}
+                    {plantInfo.name}
                   </Text>
                   
-                  {(plant?.scientificName || plant?.scientific_name) && (
+                  {plantInfo.scientific_name && (
                     <Text style={styles.scientificName}>
-                      {plant.scientificName || plant.scientific_name}
+                      {plantInfo.scientific_name}
                     </Text>
                   )}
                 </View>
                 
                 <View style={styles.qrCodeContainer}>
-                  {qrCodeValue ? (
+                  {qrCodeValue && QRCode ? (
                     <QRCode
                       value={qrCodeValue}
                       size={200}
@@ -356,7 +471,7 @@ export default function PlantBarcodeGenerator({
                 
                 <View style={styles.barcodeInfo}>
                   <Text style={styles.barcodeId}>
-                    ID: {plant?.barcode || `PLT-${plant?.id}`}
+                    ID: {plantInfo.barcode}
                   </Text>
                   
                   <Text style={styles.barcodeText}>
@@ -372,6 +487,7 @@ export default function PlantBarcodeGenerator({
                     style={styles.exportButton}
                     onPress={downloadAndSharePdf}
                     disabled={isDownloading}
+                    activeOpacity={0.7}
                   >
                     {isDownloading ? (
                       <ActivityIndicator size="small" color="#fff" />
@@ -388,7 +504,8 @@ export default function PlantBarcodeGenerator({
                   <TouchableOpacity 
                     style={styles.exportButton}
                     onPress={generateAndPrintPdf}
-                    disabled={isDownloading}
+                    disabled={isDownloading || !Print}
+                    activeOpacity={0.7}
                   >
                     {isDownloading ? (
                       <ActivityIndicator size="small" color="#fff" />
@@ -406,6 +523,7 @@ export default function PlantBarcodeGenerator({
                 <TouchableOpacity 
                   style={styles.switchModeButton}
                   onPress={() => setMode(mode === 'download' ? 'generate' : 'download')}
+                  activeOpacity={0.7}
                 >
                   <MaterialIcons 
                     name={mode === 'download' ? "print" : "cloud-download"} 
@@ -447,6 +565,8 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f5f5f5',
   },
   headerTitle: {
     fontSize: 18,
@@ -480,6 +600,7 @@ const styles = StyleSheet.create({
     color: '#f44336',
     textAlign: 'center',
     marginVertical: 16,
+    maxWidth: '80%',
   },
   retryButton: {
     backgroundColor: '#4CAF50',
@@ -585,5 +706,48 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
     fontWeight: '600',
     marginLeft: 8,
+  },
+  warningContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  warningTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  warningText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  warningItem: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 4,
+    textAlign: 'left',
+    alignSelf: 'stretch',
+    paddingLeft: 20,
+  },
+  warningInstruction: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  codeBlock: {
+    backgroundColor: '#f0f0f0',
+    padding: 12,
+    borderRadius: 8,
+    alignSelf: 'stretch',
+  },
+  code: {
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontSize: 14,
   },
 });

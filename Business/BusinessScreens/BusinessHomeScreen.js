@@ -1,4 +1,4 @@
-// Business/BusinessScreens/BusinessHomeScreen.js - COMPLETE WEB & MOBILE COMPATIBLE
+// Business/BusinessScreens/BusinessHomeScreen.js - FIXED COMPLETE VERSION
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
@@ -16,13 +16,16 @@ import {
 } from 'react-native';
 import { 
   MaterialCommunityIcons, 
-  MaterialIcons 
+  MaterialIcons,
+  Ionicons 
 } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Import API services
 import { getBusinessDashboard } from '../services/businessApi';
+import { getBusinessInventory } from '../services/businessApi';
+import { getBusinessOrders } from '../services/businessOrderApi';
 import { triggerAutoRefresh } from '../services/businessAnalyticsApi';
 
 // Import components
@@ -36,7 +39,7 @@ import { useNotificationManager } from '../components/NotificationManager';
 const { width: screenWidth } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 
-// Web-compatible animation config
+// Web-compatible animation config (defined in file)
 const webAnimationConfig = {
   duration: 300,
   useNativeDriver: Platform.select({ web: false, default: true }),
@@ -44,7 +47,7 @@ const webAnimationConfig = {
   friction: 8,
 };
 
-// Web-compatible styles helper
+// Web-compatible styles helper (defined in file)
 const createWebShadow = (mobileStyle) => {
   if (Platform.OS === 'web') {
     return {
@@ -67,11 +70,18 @@ export default function BusinessHomeScreen({ navigation, route }) {
   // ===== STATE MANAGEMENT =====
   const [businessId, setBusinessId] = useState(routeBusinessId);
   const [dashboardData, setDashboardData] = useState(null);
+  const [inventoryData, setInventoryData] = useState(null);
+  const [ordersData, setOrdersData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [inventoryStats, setInventoryStats] = useState({
+    inStock: 0,
+    lowStock: 0,
+    outOfStock: 0
+  });
   
   // ===== ANIMATION REFS - WEB COMPATIBLE =====
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -108,8 +118,8 @@ export default function BusinessHomeScreen({ navigation, route }) {
     initBusinessId();
   }, []);
 
-  // ===== LOAD DASHBOARD DATA =====
-  const loadDashboard = useCallback(async (showLoading = true) => {
+  // ===== LOAD ALL DATA =====
+  const loadAllData = useCallback(async (showLoading = true) => {
     if (!businessId) {
       console.log('⚠️ No business ID available');
       return;
@@ -122,17 +132,42 @@ export default function BusinessHomeScreen({ navigation, route }) {
       }
       setError(null);
 
-      console.log('📊 Loading dashboard data for business:', businessId);
-      const data = await getBusinessDashboard();
-      console.log('✅ Dashboard data loaded:', data);
+      console.log('📊 Loading all business data for:', businessId);
       
-      setDashboardData(data);
+      // Load dashboard data
+      const [dashData, invData, orderData] = await Promise.all([
+        getBusinessDashboard(),
+        getBusinessInventory(businessId),
+        getBusinessOrders(businessId, { limit: 5, status: 'all' })
+      ]);
+      
+      console.log('✅ All data loaded successfully');
+      
+      setDashboardData(dashData);
+      setInventoryData(invData);
+      setOrdersData(orderData);
       setLastUpdated(new Date().toISOString());
+      
+      // Calculate inventory stats
+      if (invData?.inventory) {
+        const stats = {
+          inStock: invData.inventory.filter(item => 
+            item.status === 'active' && (item.quantity || 0) > (item.minThreshold || 5)
+          ).length,
+          lowStock: invData.inventory.filter(item => 
+            item.status === 'active' && (item.quantity || 0) > 0 && (item.quantity || 0) <= (item.minThreshold || 5)
+          ).length,
+          outOfStock: invData.inventory.filter(item => 
+            item.status === 'active' && (item.quantity || 0) === 0
+          ).length
+        };
+        setInventoryStats(stats);
+      }
       
       // Trigger auto-refresh for other components
       await triggerAutoRefresh('dashboard_loaded', { businessId });
       
-      // Success animation - Web compatible
+      // Success animation
       if (showLoading) {
         Animated.parallel([
           Animated.timing(fadeAnim, {
@@ -155,10 +190,10 @@ export default function BusinessHomeScreen({ navigation, route }) {
       }
       
     } catch (error) {
-      console.error('❌ Error loading dashboard:', error);
+      console.error('❌ Error loading data:', error);
       setError(error.message);
       
-      // Show fallback data structure (NO MOCK DATA)
+      // Show empty structure if no data
       if (!dashboardData) {
         setDashboardData(getEmptyDashboardStructure());
       }
@@ -168,14 +203,16 @@ export default function BusinessHomeScreen({ navigation, route }) {
     }
   }, [businessId, dashboardData]);
 
-  // ===== EMPTY DASHBOARD STRUCTURE (NO MOCK DATA) =====
+  // ===== EMPTY DASHBOARD STRUCTURE =====
   const getEmptyDashboardStructure = () => ({
     businessInfo: {
       businessName: 'Your Business',
       businessType: 'Plant Store',
       email: businessId,
       rating: 0,
-      reviewCount: 0
+      reviewCount: 0,
+      address: null,
+      phone: null
     },
     metrics: {
       totalSales: 0,
@@ -202,7 +239,7 @@ export default function BusinessHomeScreen({ navigation, route }) {
     if (autoRefreshEnabled && businessId) {
       refreshTimer.current = setInterval(() => {
         console.log('🔄 Auto-refreshing dashboard...');
-        loadDashboard(false); // Silent refresh
+        loadAllData(false); // Silent refresh
       }, 60000); // 1 minute
       
       return () => {
@@ -212,20 +249,20 @@ export default function BusinessHomeScreen({ navigation, route }) {
         }
       };
     }
-  }, [autoRefreshEnabled, businessId, loadDashboard]);
+  }, [autoRefreshEnabled, businessId, loadAllData]);
 
   // ===== FOCUS EFFECT =====
   useFocusEffect(
     useCallback(() => {
-      console.log('🏠 Business Home focused - loading dashboard...');
+      console.log('🏠 Business Home focused - loading data...');
       if (businessId) {
-        loadDashboard();
+        loadAllData();
       }
       
       return () => {
         console.log('🏠 Business Home unfocused');
       };
-    }, [businessId, loadDashboard])
+    }, [businessId, loadAllData])
   );
 
   // ===== NAVIGATION HANDLERS =====
@@ -257,29 +294,77 @@ export default function BusinessHomeScreen({ navigation, route }) {
     navigation.navigate('BusinessProfileScreen', { businessId });
   };
 
+  const handleOrderPress = (order) => {
+    navigation.navigate('BusinessOrdersScreen', { businessId, selectedOrderId: order.id });
+  };
+
   // ===== TOGGLE AUTO-REFRESH =====
   const toggleAutoRefresh = () => {
     setAutoRefreshEnabled(!autoRefreshEnabled);
   };
 
-  // ===== RENDER BUSINESS HEADER =====
-  const renderBusinessHeader = () => {
+  // ===== RENDER BUSINESS INFO CARD =====
+  const renderBusinessInfoCard = () => {
     const { businessInfo } = dashboardData || {};
     
     return (
-      <View style={styles.businessHeader}>
-        <View style={styles.businessInfo}>
+      <View style={styles.businessInfoCard}>
+        {/* Business Avatar */}
+        <View style={styles.businessAvatar}>
+          <MaterialIcons name="store" size={40} color="#4CAF50" />
+        </View>
+        
+        {/* Business Details */}
+        <View style={styles.businessDetails}>
           <Text style={styles.businessName}>
             {businessInfo?.businessName || 'Your Business'}
           </Text>
           <Text style={styles.businessType}>
             {businessInfo?.businessType || 'Plant Store'}
           </Text>
-          <Text style={styles.lastUpdated}>
-            Last updated: {lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : 'Just now'}
-          </Text>
+          
+          {/* Contact Info */}
+          <View style={styles.contactInfo}>
+            {businessInfo?.email && (
+              <View style={styles.contactItem}>
+                <MaterialIcons name="email" size={14} color="#666" />
+                <Text style={styles.contactText} numberOfLines={1}>
+                  {businessInfo.email}
+                </Text>
+              </View>
+            )}
+            
+            {businessInfo?.phone && (
+              <View style={styles.contactItem}>
+                <MaterialIcons name="phone" size={14} color="#666" />
+                <Text style={styles.contactText}>
+                  {businessInfo.phone}
+                </Text>
+              </View>
+            )}
+            
+            {businessInfo?.address && (
+              <View style={styles.contactItem}>
+                <MaterialIcons name="location-on" size={14} color="#666" />
+                <Text style={styles.contactText} numberOfLines={1}>
+                  {businessInfo.address.street || businessInfo.address}
+                </Text>
+              </View>
+            )}
+          </View>
+          
+          {/* Rating */}
+          {businessInfo?.rating > 0 && (
+            <View style={styles.ratingContainer}>
+              <MaterialIcons name="star" size={16} color="#FFD700" />
+              <Text style={styles.ratingText}>
+                {businessInfo.rating.toFixed(1)} ({businessInfo.reviewCount} reviews)
+              </Text>
+            </View>
+          )}
         </View>
         
+        {/* Header Actions */}
         <View style={styles.headerActions}>
           <NotificationBell
             hasNotifications={hasNewNotifications}
@@ -298,6 +383,14 @@ export default function BusinessHomeScreen({ navigation, route }) {
               color={autoRefreshEnabled ? "#4CAF50" : "#999"} 
             />
           </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.profileButton, createWebCursor()]}
+            onPress={handleNavigateToProfile}
+            activeOpacity={0.7}
+          >
+            <MaterialIcons name="settings" size={20} color="#666" />
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -315,6 +408,8 @@ export default function BusinessHomeScreen({ navigation, route }) {
           icon="cash"
           format="currency"
           color="#4CAF50"
+          trend={metrics?.salesTrend || 'neutral'}
+          change={metrics?.salesGrowth}
           autoRefresh={autoRefreshEnabled}
           onPress={handleNavigateToAnalytics}
         />
@@ -325,22 +420,23 @@ export default function BusinessHomeScreen({ navigation, route }) {
           icon="shopping-cart"
           format="number"
           color="#2196F3"
+          trend={metrics?.newOrders > 0 ? 'up' : 'neutral'}
           onPress={handleNavigateToOrders}
         />
         
         <KPIWidget
           title="Low Stock Items"
-          value={metrics?.lowStockItems || 0}
+          value={inventoryStats.lowStock || 0}
           icon="warning"
           format="number"
           color="#FF9800"
-          trend={metrics?.lowStockItems > 0 ? 'down' : 'neutral'}
+          trend={inventoryStats.lowStock > 0 ? 'down' : 'neutral'}
           onPress={handleNavigateToInventory}
         />
         
         <KPIWidget
           title="Total Inventory"
-          value={metrics?.totalInventory || 0}
+          value={inventoryData?.inventory?.length || 0}
           icon="inventory"
           format="number"
           color="#9C27B0"
@@ -350,13 +446,88 @@ export default function BusinessHomeScreen({ navigation, route }) {
     );
   };
 
+  // ===== RENDER RECENT ORDERS =====
+  const renderRecentOrders = () => {
+    const recentOrders = ordersData?.orders?.slice(0, 5) || [];
+    
+    if (recentOrders.length === 0) {
+      return (
+        <View style={styles.recentOrdersContainer}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleContainer}>
+              <MaterialIcons name="receipt" size={20} color="#2196F3" />
+              <Text style={styles.sectionTitle}>Recent Orders</Text>
+            </View>
+            <TouchableOpacity 
+              onPress={handleNavigateToOrders}
+              style={createWebCursor()}
+            >
+              <Text style={styles.viewAllText}>View All</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.emptyOrdersState}>
+            <MaterialIcons name="receipt-long" size={48} color="#e0e0e0" />
+            <Text style={styles.emptyText}>No orders yet</Text>
+            <Text style={styles.emptySubtext}>
+              Orders will appear here as customers purchase
+            </Text>
+          </View>
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.recentOrdersContainer}>
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleContainer}>
+            <MaterialIcons name="receipt" size={20} color="#2196F3" />
+            <Text style={styles.sectionTitle}>Recent Orders</Text>
+          </View>
+          <TouchableOpacity 
+            onPress={handleNavigateToOrders}
+            style={createWebCursor()}
+          >
+            <Text style={styles.viewAllText}>View All</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {recentOrders.map((order, index) => (
+          <TouchableOpacity
+            key={order.id || index}
+            style={[styles.orderItem, createWebCursor()]}
+            onPress={() => handleOrderPress(order)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.orderLeft}>
+              <View style={[styles.orderStatus, { backgroundColor: getOrderStatusColor(order.status) }]}>
+                <MaterialIcons name={getOrderStatusIcon(order.status)} size={16} color="#fff" />
+              </View>
+              <View style={styles.orderInfo}>
+                <Text style={styles.orderNumber}>#{order.confirmationNumber || order.id}</Text>
+                <Text style={styles.orderCustomer} numberOfLines={1}>
+                  {order.customerName || 'Unknown Customer'}
+                </Text>
+                <Text style={styles.orderTime}>{getTimeAgo(order.orderDate)}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.orderRight}>
+              <Text style={styles.orderAmount}>${(order.total || 0).toFixed(2)}</Text>
+              <Text style={styles.orderItems}>
+                {order.items?.length || 0} items
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
+
   // ===== RENDER QUICK ACTIONS =====
   const renderQuickActions = () => (
     <View style={styles.quickActionsContainer}>
       <Text style={styles.sectionTitle}>Quick Actions</Text>
-      <Text style={styles.sectionSubtitle}>
-        Common tasks and management tools
-      </Text>
       
       <View style={styles.quickActionsGrid}>
         <TouchableOpacity 
@@ -364,8 +535,10 @@ export default function BusinessHomeScreen({ navigation, route }) {
           onPress={handleNavigateToInventory}
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="package-variant" size={24} color="#4CAF50" />
-          <Text style={styles.quickActionText}>Manage Inventory</Text>
+          <View style={[styles.quickActionIcon, { backgroundColor: '#e8f5e9' }]}>
+            <MaterialCommunityIcons name="package-variant" size={24} color="#4CAF50" />
+          </View>
+          <Text style={styles.quickActionText}>Add Product</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -373,8 +546,10 @@ export default function BusinessHomeScreen({ navigation, route }) {
           onPress={handleNavigateToOrders}
           activeOpacity={0.7}
         >
-          <MaterialIcons name="receipt" size={24} color="#2196F3" />
-          <Text style={styles.quickActionText}>View Orders</Text>
+          <View style={[styles.quickActionIcon, { backgroundColor: '#e3f2fd' }]}>
+            <MaterialIcons name="receipt" size={24} color="#2196F3" />
+          </View>
+          <Text style={styles.quickActionText}>Orders</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -382,7 +557,9 @@ export default function BusinessHomeScreen({ navigation, route }) {
           onPress={handleNavigateToCustomers}
           activeOpacity={0.7}
         >
-          <MaterialIcons name="people" size={24} color="#FF9800" />
+          <View style={[styles.quickActionIcon, { backgroundColor: '#fff3e0' }]}>
+            <MaterialIcons name="people" size={24} color="#FF9800" />
+          </View>
           <Text style={styles.quickActionText}>Customers</Text>
         </TouchableOpacity>
         
@@ -391,7 +568,9 @@ export default function BusinessHomeScreen({ navigation, route }) {
           onPress={handleNavigateToWatering}
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="water" size={24} color="#00BCD4" />
+          <View style={[styles.quickActionIcon, { backgroundColor: '#e0f7fa' }]}>
+            <MaterialCommunityIcons name="water" size={24} color="#00BCD4" />
+          </View>
           <Text style={styles.quickActionText}>Plant Care</Text>
         </TouchableOpacity>
         
@@ -400,7 +579,9 @@ export default function BusinessHomeScreen({ navigation, route }) {
           onPress={handleNavigateToAnalytics}
           activeOpacity={0.7}
         >
-          <MaterialIcons name="analytics" size={24} color="#9C27B0" />
+          <View style={[styles.quickActionIcon, { backgroundColor: '#f3e5f5' }]}>
+            <MaterialIcons name="analytics" size={24} color="#9C27B0" />
+          </View>
           <Text style={styles.quickActionText}>Analytics</Text>
         </TouchableOpacity>
         
@@ -409,40 +590,71 @@ export default function BusinessHomeScreen({ navigation, route }) {
           onPress={handleNavigateToProfile}
           activeOpacity={0.7}
         >
-          <MaterialIcons name="business" size={24} color="#607D8B" />
+          <View style={[styles.quickActionIcon, { backgroundColor: '#eceff1' }]}>
+            <MaterialIcons name="business" size={24} color="#607D8B" />
+          </View>
           <Text style={styles.quickActionText}>Profile</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 
-  // ===== RENDER EMPTY STATE =====
-  const renderEmptyState = () => (
-    <View style={styles.emptyStateContainer}>
-      <MaterialCommunityIcons name="store-outline" size={64} color="#e0e0e0" />
-      <Text style={styles.emptyStateTitle}>Welcome to Your Business Dashboard</Text>
-      <Text style={styles.emptyStateText}>
-        Get started by adding products to your inventory and setting up your business profile.
-      </Text>
-      <TouchableOpacity 
-        style={[styles.getStartedButton, createWebCursor()]}
-        onPress={handleNavigateToInventory}
-        activeOpacity={0.7}
-      >
-        <MaterialIcons name="add-business" size={20} color="#4CAF50" />
-        <Text style={styles.getStartedText}>Add Your First Product</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  // ===== HELPER FUNCTIONS =====
+  const getOrderStatusColor = (status) => {
+    switch (status) {
+      case 'pending': return '#FFA000';
+      case 'confirmed': return '#2196F3';
+      case 'ready': return '#9C27B0';
+      case 'completed': return '#4CAF50';
+      case 'cancelled': return '#F44336';
+      default: return '#757575';
+    }
+  };
+
+  const getOrderStatusIcon = (status) => {
+    switch (status) {
+      case 'pending': return 'hourglass-empty';
+      case 'confirmed': return 'check-circle-outline';
+      case 'ready': return 'shopping-bag';
+      case 'completed': return 'check-circle';
+      case 'cancelled': return 'cancel';
+      default: return 'help-outline';
+    }
+  };
+
+  const getTimeAgo = (dateString) => {
+    if (!dateString) return 'Unknown time';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
 
   // ===== RENDER DASHBOARD CONTENT =====
   const renderDashboardContent = () => {
-    if (!dashboardData) return renderEmptyState();
+    const hasData = (inventoryData?.inventory?.length > 0) || 
+                   (ordersData?.orders?.length > 0) || 
+                   (dashboardData?.topProducts?.length > 0);
     
-    const { businessInfo, metrics, topProducts, recentOrders, lowStockDetails, chartData } = dashboardData;
-    
-    // Check if we have any meaningful data
-    const hasData = (metrics?.totalInventory > 0) || (recentOrders?.length > 0) || (topProducts?.length > 0);
+    // Calculate chart data with actual inventory stats
+    const chartData = {
+      sales: dashboardData?.chartData?.sales || { labels: [], values: [], total: 0, average: 0 },
+      inventory: inventoryStats,
+      orders: dashboardData?.chartData?.orders || { 
+        pending: 0, 
+        confirmed: 0, 
+        ready: 0, 
+        completed: 0, 
+        total: 0 
+      }
+    };
     
     return (
       <Animated.View 
@@ -459,111 +671,73 @@ export default function BusinessHomeScreen({ navigation, route }) {
           }
         ]}
       >
-        {/* Business Header */}
-        {renderBusinessHeader()}
+        {/* Business Info Card */}
+        {renderBusinessInfoCard()}
 
         {/* KPI Widgets */}
         {renderKPIWidgets()}
 
-        {/* Low Stock Banner - Only show if there are low stock items */}
-        {lowStockDetails && lowStockDetails.length > 0 && (
+        {/* Low Stock Banner */}
+        {inventoryStats.lowStock > 0 && (
           <LowStockBanner 
-            lowStockItems={lowStockDetails}
+            lowStockItems={inventoryData?.inventory?.filter(item => 
+              item.status === 'active' && 
+              (item.quantity || 0) > 0 && 
+              (item.quantity || 0) <= (item.minThreshold || 5)
+            ) || []}
             onManageStock={handleNavigateToInventory}
           />
         )}
 
-        {/* Dashboard Charts - Only show if we have data */}
-        {hasData && (
-          <BusinessDashboardCharts
-            salesData={chartData?.sales || { labels: [], values: [], total: 0, average: 0 }}
-            inventoryData={chartData?.inventory || { inStock: 0, lowStock: 0, outOfStock: 0 }}
-            ordersData={chartData?.orders || { pending: 0, confirmed: 0, ready: 0, completed: 0, total: 0 }}
-            onRefresh={loadDashboard}
-            autoRefresh={autoRefreshEnabled}
-          />
-        )}
+        {/* Dashboard Charts */}
+        <BusinessDashboardCharts
+          salesData={chartData.sales}
+          inventoryData={chartData.inventory}
+          ordersData={chartData.orders}
+          onRefresh={loadAllData}
+          autoRefresh={autoRefreshEnabled}
+        />
 
-        {/* Top Products - Only show if there are products */}
-        {topProducts && topProducts.length > 0 && (
+        {/* Recent Orders */}
+        {renderRecentOrders()}
+
+        {/* Top Products */}
+        {dashboardData?.topProducts && dashboardData.topProducts.length > 0 && (
           <TopSellingProductsList
             businessId={businessId}
-            onRefresh={loadDashboard}
+            onRefresh={loadAllData}
             onProductPress={(product) => {
               navigation.navigate('BusinessProductDetailScreen', { 
                 businessId, 
                 productId: product.id 
               });
             }}
+            limit={5}
           />
         )}
 
-        {/* Quick Actions - Always show */}
+        {/* Quick Actions */}
         {renderQuickActions()}
 
-        {/* Empty state for new businesses */}
+        {/* Getting Started for new businesses */}
         {!hasData && (
           <View style={styles.gettingStartedSection}>
             <Text style={styles.sectionTitle}>Getting Started</Text>
-            <Text style={styles.sectionSubtitle}>
-              Set up your business to start seeing data here
-            </Text>
             
-            <View style={styles.onboardingSteps}>
-              <View style={styles.onboardingStep}>
-                <View style={[styles.stepNumber, { backgroundColor: '#4CAF50' }]}>
-                  <Text style={styles.stepNumberText}>1</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Add Products</Text>
-                  <Text style={styles.stepDescription}>
-                    Start by adding plants and products to your inventory
-                  </Text>
-                </View>
-                <TouchableOpacity 
-                  style={[styles.stepAction, createWebCursor()]}
-                  onPress={handleNavigateToInventory}
-                >
-                  <MaterialIcons name="arrow-forward" size={16} color="#4CAF50" />
-                </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.getStartedCard, createWebCursor()]}
+              onPress={handleNavigateToInventory}
+              activeOpacity={0.7}
+            >
+              <MaterialCommunityIcons name="numeric-1-circle" size={32} color="#4CAF50" />
+              <View style={styles.getStartedContent}>
+                <Text style={styles.getStartedTitle}>Add Your First Product</Text>
+                <Text style={styles.getStartedText}>
+                  Start by adding plants and products to your inventory
+                </Text>
               </View>
-              
-              <View style={styles.onboardingStep}>
-                <View style={[styles.stepNumber, { backgroundColor: '#2196F3' }]}>
-                  <Text style={styles.stepNumberText}>2</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Complete Profile</Text>
-                  <Text style={styles.stepDescription}>
-                    Set up your business information and contact details
-                  </Text>
-                </View>
-                <TouchableOpacity 
-                  style={[styles.stepAction, createWebCursor()]}
-                  onPress={handleNavigateToProfile}
-                >
-                  <MaterialIcons name="arrow-forward" size={16} color="#2196F3" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.onboardingStep}>
-                <View style={[styles.stepNumber, { backgroundColor: '#FF9800' }]}>
-                  <Text style={styles.stepNumberText}>3</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Start Selling</Text>
-                  <Text style={styles.stepDescription}>
-                    Begin processing orders and managing customers
-                  </Text>
-                </View>
-                <TouchableOpacity 
-                  style={[styles.stepAction, createWebCursor()]}
-                  onPress={handleNavigateToOrders}
-                >
-                  <MaterialIcons name="arrow-forward" size={16} color="#FF9800" />
-                </TouchableOpacity>
-              </View>
-            </View>
+              <MaterialIcons name="arrow-forward" size={20} color="#4CAF50" />
+            </TouchableOpacity>
           </View>
         )}
       </Animated.View>
@@ -577,7 +751,6 @@ export default function BusinessHomeScreen({ navigation, route }) {
         <View style={styles.loadingContent}>
           <ActivityIndicator size="large" color="#4CAF50" />
           <Text style={styles.loadingText}>Loading your dashboard...</Text>
-          <Text style={styles.loadingSubtext}>Getting your business insights ready</Text>
         </View>
       </SafeAreaView>
     );
@@ -593,7 +766,7 @@ export default function BusinessHomeScreen({ navigation, route }) {
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity 
             style={[styles.retryButton, createWebCursor()]}
-            onPress={() => loadDashboard(true)}
+            onPress={() => loadAllData(true)}
             activeOpacity={0.7}
           >
             <MaterialIcons name="refresh" size={20} color="#fff" />
@@ -613,7 +786,7 @@ export default function BusinessHomeScreen({ navigation, route }) {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => loadDashboard(true)}
+            onRefresh={() => loadAllData(true)}
             colors={['#4CAF50']}
             tintColor="#4CAF50"
           />
@@ -627,7 +800,7 @@ export default function BusinessHomeScreen({ navigation, route }) {
       {autoRefreshEnabled && (
         <View style={styles.statusIndicator}>
           <View style={styles.statusDot} />
-          <Text style={styles.statusText}>Live updates enabled</Text>
+          <Text style={styles.statusText}>Live updates</Text>
         </View>
       )}
     </SafeAreaView>
@@ -642,6 +815,7 @@ const styles = StyleSheet.create({
     ...(isWeb && {
       maxWidth: 1200,
       alignSelf: 'center',
+      width: '100%',
     }),
   },
   loadingContainer: {
@@ -657,12 +831,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#4CAF50',
-  },
-  loadingSubtext: {
-    marginTop: 8,
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
   },
   errorContainer: {
     justifyContent: 'center',
@@ -708,214 +876,275 @@ const styles = StyleSheet.create({
   dashboardContent: {
     flex: 1,
   },
-  businessHeader: {
+  // Business Info Card
+  businessInfoCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#fff',
     margin: 16,
     padding: 20,
-    borderRadius: 12,
+    borderRadius: 16,
     ...createWebShadow({
-      elevation: 1,
+      elevation: 2,
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
     }),
   },
-  businessInfo: {
+  businessAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#e8f5e9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  businessDetails: {
     flex: 1,
   },
   businessName: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: '#333',
     marginBottom: 4,
   },
   businessType: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666',
     marginBottom: 8,
   },
-  lastUpdated: {
+  contactInfo: {
+    gap: 4,
+  },
+  contactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  contactText: {
     fontSize: 12,
-    color: '#999',
+    color: '#666',
+    flex: 1,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+  },
+  ratingText: {
+    fontSize: 12,
+    color: '#666',
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
   autoRefreshToggle: {
     padding: 8,
     borderRadius: 8,
     backgroundColor: '#f5f5f5',
   },
+  profileButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
+  // KPI Widgets
   kpiContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    padding: 16,
+    paddingHorizontal: 16,
     gap: 12,
-    ...(isWeb && {
-      justifyContent: 'center',
-    }),
+    marginBottom: 16,
   },
-  quickActionsContainer: {
+  // Recent Orders
+  recentOrdersContainer: {
     backgroundColor: '#fff',
     margin: 16,
     padding: 20,
-    borderRadius: 12,
+    borderRadius: 16,
     ...createWebShadow({
-      elevation: 1,
+      elevation: 2,
       shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
     }),
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#333',
-    marginBottom: 4,
   },
-  sectionSubtitle: {
+  viewAllText: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-  },
-  quickActionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    ...(isWeb && {
-      justifyContent: 'center',
-    }),
-  },
-  quickAction: {
-    flex: 1,
-    minWidth: 120,
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    ...(isWeb && {
-      flex: 'none',
-      minWidth: 140,
-    }),
-  },
-  quickActionText: {
-    fontSize: 12,
-    color: '#333',
-    marginTop: 8,
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  emptyStateContainer: {
-    alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 32,
-    backgroundColor: '#fff',
-    margin: 16,
-    borderRadius: 12,
-    ...createWebShadow({
-      elevation: 1,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-    }),
-  },
-  emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  getStartedButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f9f3',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#4CAF50',
-  },
-  getStartedText: {
     color: '#4CAF50',
     fontWeight: '600',
-    marginLeft: 8,
   },
-  gettingStartedSection: {
-    backgroundColor: '#fff',
-    margin: 16,
-    padding: 20,
-    borderRadius: 12,
-    ...createWebShadow({
-      elevation: 1,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-    }),
+  orderItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  onboardingSteps: {
-    gap: 16,
-  },
-  onboardingStep: {
+  orderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+    flex: 1,
   },
-  stepNumber: {
+  orderStatus: {
     width: 32,
     height: 32,
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: 12,
   },
-  stepNumberText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  stepContent: {
+  orderInfo: {
     flex: 1,
   },
-  stepTitle: {
+  orderNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+  },
+  orderCustomer: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  orderTime: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  orderRight: {
+    alignItems: 'flex-end',
+  },
+  orderAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#4CAF50',
+  },
+  orderItems: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  emptyOrdersState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 12,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  // Quick Actions
+  quickActionsContainer: {
+    backgroundColor: '#fff',
+    margin: 16,
+    padding: 20,
+    borderRadius: 16,
+    ...createWebShadow({
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+    }),
+  },
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 16,
+  },
+  quickAction: {
+    flex: 1,
+    minWidth: 100,
+    alignItems: 'center',
+    gap: 8,
+    ...(isWeb && {
+      flex: 'none',
+      width: '30%',
+      minWidth: 120,
+    }),
+  },
+  quickActionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickActionText: {
+    fontSize: 12,
+    color: '#333',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  // Getting Started
+  gettingStartedSection: {
+    backgroundColor: '#fff',
+    margin: 16,
+    padding: 20,
+    borderRadius: 16,
+    ...createWebShadow({
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+    }),
+  },
+  getStartedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#f0f9f3',
+    borderRadius: 12,
+    marginTop: 16,
+    gap: 16,
+  },
+  getStartedContent: {
+    flex: 1,
+  },
+  getStartedTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
     marginBottom: 4,
   },
-  stepDescription: {
+  getStartedText: {
     fontSize: 14,
     color: '#666',
-    lineHeight: 18,
   },
-  stepAction: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#f5f5f5',
-  },
+  // Status Indicator
   statusIndicator: {
     position: 'absolute',
     bottom: 20,
@@ -923,9 +1152,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#4CAF50',
-    paddingVertical: 8,
+    paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 20,
+    borderRadius: 16,
     ...createWebShadow({
       elevation: 4,
       shadowColor: '#000',
@@ -935,15 +1164,15 @@ const styles = StyleSheet.create({
     }),
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#fff',
     marginRight: 6,
   },
   statusText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
 });

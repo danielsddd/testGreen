@@ -1,5 +1,5 @@
-// Business/components/NotificationBell.js - FIXED WEB COMPATIBLE
-import React from 'react';
+// Business/components/NotificationBell.js
+import React, { useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Platform } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 
@@ -11,29 +11,43 @@ const NotificationBell = ({
   size = 24,
   color = '#216a94'
 }) => {
-  const pulseAnim = React.useRef(new Animated.Value(1)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
   
   // Pulse animation for new notifications - Web compatible
-  React.useEffect(() => {
+  useEffect(() => {
     if (hasNotifications) {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.2,
-            duration: 800,
-            useNativeDriver: Platform.OS !== 'web', // Disable native driver for web
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 800,
-            useNativeDriver: Platform.OS !== 'web', // Disable native driver for web
-          }),
-        ])
-      );
+      // For web, we need to avoid native driver
+      const config = {
+        toValue: 1.2,
+        duration: 800,
+        useNativeDriver: Platform.OS !== 'web',
+      };
       
-      pulse.start();
+      const pulseBack = {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: Platform.OS !== 'web',
+      };
       
-      return () => pulse.stop();
+      // Create the animation sequence
+      const pulseSequence = Animated.sequence([
+        Animated.timing(pulseAnim, config),
+        Animated.timing(pulseAnim, pulseBack)
+      ]);
+      
+      // For web, we'll use a simple interval instead of loop
+      if (Platform.OS === 'web') {
+        const interval = setInterval(() => {
+          pulseSequence.start();
+        }, 1600);
+        
+        return () => clearInterval(interval);
+      } else {
+        // For native, we can use loop
+        const pulse = Animated.loop(pulseSequence);
+        pulse.start();
+        return () => pulse.stop();
+      }
     }
   }, [hasNotifications, pulseAnim]);
   
@@ -46,9 +60,10 @@ const NotificationBell = ({
       <Animated.View 
         style={[
           styles.iconContainer,
-          Platform.OS === 'web' 
-            ? {} // No transform for web to avoid warnings
-            : { transform: [{ scale: hasNotifications ? pulseAnim : 1 }] }
+          // Avoid transform for web to prevent warnings
+          Platform.OS !== 'web' && hasNotifications ? { 
+            transform: [{ scale: pulseAnim }] 
+          } : null
         ]}
       >
         <MaterialIcons 

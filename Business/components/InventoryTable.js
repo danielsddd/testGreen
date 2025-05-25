@@ -1,4 +1,4 @@
-// Business/components/InventoryTable.js - UPDATED with Sold Out State
+// Business/components/InventoryTable.js
 import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
@@ -17,7 +17,6 @@ import {
 import { 
   MaterialCommunityIcons, 
   MaterialIcons, 
-  Ionicons 
 } from '@expo/vector-icons';
 
 // Import components
@@ -145,19 +144,21 @@ export default function InventoryTable({
       setSortOrder('asc');
     }
     
-    // Animate sort change
-    Animated.sequence([
-      Animated.timing(fadeAnim, {
-        toValue: 0.7,
-        duration: 100,
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 100,
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-    ]).start();
+    // Animate sort change - skip on web
+    if (Platform.OS !== 'web') {
+      Animated.sequence([
+        Animated.timing(fadeAnim, {
+          toValue: 0.7,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 100,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
   };
 
   // Handle edit product
@@ -188,24 +189,26 @@ export default function InventoryTable({
       setSelectedProduct(null);
       setQuickEditStock('');
       
-      // Success feedback
-      Animated.sequence([
-        Animated.timing(slideAnim, {
-          toValue: 10,
-          duration: 100,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(slideAnim, {
-          toValue: -10,
-          duration: 100,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 100,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]).start();
+      // Success feedback - skip on web
+      if (Platform.OS !== 'web') {
+        Animated.sequence([
+          Animated.timing(slideAnim, {
+            toValue: 10,
+            duration: 100,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: -10,
+            duration: 100,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 100,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }
       
     } catch (error) {
       Alert.alert('Error', `Failed to update stock: ${error.message}`);
@@ -330,18 +333,20 @@ export default function InventoryTable({
     return sortOrder === 'asc' ? 'keyboard-arrow-up' : 'keyboard-arrow-down';
   };
 
-  // Render inventory item
+  // Render inventory item with animation safety
   const renderInventoryItem = ({ item, index }) => {
     const stockInfo = getStockStatus(item);
     
+    const ItemComponent = Platform.OS === 'web' ? View : Animated.View;
+    
     return (
-      <Animated.View
+      <ItemComponent
         style={[
           styles.tableRow,
-          {
+          Platform.OS !== 'web' ? {
             opacity: fadeAnim,
             transform: [{ translateX: slideAnim }],
-          },
+          } : {},
           index % 2 === 0 && styles.evenRow,
           selectedItems.has(item.id) && styles.selectedRow,
           stockInfo.status === 'sold-out' && styles.soldOutRow,
@@ -452,7 +457,41 @@ export default function InventoryTable({
             </TouchableOpacity>
           </View>
         </View>
-      </Animated.View>
+      </ItemComponent>
+    );
+  };
+
+  // Render empty state for inventory
+  const renderEmptyState = () => {
+    if (isLoading) {
+      return (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color="#4CAF50" />
+          <Text style={styles.loadingText}>Loading inventory...</Text>
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.emptyContainer}>
+        <MaterialCommunityIcons name="package-variant-closed" size={48} color="#e0e0e0" />
+        <Text style={styles.emptyText}>
+          {searchQuery || filterStatus !== 'all' 
+            ? 'No products match your filters' 
+            : 'No products in inventory yet'
+          }
+        </Text>
+        {searchQuery || filterStatus !== 'all' ? (
+          <TouchableOpacity 
+            onPress={() => {
+              setSearchQuery('');
+              setFilterStatus('all');
+            }}
+          >
+            <Text style={styles.clearFiltersText}>Clear filters</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
     );
   };
 
@@ -516,7 +555,7 @@ export default function InventoryTable({
             { key: 'sold-out', label: 'Sold Out', count: soldOutItems.length },
             { key: 'low-stock', label: 'Low Stock', count: lowStockItems.length },
             { key: 'inactive', label: 'Inactive', count: inventory.filter(i => i.status === 'inactive').length },
-          ].map(filter => (
+          ].map((filter) => (
             <TouchableOpacity
               key={filter.key}
               style={[
@@ -678,27 +717,7 @@ export default function InventoryTable({
               tintColor="#4CAF50"
             />
           }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons name="package-variant-closed" size={48} color="#e0e0e0" />
-              <Text style={styles.emptyText}>
-                {searchQuery || filterStatus !== 'all' 
-                  ? 'No products match your filters' 
-                  : 'No products in inventory yet'
-                }
-              </Text>
-              {searchQuery || filterStatus !== 'all' ? (
-                <TouchableOpacity 
-                  onPress={() => {
-                    setSearchQuery('');
-                    setFilterStatus('all');
-                  }}
-                >
-                  <Text style={styles.clearFiltersText}>Clear filters</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          }
+          ListEmptyComponent={renderEmptyState}
           showsVerticalScrollIndicator={false}
         />
       </View>
@@ -781,11 +800,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffebee',
     borderLeftWidth: 4,
     borderLeftColor: '#F44336',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...(Platform.OS !== 'web' ? {
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+    } : {
+      borderWidth: 1,
+      borderColor: '#ffcdd2',
+    }),
   },
   bannerContent: {
     flexDirection: 'row',
@@ -887,10 +911,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
     marginLeft: 8,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 0,
   },
   filterTabs: {
     flexDirection: 'row',
     marginBottom: 16,
+    flexWrap: 'wrap',
   },
   filterTab: {
     paddingVertical: 8,
@@ -898,6 +924,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#f5f5f5',
     marginRight: 8,
+    marginBottom: 8,
   },
   activeFilterTab: {
     backgroundColor: '#4CAF50',
@@ -940,6 +967,7 @@ const styles = StyleSheet.create({
   bulkActions: {
     flexDirection: 'row',
     gap: 8,
+    flexWrap: 'wrap',
   },
   bulkAction: {
     flexDirection: 'row',
@@ -1080,6 +1108,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
   },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 16,
+  },
   clearFiltersText: {
     fontSize: 14,
     color: '#4CAF50',
@@ -1097,6 +1130,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 24,
     width: '80%',
+    maxWidth: 400,
   },
   quickEditTitle: {
     fontSize: 18,

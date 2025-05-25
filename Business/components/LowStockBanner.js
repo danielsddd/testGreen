@@ -32,7 +32,7 @@ export default function LowStockBanner({
 
   useEffect(() => {
     if (lowStockItems.length > 0 && isVisible) {
-      // Entrance animation
+      // Entrance animation - web safe
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: 0,
@@ -46,40 +46,47 @@ export default function LowStockBanner({
         }),
       ]).start();
       
-      // Pulse animation for urgency
-      const pulseAnimation = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.05,
-            duration: 1000,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-        ])
-      );
-      
-      pulseAnimation.start();
-      
-      // Auto-refresh if enabled
-      if (autoRefresh) {
-        refreshTimer.current = setInterval(() => {
-          // Trigger parent refresh
-          onManageStock();
-        }, refreshInterval);
+      // Pulse animation for urgency - adapted for web
+      if (Platform.OS !== 'web') {
+        const pulseAnimation = Animated.loop(
+          Animated.sequence([
+            Animated.timing(pulseAnim, {
+              toValue: 1.05,
+              duration: 1000,
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseAnim, {
+              toValue: 1,
+              duration: 1000,
+              useNativeDriver: true,
+            }),
+          ])
+        );
+        
+        pulseAnimation.start();
+        
+        return () => pulseAnimation.stop();
+      } else {
+        // Web-compatible pulse using setInterval
+        const interval = setInterval(() => {
+          Animated.sequence([
+            Animated.timing(pulseAnim, {
+              toValue: 1.05,
+              duration: 1000,
+              useNativeDriver: false,
+            }),
+            Animated.timing(pulseAnim, {
+              toValue: 1,
+              duration: 1000,
+              useNativeDriver: false,
+            }),
+          ]).start();
+        }, 2000);
+        
+        return () => clearInterval(interval);
       }
-      
-      return () => {
-        pulseAnimation.stop();
-        if (refreshTimer.current) {
-          clearInterval(refreshTimer.current);
-        }
-      };
     } else if (lowStockItems.length === 0) {
-      // Exit animation
+      // Exit animation - web safe
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: -100,
@@ -93,15 +100,32 @@ export default function LowStockBanner({
         }),
       ]).start();
     }
-  }, [lowStockItems.length, isVisible, autoRefresh]);
+  }, [lowStockItems.length, isVisible]);
+
+  // Handle auto-refresh
+  useEffect(() => {
+    if (autoRefresh) {
+      refreshTimer.current = setInterval(() => {
+        // Trigger parent refresh
+        onManageStock();
+      }, refreshInterval);
+    }
+    
+    return () => {
+      if (refreshTimer.current) {
+        clearInterval(refreshTimer.current);
+      }
+    };
+  }, [autoRefresh, refreshInterval, onManageStock]);
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
     
+    // Animation for expansion - web safe
     Animated.timing(expandAnim, {
       toValue: isExpanded ? 0 : 1,
       duration: 300,
-      useNativeDriver: false,
+      useNativeDriver: false, // Height animations require useNativeDriver: false
     }).start();
   };
 
@@ -157,10 +181,15 @@ export default function LowStockBanner({
         styles.container,
         {
           opacity: fadeAnim,
-          transform: [
-            { translateY: slideAnim },
-            { scale: pulseAnim }
-          ],
+          ...(Platform.OS !== 'web' ? {
+            transform: [
+              { translateY: slideAnim },
+              { scale: pulseAnim }
+            ]
+          } : {
+            // Web safe transform
+            marginTop: slideAnim
+          })
         }
       ]}
     >
@@ -198,16 +227,20 @@ export default function LowStockBanner({
         </View>
       </TouchableOpacity>
       
-      {/* Expanded Content */}
+      {/* Expanded Content - Height animation handled differently for web/native */}
       <Animated.View
         style={[
           styles.expandedContent,
-          {
+          Platform.OS !== 'web' ? {
             maxHeight: expandAnim.interpolate({
               inputRange: [0, 1],
               outputRange: [0, 300],
             }),
             opacity: expandAnim,
+          } : {
+            height: isExpanded ? 'auto' : 0,
+            opacity: isExpanded ? 1 : 0,
+            overflow: 'hidden',
           }
         ]}
       >
@@ -247,11 +280,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff3e0',
     borderLeftWidth: 4,
     borderLeftColor: '#FF9800',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    ...(Platform.OS !== 'web' ? {
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+    } : {
+      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      borderLeft: '4px solid #FF9800',
+    }),
     overflow: 'hidden',
   },
   banner: {

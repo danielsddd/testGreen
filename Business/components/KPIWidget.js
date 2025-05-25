@@ -1,4 +1,4 @@
-// Business/components/KPIWidget.js - FIXED VERSION - NO MOCK DATA
+// Business/components/KPIWidget.js
 import React, { useRef, useEffect } from 'react';
 import {
   View,
@@ -29,39 +29,57 @@ export default function KPIWidget({
   // Auto-refresh pulse animation
   useEffect(() => {
     if (autoRefresh) {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.05,
-            duration: 1500,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: Platform.OS !== 'web',
-          }),
-        ])
-      );
+      const animationConfig = {
+        toValue: 1.05,
+        duration: 1500,
+        useNativeDriver: Platform.OS !== 'web',
+      };
       
-      pulse.start();
+      const pulseBackConfig = {
+        toValue: 1,
+        duration: 1500,
+        useNativeDriver: Platform.OS !== 'web',
+      };
       
-      return () => pulse.stop();
+      const pulseSequence = Animated.sequence([
+        Animated.timing(pulseAnim, animationConfig),
+        Animated.timing(pulseAnim, pulseBackConfig)
+      ]);
+      
+      // For web, use interval instead of loop
+      if (Platform.OS === 'web') {
+        const interval = setInterval(() => {
+          pulseSequence.start();
+        }, 3000);
+        
+        return () => clearInterval(interval);
+      } else {
+        // For native, use loop
+        const pulse = Animated.loop(pulseSequence);
+        pulse.start();
+        return () => pulse.stop();
+      }
     }
   }, [autoRefresh, pulseAnim]);
 
   // Press animation
   const handlePress = () => {
+    // For web, skip animation
+    if (Platform.OS === 'web') {
+      onPress();
+      return;
+    }
+    
     Animated.sequence([
       Animated.timing(scaleAnim, {
         toValue: 0.95,
         duration: 100,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: true,
       }),
       Animated.timing(scaleAnim, {
         toValue: 1,
         duration: 100,
-        useNativeDriver: Platform.OS !== 'web',
+        useNativeDriver: true,
       }),
     ]).start();
     
@@ -95,9 +113,9 @@ export default function KPIWidget({
     const iconMap = {
       'cash': { library: 'MaterialCommunityIcons', name: 'cash' },
       'trending-up': { library: 'MaterialIcons', name: 'trending-up' },
-      'shopping-cart': { library: 'MaterialIcons', name: 'shopping-cart' }, // Fixed: Use MaterialIcons
+      'shopping-cart': { library: 'MaterialIcons', name: 'shopping-cart' },
       'cart': { library: 'MaterialCommunityIcons', name: 'cart' },
-      'warning': { library: 'MaterialIcons', name: 'warning' }, // Fixed: Use MaterialIcons
+      'warning': { library: 'MaterialIcons', name: 'warning' },
       'alert': { library: 'MaterialCommunityIcons', name: 'alert' },
       'inventory': { library: 'MaterialIcons', name: 'inventory' },
       'package': { library: 'MaterialCommunityIcons', name: 'package-variant' },
@@ -135,13 +153,13 @@ export default function KPIWidget({
     <Animated.View
       style={[
         styles.container,
-        {
+        Platform.OS !== 'web' ? {
           transform: [
             { scale: scaleAnim },
             { scale: pulseAnim }
           ],
           opacity: fadeAnim,
-        }
+        } : {}
       ]}
     >
       <TouchableOpacity 
@@ -195,11 +213,16 @@ const styles = StyleSheet.create({
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    ...(Platform.OS !== 'web' ? {
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+    } : {
+      borderWidth: 1,
+      borderColor: '#e0e0e0',
+    }),
     minHeight: 80,
   },
   iconContainer: {
