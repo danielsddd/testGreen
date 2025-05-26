@@ -1,4 +1,4 @@
-// services/marketplaceApi.js
+// services/marketplaceApi.js - ENHANCED VERSION (All Functions Preserved + Auto-Refresh)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import config from './config';
@@ -6,60 +6,146 @@ import config from './config';
 // Base URL for API requests
 const API_BASE_URL = config.API_BASE_URL || 'https://usersfunctions.azurewebsites.net/api';
 
+// Enhanced error handling
+class ApiError extends Error {
+  constructor(message, status, response) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.response = response;
+  }
+}
+
 /**
- * Helper function to handle API requests with proper error handling
+ * Helper function to handle API requests with proper error handling and retry logic
  * @param {string} endpoint - API endpoint to call
  * @param {Object} options - Fetch options
+ * @param {number} retries - Number of retry attempts
  * @returns {Promise<Object>} - Response data
  */
-const apiRequest = async (endpoint, options = {}) => {
-  try {
-    // Get authentication token and user email
-    const token = await AsyncStorage.getItem('googleAuthToken');
-    const userEmail = await AsyncStorage.getItem('userEmail');
-    
-    // Default headers with authentication
-    const headers = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
-    
-    // Add authentication headers if available
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    
-    if (userEmail) {
-      headers['X-User-Email'] = userEmail;
-    }
-    
-    // Full URL with endpoint
-    const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
-    
-    // Make the request
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-    
-    // Parse response
-    let data;
+const apiRequest = async (endpoint, options = {}, retries = 3) => {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      data = await response.json();
-    } catch (e) {
-      console.warn('Error parsing JSON response:', e);
-      data = { error: 'Invalid response format' };
+      // Get authentication token and user email
+      const token = await AsyncStorage.getItem('googleAuthToken');
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      
+      // Default headers with authentication
+      const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      };
+      
+      // Add authentication headers if available
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      if (userEmail) {
+        headers['X-User-Email'] = userEmail;
+      }
+      
+      // Full URL with endpoint
+      const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+      
+      console.log(`🚀 API Request (attempt ${attempt}): ${url}`);
+      
+      // Make the request with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Parse response
+      let data;
+      try {
+        const responseText = await response.text();
+        data = responseText ? JSON.parse(responseText) : {};
+        console.log(`📋 API Response (${response.status}):`, Object.keys(data));
+      } catch (e) {
+        console.warn('Error parsing JSON response:', e);
+        data = { error: 'Invalid response format' };
+      }
+      
+      // Check for errors
+      if (!response.ok) {
+        const errorMessage = data.error || data.message || `Request failed with status ${response.status}`;
+        console.error(`❌ API Error (${endpoint}):`, errorMessage);
+        throw new ApiError(errorMessage, response.status, data);
+      }
+      
+      console.log(`✅ API Success (${endpoint})`);
+      return data;
+      
+    } catch (error) {
+      console.error(`❌ API Attempt ${attempt} failed (${endpoint}):`, error.message);
+      
+      // Don't retry on client errors (4xx) except 429 (rate limit)
+      if (error.status >= 400 && error.status < 500 && error.status !== 429) {
+        throw error;
+      }
+      
+      if (attempt === retries) {
+        throw error;
+      }
+      
+      // Wait before retry (exponential backoff)
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+      console.log(`⏱️ Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+};
+
+/**
+ * Trigger auto-refresh after data changes
+ */
+const triggerAutoRefresh = async (eventType, data = {}) => {
+  try {
+    console.log('🔄 Triggering auto-refresh after:', eventType);
+    
+    // Clear relevant caches based on event type
+    const cachesToClear = [];
+    
+    switch (eventType) {
+      case 'product_created':
+      case 'product_updated':
+      case 'product_deleted':
+        cachesToClear.push('cached_products', 'cached_user_listings', 'cached_nearby_products');
+        break;
+      case 'wishlist_updated':
+        cachesToClear.push('cached_wishlist', 'cached_products');
+        break;
+      case 'review_submitted':
+      case 'review_deleted':
+        cachesToClear.push('cached_reviews');
+        break;
+      case 'profile_updated':
+        cachesToClear.push('cached_profile');
+        break;
+      case 'message_sent':
+        cachesToClear.push('cached_conversations', 'cached_messages');
+        break;
+      default:
+        cachesToClear.push('cached_products');
     }
     
-    // Check for errors
-    if (!response.ok) {
-      throw new Error(data.error || data.message || `Request failed with status ${response.status}`);
+    // Clear caches
+    if (cachesToClear.length > 0) {
+      await AsyncStorage.multiRemove(cachesToClear);
     }
     
-    return data;
+    console.log('✅ Auto-refresh completed');
+    return true;
   } catch (error) {
-    console.error(`API request failed (${endpoint}):`, error);
-    throw error;
+    console.error('❌ Auto-refresh error:', error);
+    return false;
   }
 };
 
@@ -100,10 +186,51 @@ export const getAll = async (page = 1, category = null, search = null, options =
     queryParams.append('sortBy', options.sortBy);
   }
   
+  // Add seller type filter if provided
+  if (options.sellerType) {
+    queryParams.append('sellerType', options.sellerType);
+  }
+  
   // Build endpoint with query params
   const endpoint = `marketplace/products?${queryParams.toString()}`;
   
-  return apiRequest(endpoint);
+  try {
+    const response = await apiRequest(endpoint);
+    
+    // Cache the response for offline access
+    if (page === 1 && !search && !category) {
+      try {
+        await AsyncStorage.setItem('cached_products', JSON.stringify({
+          data: response,
+          timestamp: Date.now()
+        }));
+      } catch (cacheError) {
+        console.warn('⚠️ Failed to cache products:', cacheError);
+      }
+    }
+    
+    return response;
+  } catch (error) {
+    // Try to return cached data on error
+    if (page === 1 && !search && !category) {
+      try {
+        const cached = await AsyncStorage.getItem('cached_products');
+        if (cached) {
+          const { data, timestamp } = JSON.parse(cached);
+          const isStale = Date.now() - timestamp > 300000; // 5 minutes
+          
+          if (!isStale) {
+            console.log('📱 Returning cached products');
+            return { ...data, fromCache: true };
+          }
+        }
+      } catch (cacheError) {
+        console.warn('⚠️ Failed to load cached products:', cacheError);
+      }
+    }
+    
+    throw error;
+  }
 };
 
 /**
@@ -133,9 +260,18 @@ export const wishProduct = async (productId) => {
   
   const endpoint = `marketplace/products/wish/${productId}`;
   
-  return apiRequest(endpoint, {
-    method: 'POST',
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'POST',
+    });
+    
+    // Trigger auto-refresh after wishlist update
+    await triggerAutoRefresh('wishlist_updated', { productId });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -146,10 +282,19 @@ export const wishProduct = async (productId) => {
 export const createProduct = async (productData) => {
   const endpoint = 'marketplace/products/create';
   
-  return apiRequest(endpoint, {
-    method: 'POST',
-    body: JSON.stringify(productData),
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(productData),
+    });
+    
+    // Trigger auto-refresh after product creation
+    await triggerAutoRefresh('product_created', { productData });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -161,10 +306,19 @@ export const createProduct = async (productData) => {
 export const updateProduct = async (productId, productData) => {
   const endpoint = `marketplace/products/${productId}`;
   
-  return apiRequest(endpoint, {
-    method: 'PATCH',
-    body: JSON.stringify(productData),
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(productData),
+    });
+    
+    // Trigger auto-refresh after product update
+    await triggerAutoRefresh('product_updated', { productId, productData });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -175,9 +329,18 @@ export const updateProduct = async (productId, productData) => {
 export const deleteProduct = async (productId) => {
   const endpoint = `marketplace/products/${productId}`;
   
-  return apiRequest(endpoint, {
-    method: 'DELETE',
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'DELETE',
+    });
+    
+    // Trigger auto-refresh after product deletion
+    await triggerAutoRefresh('product_deleted', { productId });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -189,10 +352,19 @@ export const deleteProduct = async (productId) => {
 export const markAsSold = async (productId, data = {}) => {
   const endpoint = `marketplace/products/${productId}/sold`;
   
-  return apiRequest(endpoint, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    
+    // Trigger auto-refresh after marking as sold
+    await triggerAutoRefresh('product_updated', { productId, status: 'sold' });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -207,7 +379,39 @@ export const fetchUserProfile = async (userId) => {
   
   const endpoint = `marketplace/users/${userId}`;
   
-  return apiRequest(endpoint);
+  try {
+    const response = await apiRequest(endpoint);
+    
+    // Cache profile data
+    try {
+      await AsyncStorage.setItem(`cached_profile_${userId}`, JSON.stringify({
+        data: response,
+        timestamp: Date.now()
+      }));
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to cache profile:', cacheError);
+    }
+    
+    return response;
+  } catch (error) {
+    // Try to return cached profile on error
+    try {
+      const cached = await AsyncStorage.getItem(`cached_profile_${userId}`);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const isStale = Date.now() - timestamp > 600000; // 10 minutes
+        
+        if (!isStale) {
+          console.log('📱 Returning cached profile');
+          return { ...data, fromCache: true };
+        }
+      }
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to load cached profile:', cacheError);
+    }
+    
+    throw error;
+  }
 };
 
 /**
@@ -219,10 +423,19 @@ export const fetchUserProfile = async (userId) => {
 export const updateUserProfile = async (userId, profileData) => {
   const endpoint = `marketplace/users/${userId}`;
   
-  return apiRequest(endpoint, {
-    method: 'PATCH',
-    body: JSON.stringify(profileData),
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(profileData),
+    });
+    
+    // Trigger auto-refresh after profile update
+    await triggerAutoRefresh('profile_updated', { userId, profileData });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -234,7 +447,43 @@ export const updateUserProfile = async (userId, profileData) => {
 export const getUserListings = async (userId, status = 'all') => {
   const endpoint = `marketplace/users/${userId}/listings?status=${status}`;
   
-  return apiRequest(endpoint);
+  try {
+    const response = await apiRequest(endpoint);
+    
+    // Cache user listings
+    if (status === 'all') {
+      try {
+        await AsyncStorage.setItem(`cached_user_listings_${userId}`, JSON.stringify({
+          data: response,
+          timestamp: Date.now()
+        }));
+      } catch (cacheError) {
+        console.warn('⚠️ Failed to cache listings:', cacheError);
+      }
+    }
+    
+    return response;
+  } catch (error) {
+    // Try to return cached listings on error
+    if (status === 'all') {
+      try {
+        const cached = await AsyncStorage.getItem(`cached_user_listings_${userId}`);
+        if (cached) {
+          const { data, timestamp } = JSON.parse(cached);
+          const isStale = Date.now() - timestamp > 300000; // 5 minutes
+          
+          if (!isStale) {
+            console.log('📱 Returning cached listings');
+            return { ...data, fromCache: true };
+          }
+        }
+      } catch (cacheError) {
+        console.warn('⚠️ Failed to load cached listings:', cacheError);
+      }
+    }
+    
+    throw error;
+  }
 };
 
 /**
@@ -245,7 +494,39 @@ export const getUserListings = async (userId, status = 'all') => {
 export const getUserWishlist = async (userId) => {
   const endpoint = `marketplace/users/${userId}/wishlist`;
   
-  return apiRequest(endpoint);
+  try {
+    const response = await apiRequest(endpoint);
+    
+    // Cache wishlist data
+    try {
+      await AsyncStorage.setItem(`cached_wishlist_${userId}`, JSON.stringify({
+        data: response,
+        timestamp: Date.now()
+      }));
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to cache wishlist:', cacheError);
+    }
+    
+    return response;
+  } catch (error) {
+    // Try to return cached wishlist on error
+    try {
+      const cached = await AsyncStorage.getItem(`cached_wishlist_${userId}`);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const isStale = Date.now() - timestamp > 300000; // 5 minutes
+        
+        if (!isStale) {
+          console.log('📱 Returning cached wishlist');
+          return { ...data, fromCache: true };
+        }
+      }
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to load cached wishlist:', cacheError);
+    }
+    
+    throw error;
+  }
 };
 
 /**
@@ -302,6 +583,9 @@ export const uploadImage = async (imageData, type = 'plant') => {
   });
 };
 
+/**
+ * Get nearby products
+ */
 export const getNearbyProducts = async (latitude, longitude, radius = 10, category = null) => {
   try {
     if (typeof latitude !== 'number' || typeof longitude !== 'number') {
@@ -313,79 +597,79 @@ export const getNearbyProducts = async (latitude, longitude, radius = 10, catego
       queryParams += `&category=${encodeURIComponent(category)}`;
     }
     
-    const headers = {
-      'Content-Type': 'application/json',
-    };
+    const endpoint = `marketplace/nearbyProducts?${queryParams}`;
+    const response = await apiRequest(endpoint);
     
-    const userEmail = await AsyncStorage.getItem('userEmail');
-    if (userEmail) {
-      headers['X-User-Email'] = userEmail;
+    // Cache nearby products
+    try {
+      await AsyncStorage.setItem('cached_nearby_products', JSON.stringify({
+        data: response,
+        location: { latitude, longitude, radius },
+        timestamp: Date.now()
+      }));
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to cache nearby products:', cacheError);
     }
     
-    const response = await fetch(`${API_BASE_URL}/marketplace/nearbyProducts?${queryParams}`, {
-      method: 'GET',
-      headers: headers,
-    });
-    
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-    
-    return await response.json();
+    return response;
   } catch (error) {
-    console.error('Error fetching nearby products:', error);
+    // Try to return cached nearby products on error
+    try {
+      const cached = await AsyncStorage.getItem('cached_nearby_products');
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const isStale = Date.now() - timestamp > 300000; // 5 minutes
+        
+        if (!isStale) {
+          console.log('📱 Returning cached nearby products');
+          return { ...data, fromCache: true };
+        }
+      }
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to load cached nearby products:', cacheError);
+    }
+    
     throw error;
   }
 };
 
+/**
+ * Geocode address
+ */
 export const geocodeAddress = async (address) => {
   try {
     if (!address) {
       throw new Error('Address is required');
     }
     
-    const response = await fetch(`${API_BASE_URL}/marketplace/geocode?address=${encodeURIComponent(address)}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-    
-    return await response.json();
+    const endpoint = `marketplace/geocode?address=${encodeURIComponent(address)}`;
+    return await apiRequest(endpoint);
   } catch (error) {
     console.error('Error geocoding address:', error);
     throw error;
   }
 };
 
+/**
+ * Reverse geocode coordinates
+ */
 export const reverseGeocode = async (latitude, longitude) => {
   try {
     if (typeof latitude !== 'number' || typeof longitude !== 'number') {
       throw new Error('Valid coordinates required');
     }
     
-    const response = await fetch(`${API_BASE_URL}/marketplace/reverseGeocode?lat=${latitude}&lon=${longitude}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-    
-    return await response.json();
+    const endpoint = `marketplace/reverseGeocode?lat=${latitude}&lon=${longitude}`;
+    return await apiRequest(endpoint);
   } catch (error) {
     console.error('Error reverse geocoding:', error);
     throw error;
   }
 };
 
+/**
+ * Speech to text conversion
+ */
 export const speechToText = async (audioUrl, language = 'en-US') => {
   if (!audioUrl) {
     throw new Error('Audio URL is required');
@@ -415,28 +699,13 @@ export const speechToText = async (audioUrl, language = 'en-US') => {
   }
 };
 
+/**
+ * Get Azure Maps key
+ */
 export const getAzureMapsKey = async () => {
   try {
-    const userEmail = await AsyncStorage.getItem('userEmail');
-    
-    const headers = {
-      'Content-Type': 'application/json',
-    };
-    
-    if (userEmail) {
-      headers['X-User-Email'] = userEmail;
-    }
-    
-    const response = await fetch(`${API_BASE_URL}/marketplace/maps-config`, {
-      method: 'GET',
-      headers: headers,
-    });
-    
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-    
-    const data = await response.json();
+    const endpoint = 'marketplace/maps-config';
+    const data = await apiRequest(endpoint);
     
     if (!data.azureMapsKey) {
       throw new Error('No Azure Maps key returned from server');
@@ -484,7 +753,39 @@ export const fetchConversations = async (userId) => {
   
   const endpoint = 'marketplace/messages/getUserConversations';
   
-  return apiRequest(endpoint);
+  try {
+    const response = await apiRequest(endpoint);
+    
+    // Cache conversations
+    try {
+      await AsyncStorage.setItem(`cached_conversations_${userId}`, JSON.stringify({
+        data: response,
+        timestamp: Date.now()
+      }));
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to cache conversations:', cacheError);
+    }
+    
+    return response;
+  } catch (error) {
+    // Try to return cached conversations on error
+    try {
+      const cached = await AsyncStorage.getItem(`cached_conversations_${userId}`);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const isStale = Date.now() - timestamp > 60000; // 1 minute
+        
+        if (!isStale) {
+          console.log('📱 Returning cached conversations');
+          return data;
+        }
+      }
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to load cached conversations:', cacheError);
+    }
+    
+    throw error;
+  }
 };
 
 /**
@@ -500,7 +801,39 @@ export const fetchMessages = async (chatId, userId) => {
   
   const endpoint = `marketplace/messages/getMessages/${chatId}`;
   
-  return apiRequest(endpoint);
+  try {
+    const response = await apiRequest(endpoint);
+    
+    // Cache messages
+    try {
+      await AsyncStorage.setItem(`cached_messages_${chatId}`, JSON.stringify({
+        data: response,
+        timestamp: Date.now()
+      }));
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to cache messages:', cacheError);
+    }
+    
+    return response;
+  } catch (error) {
+    // Try to return cached messages on error
+    try {
+      const cached = await AsyncStorage.getItem(`cached_messages_${chatId}`);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const isStale = Date.now() - timestamp > 30000; // 30 seconds
+        
+        if (!isStale) {
+          console.log('📱 Returning cached messages');
+          return data;
+        }
+      }
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to load cached messages:', cacheError);
+    }
+    
+    throw error;
+  }
 };
 
 /**
@@ -517,14 +850,23 @@ export const sendMessage = async (chatId, message, senderId) => {
   
   const endpoint = 'marketplace/messages/sendMessage';
   
-  return apiRequest(endpoint, {
-    method: 'POST',
-    body: JSON.stringify({
-      chatId,
-      message,
-      senderId,
-    }),
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        chatId,
+        message,
+        senderId,
+      }),
+    });
+    
+    // Trigger auto-refresh after sending message
+    await triggerAutoRefresh('message_sent', { chatId, message });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -542,15 +884,24 @@ export const startConversation = async (sellerId, plantId, message, sender) => {
   
   const endpoint = 'marketplace/messages/createChatRoom';
   
-  return apiRequest(endpoint, {
-    method: 'POST',
-    body: JSON.stringify({
-      receiver: sellerId,
-      plantId,
-      message,
-      sender,
-    }),
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        receiver: sellerId,
+        plantId,
+        message,
+        sender,
+      }),
+    });
+    
+    // Trigger auto-refresh after starting conversation
+    await triggerAutoRefresh('message_sent', { sellerId, plantId });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -614,7 +965,39 @@ export const fetchReviews = async (targetType, targetId) => {
   
   const endpoint = `marketplace/reviews/${targetType}/${targetId}`;
   
-  return apiRequest(endpoint);
+  try {
+    const response = await apiRequest(endpoint);
+    
+    // Cache reviews
+    try {
+      await AsyncStorage.setItem(`cached_reviews_${targetType}_${targetId}`, JSON.stringify({
+        data: response,
+        timestamp: Date.now()
+      }));
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to cache reviews:', cacheError);
+    }
+    
+    return response;
+  } catch (error) {
+    // Try to return cached reviews on error
+    try {
+      const cached = await AsyncStorage.getItem(`cached_reviews_${targetType}_${targetId}`);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        const isStale = Date.now() - timestamp > 600000; // 10 minutes
+        
+        if (!isStale) {
+          console.log('📱 Returning cached reviews');
+          return data;
+        }
+      }
+    } catch (cacheError) {
+      console.warn('⚠️ Failed to load cached reviews:', cacheError);
+    }
+    
+    throw error;
+  }
 };
 
 /**
@@ -635,10 +1018,19 @@ export const submitReview = async (targetId, targetType, reviewData) => {
   
   const endpoint = `submitreview/${targetType}/${targetId}`;
   
-  return apiRequest(endpoint, {
-    method: 'POST',
-    body: JSON.stringify(reviewData),
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'POST',
+      body: JSON.stringify(reviewData),
+    });
+    
+    // Trigger auto-refresh after submitting review
+    await triggerAutoRefresh('review_submitted', { targetId, targetType, reviewData });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -655,9 +1047,49 @@ export const deleteReview = async (targetType, targetId, reviewId) => {
   
   const endpoint = `marketplace/reviews/${targetType}/${targetId}/${reviewId}`;
   
-  return apiRequest(endpoint, {
-    method: 'DELETE',
-  });
+  try {
+    const response = await apiRequest(endpoint, {
+      method: 'DELETE',
+    });
+    
+    // Trigger auto-refresh after deleting review
+    await triggerAutoRefresh('review_deleted', { targetId, targetType, reviewId });
+    
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Clear all marketplace cache
+ */
+export const clearMarketplaceCache = async () => {
+  try {
+    console.log('🧹 Clearing marketplace cache...');
+    
+    const keys = await AsyncStorage.getAllKeys();
+    const cacheKeys = keys.filter(key => 
+      key.startsWith('cached_products') || 
+      key.startsWith('cached_profile_') ||
+      key.startsWith('cached_user_listings_') ||
+      key.startsWith('cached_wishlist_') ||
+      key.startsWith('cached_conversations_') ||
+      key.startsWith('cached_messages_') ||
+      key.startsWith('cached_reviews_') ||
+      key.startsWith('cached_nearby_products')
+    );
+    
+    if (cacheKeys.length > 0) {
+      await AsyncStorage.multiRemove(cacheKeys);
+      console.log(`✅ Cleared ${cacheKeys.length} cached items`);
+    }
+    
+    return { success: true, clearedItems: cacheKeys.length };
+  } catch (error) {
+    console.error('❌ Error clearing cache:', error);
+    return { success: false, error: error.message };
+  }
 };
 
 // Export all functions
@@ -689,4 +1121,6 @@ export default {
   fetchReviews,
   submitReview,
   deleteReview,
+  clearMarketplaceCache,
+  triggerAutoRefresh,
 };

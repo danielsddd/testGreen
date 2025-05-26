@@ -1,6 +1,17 @@
-// services/MarketplaceUpdates.js - Enhanced Auto-Refresh Service
+// services/MarketplaceUpdates.js - Enhanced Auto-Refresh Service with FCM Integration
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import signalRService from './signalRservice';
+
+// Firebase imports for mobile
+let messaging = null;
+if (Platform.OS === 'android' || Platform.OS === 'ios') {
+  try {
+    messaging = require('@react-native-firebase/messaging').default;
+  } catch (error) {
+    console.warn('[MarketplaceUpdates] Firebase Messaging import failed:', error);
+  }
+}
 
 // Update event types
 export const UPDATE_TYPES = {
@@ -39,6 +50,143 @@ const STORAGE_KEYS = {
 // Event listeners map for cleanup
 const listeners = new Map();
 const updateListeners = new Map();
+let messageUnsubscribe = null;
+
+// Initialize FCM for notifications (only on mobile)
+const initializeFCM = () => {
+  if (Platform.OS !== 'android' && Platform.OS !== 'ios') return;
+  if (!messaging) return;
+  
+  try {
+    // Set up foreground message handler
+    messageUnsubscribe = messaging().onMessage(async remoteMessage => {
+      console.log('[MarketplaceUpdates] 📬 FCM message received in foreground:', remoteMessage);
+      handleFCMMessage(remoteMessage);
+    });
+    
+    // Handle notifications opened from background state
+    messaging().onNotificationOpenedApp(remoteMessage => {
+      console.log('[MarketplaceUpdates] 🔔 Notification opened from background state:', remoteMessage);
+      handleFCMMessage(remoteMessage, true);
+    });
+    
+    // Check if app was opened from a notification
+    messaging()
+      .getInitialNotification()
+      .then(remoteMessage => {
+        if (remoteMessage) {
+          console.log('[MarketplaceUpdates] 🚀 App opened from quit state by notification:', remoteMessage);
+          handleFCMMessage(remoteMessage, true);
+        }
+      });
+    
+    console.log('[MarketplaceUpdates] ✅ FCM setup completed successfully');
+  } catch (error) {
+    console.error('[MarketplaceUpdates] ❌ Error setting up FCM:', error);
+  }
+};
+
+/**
+ * Process FCM message and map to update type
+ */
+const handleFCMMessage = (remoteMessage, wasClicked = false) => {
+  try {
+    // Extract data from the notification
+    const { notification, data } = remoteMessage;
+    
+    if (!data || !data.type) {
+      console.log('[MarketplaceUpdates] ⚠️ FCM message missing type:', remoteMessage);
+      return;
+    }
+    
+    // Map FCM message type to our UPDATE_TYPES
+    let updateType = data.type;
+    
+    // Map common FCM message types to our update types
+    if (data.type === 'NEW_MESSAGE') updateType = UPDATE_TYPES.MESSAGE;
+    if (data.type === 'NEW_REVIEW') updateType = UPDATE_TYPES.REVIEW;
+    if (data.type === 'WISHLIST_CHANGE') updateType = UPDATE_TYPES.WISHLIST;
+    if (data.type === 'INVENTORY_UPDATE') updateType = UPDATE_TYPES.INVENTORY;
+    if (data.type === 'ORDER_UPDATE') updateType = UPDATE_TYPES.ORDER;
+    if (data.type === 'WATERING_REMINDER') updateType = UPDATE_TYPES.WATERING;
+    
+    // Create update data from the notification
+    const updateData = {
+      ...data,
+      title: notification?.title,
+      body: notification?.body,
+      wasClicked,
+      timestamp: Date.now()
+    };
+    
+    // Trigger update to refresh UI components
+    triggerUpdate(updateType, updateData, { source: 'fcm' });
+    
+  } catch (error) {
+    console.error('[MarketplaceUpdates] ❌ Error handling FCM message:', error);
+  }
+};
+
+// Set up SignalR handlers
+const setupSignalRHandlers = () => {
+  if (!signalRService) {
+    console.log('[MarketplaceUpdates] ⚠️ SignalR service not available');
+    return;
+  }
+  
+  try {
+    // Handle incoming messages
+    signalRService.onMessageReceived(message => {
+      triggerUpdate(UPDATE_TYPES.MESSAGE, {
+        messageId: message.id,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        text: message.text || message.message,
+        timestamp: message.timestamp || Date.now(),
+        source: 'signalr'
+      });
+    });
+    
+    // Handle typing indicators
+    signalRService.onTypingStarted && signalRService.onTypingStarted((conversationId, userId) => {
+      triggerUpdate('TYPING_STARTED', {
+        conversationId,
+        userId,
+        timestamp: Date.now(),
+        source: 'signalr'
+      });
+    });
+    
+    // Handle when user stops typing
+    signalRService.onTypingStopped && signalRService.onTypingStopped((conversationId, userId) => {
+      triggerUpdate('TYPING_STOPPED', {
+        conversationId,
+        userId,
+        timestamp: Date.now(),
+        source: 'signalr'
+      });
+    });
+    
+    // Handle read receipts
+    signalRService.onReadReceiptReceived && signalRService.onReadReceiptReceived((conversationId, userId, messageIds, timestamp) => {
+      triggerUpdate('MESSAGE_READ', {
+        conversationId,
+        userId,
+        messageIds,
+        timestamp: timestamp || Date.now(),
+        source: 'signalr'
+      });
+    });
+    
+    console.log('[MarketplaceUpdates] ✅ SignalR handlers set up successfully');
+  } catch (error) {
+    console.error('[MarketplaceUpdates] ❌ Error setting up SignalR handlers:', error);
+  }
+};
+
+// Initialize services
+initializeFCM();
+setupSignalRHandlers();
 
 /**
  * Enhanced trigger update with retry mechanism and validation
@@ -48,11 +196,11 @@ const updateListeners = new Map();
  * @returns {Promise<boolean>} Success status
  */
 export const triggerUpdate = async (updateType, data = {}, options = {}) => {
-  const { silent = false, retry = true } = options;
+  const { silent = false, retry = true, source = 'app' } = options;
   
   try {
     // Validate update type
-    if (!Object.values(UPDATE_TYPES).includes(updateType)) {
+    if (!Object.values(UPDATE_TYPES).includes(updateType) && !updateType.includes('_STARTED') && !updateType.includes('_STOPPED') && !updateType.includes('_READ')) {
       console.warn(`[MarketplaceUpdates] Invalid update type: ${updateType}`);
       return false;
     }
@@ -60,7 +208,7 @@ export const triggerUpdate = async (updateType, data = {}, options = {}) => {
     const updateInfo = {
       timestamp: Date.now(),
       type: updateType,
-      source: Platform.OS,
+      source,
       ...data
     };
     
@@ -122,7 +270,7 @@ export const triggerUpdate = async (updateType, data = {}, options = {}) => {
  */
 export const checkForUpdate = async (updateType, since = 0, includeData = false) => {
   try {
-    if (!Object.values(UPDATE_TYPES).includes(updateType)) {
+    if (!Object.values(UPDATE_TYPES).includes(updateType) && !updateType.includes('_STARTED') && !updateType.includes('_STOPPED') && !updateType.includes('_READ')) {
       console.warn(`[MarketplaceUpdates] Invalid update type for check: ${updateType}`);
       return false;
     }
@@ -170,7 +318,7 @@ export const getLastUpdateTimestamp = async (updateType) => {
  */
 export const clearUpdate = async (updateType) => {
   try {
-    if (!Object.values(UPDATE_TYPES).includes(updateType)) {
+    if (!Object.values(UPDATE_TYPES).includes(updateType) && !updateType.includes('_STARTED') && !updateType.includes('_STOPPED') && !updateType.includes('_READ')) {
       console.warn(`[MarketplaceUpdates] Invalid update type for clear: ${updateType}`);
       return false;
     }
@@ -233,8 +381,8 @@ export const addUpdateListener = (id, updateTypes, callback) => {
   
   const types = Array.isArray(updateTypes) ? updateTypes : [updateTypes];
   
-  // Validate update types
-  const validTypes = types.filter(type => Object.values(UPDATE_TYPES).includes(type));
+  // Validate update types (more permissive to allow custom signalR events)
+  const validTypes = types;
   if (validTypes.length === 0) {
     console.warn('[MarketplaceUpdates] No valid update types provided');
     return;
@@ -468,6 +616,12 @@ export const useAutoRefresh = (updateTypes, refreshCallback, options = {}) => {
 
 // Cleanup function for app shutdown
 export const cleanup = () => {
+  // Clean up FCM subscription
+  if (messageUnsubscribe) {
+    messageUnsubscribe();
+    messageUnsubscribe = null;
+  }
+  
   // Remove all listeners
   listeners.forEach((listener, id) => {
     removeUpdateListener(id);
