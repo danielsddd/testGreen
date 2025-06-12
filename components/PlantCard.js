@@ -1,331 +1,474 @@
-// components/PlantCard.js - Enhanced with Business Integration
-import React, { useState, useEffect, useRef } from 'react';
+// components/PlantCard.js - ENHANCED Business Display
+import React, { useState, useCallback, useRef } from 'react';
 import {
-  View,
-  Text,
-  Image,
-  StyleSheet,
-  TouchableOpacity,
-  Platform,
+  View, Text, Image, TouchableOpacity, StyleSheet, Alert,
+  Platform, Dimensions, ActivityIndicator
 } from 'react-native';
-import { MaterialIcons, FontAwesome, MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { formatDistanceToNow } from 'date-fns';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import { wishProduct } from '../services/marketplaceApi';
+import { wishProduct, startConversation, purchaseBusinessProduct } from '../services/marketplaceApi';
 import { triggerUpdate, UPDATE_TYPES } from '../services/MarketplaceUpdates';
 
-const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = false }) => {
+const { width: screenWidth } = Dimensions.get('window');
+
+const PlantCard = ({ plant, showActions = true, layout = 'grid', onPress, style }) => {
   const navigation = useNavigation();
-  const cardRef = useRef(null);
   const [isFavorite, setIsFavorite] = useState(plant.isFavorite || plant.isWished || false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isWishLoading, setIsWishLoading] = useState(false);
+  const [isMessageLoading, setIsMessageLoading] = useState(false);
+  const [isOrderLoading, setIsOrderLoading] = useState(false);
+  const lastActionTimeRef = useRef(0);
 
-  useEffect(() => {
-    setIsFavorite(plant.isFavorite || plant.isWished || false);
-  }, [plant.isFavorite, plant.isWished]);
+  // ENHANCED: Business information extraction
+  const isBusinessProduct = plant.sellerType === 'business' || plant.isBusinessListing;
+  const businessInfo = plant.businessInfo || {};
+  const sellerInfo = plant.seller || {};
+  const locationInfo = plant.location || {};
+  const availability = plant.availability || {};
 
-  useEffect(() => {
-    return () => {
-      if (
-        typeof document !== 'undefined' &&
-        document.activeElement &&
-        cardRef.current?.contains(document.activeElement)
-      ) {
-        document.activeElement.blur();
+  // ENHANCED: Get business display name
+  const getBusinessDisplayName = () => {
+    return sellerInfo.businessName || 
+           sellerInfo.name || 
+           businessInfo.name || 
+           'Business';
+  };
+
+  // ENHANCED: Get business type with fallback
+  const getBusinessType = () => {
+    return businessInfo.type || 
+           sellerInfo.businessType || 
+           availability.businessType || 
+           'Business';
+  };
+
+  // ENHANCED: Get pickup/location information
+  const getLocationDisplay = () => {
+    if (isBusinessProduct) {
+      // Priority order for business location display
+      return locationInfo.displayText || 
+             availability.pickupLocation ||
+             businessInfo.pickupInfo?.location ||
+             locationInfo.formattedAddress ||
+             (locationInfo.city && locationInfo.address ? `${locationInfo.address}, ${locationInfo.city}` : '') ||
+             locationInfo.city ||
+             locationInfo.address ||
+             `${getBusinessDisplayName()} - Contact for pickup`;
+    } else {
+      // Individual seller location
+      return locationInfo.city || 
+             plant.city || 
+             plant.location || 
+             'Local pickup';
+    }
+  };
+
+  // ENHANCED: Check if business is verified
+  const isVerified = () => {
+    return businessInfo.verified || 
+           sellerInfo.isVerified || 
+           sellerInfo.verificationStatus === 'verified' ||
+           false;
+  };
+
+  const debounce = (func, delay) => {
+    return (...args) => {
+      const now = Date.now();
+      if (now - lastActionTimeRef.current >= delay) {
+        lastActionTimeRef.current = now;
+        func(...args);
       }
     };
-  }, []);
-
-  const handlePress = () => {
-    navigation.navigate('PlantDetail', { plantId: plant.id || plant._id });
   };
 
-  const handleSellerPress = (e) => {
-    e.stopPropagation();
+  const handleWishToggle = useCallback(debounce(async () => {
+    if (isWishLoading) return;
     
-    // Check if seller is a business or individual
-    const isBusiness = plant.seller?.isBusiness || plant.sellerType === 'business' || plant.isBusinessListing;
-    
-    if (isBusiness) {
-      // Navigate to business profile
-      navigation.navigate('BusinessSellerProfile', {
-        businessId: plant.seller?._id || plant.seller?.id || plant.sellerId || plant.businessId,
-        sellerData: plant.seller || { 
-          name: plant.sellerName || 'Business Seller',
-          isBusiness: true
-        }
-      });
-    } else {
-      // Navigate to individual seller profile
-      navigation.navigate('SellerProfile', {
-        sellerId: plant.seller?._id || plant.seller?.id || plant.sellerId || 'unknown',
-        sellerData: plant.seller || { 
-          name: plant.sellerName || 'Individual Seller',
-          isBusiness: false
-        }
-      });
-    }
-  };
-
-  const toggleFavorite = async (e) => {
-    e.stopPropagation();
-    if (isSubmitting) return;
-
     try {
-      setIsSubmitting(true);
-      const newFavoriteState = !isFavorite;
-      setIsFavorite(newFavoriteState);
-
-      const result = await wishProduct(plant.id || plant._id);
-      if (result && 'isWished' in result) {
-        setIsFavorite(result.isWished);
+      setIsWishLoading(true);
+      const plantId = plant.id || plant._id;
+      
+      if (!plantId) {
+        throw new Error('Plant ID not found');
       }
 
-      AsyncStorage.setItem('WISHLIST_UPDATED', Date.now().toString())
-        .then(() => {
-          triggerUpdate(UPDATE_TYPES.WISHLIST, {
-            plantId: plant.id || plant._id,
-            isFavorite: newFavoriteState,
-            timestamp: Date.now()
-          }).catch(e => console.warn('Failed to trigger update:', e));
-        })
-        .catch(err => console.warn('Failed to set wishlist update flag:', err));
-    } catch (err) {
-      setIsFavorite(isFavorite);
-      console.error('Error updating favorites:', err);
+      const response = await wishProduct(plantId);
+      const newWishState = response.isWished;
+      
+      setIsFavorite(newWishState);
+      
+      // Store the update for other components
+      await AsyncStorage.setItem('WISHLIST_UPDATED', 'true');
+      
+      // Trigger update for other screens
+      triggerUpdate(UPDATE_TYPES.WISHLIST, {
+        plantId: plantId,
+        isFavorite: newWishState
+      });
+      
+    } catch (error) {
+      console.error('Error toggling wishlist:', error);
+      Alert.alert('Error', 'Failed to update wishlist. Please try again.');
     } finally {
-      setIsSubmitting(false);
+      setIsWishLoading(false);
+    }
+  }, 1000), [plant.id, plant._id, isWishLoading]);
+
+  const handleCardPress = () => {
+    if (onPress) {
+      onPress(plant);
+    } else {
+      const plantId = plant.id || plant._id;
+      if (plantId) {
+        navigation.navigate('PlantDetails', { 
+          plant: plant,
+          plantId: plantId
+        });
+      }
     }
   };
 
-  const handleShare = (e) => {
-    e.stopPropagation();
-  };
-
-  const handleContact = (e) => {
-    e.stopPropagation();
-    const sellerName = plant.seller?.name || plant.sellerName || 'Plant Seller';
-    const isBusiness = plant.seller?.isBusiness || plant.sellerType === 'business' || plant.isBusinessListing;
+  const handleMessageSeller = useCallback(debounce(async () => {
+    if (isMessageLoading) return;
     
-    navigation.navigate('Messages', {
-      sellerId: plant.seller?._id || plant.sellerId,
-      plantId: plant.id || plant._id,
-      plantName: plant.title || plant.name,
-      sellerName,
-      isBusiness
-    });
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'Recently';
     try {
-      const date = new Date(dateString);
-      return formatDistanceToNow(date, { addSuffix: true });
-    } catch (e) {
-      return 'Recently';
-    }
-  };
-
-  const getLocationText = () => {
-    if (typeof plant.location === 'string') {
-      return plant.location;
-    } else if (plant.location && typeof plant.location === 'object') {
-      if (plant.location.city) return plant.location.city;
-      if (plant.location.latitude && plant.location.longitude) {
-        return `Location: ${plant.location.latitude.toFixed(2)}, ${plant.location.longitude.toFixed(2)}`;
+      setIsMessageLoading(true);
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      const sellerId = plant.sellerId || plant.seller?._id;
+      
+      if (!userEmail || !sellerId) {
+        Alert.alert('Error', 'Unable to start conversation. Please check your login status.');
+        return;
       }
-      return 'Local pickup';
-    } else if (plant.city) {
-      return plant.city;
-    }
-    return 'Local pickup';
-  };
 
-  const hasLocationCoordinates = () => {
-    return (
-      plant.location &&
-      typeof plant.location === 'object' &&
-      plant.location.latitude &&
-      plant.location.longitude
-    );
-  };
-
-  const handleOpenMap = (e) => {
-    e.stopPropagation();
-    if (!hasLocationCoordinates()) return;
-    navigation.navigate('MapView', {
-      products: [plant],
-      initialLocation: {
-        latitude: plant.location.latitude,
-        longitude: plant.location.longitude
+      if (userEmail === sellerId) {
+        Alert.alert('Info', 'You cannot message yourself.');
+        return;
       }
-    });
-  };
 
-  // Check if this is a business listing
-  const isBusiness = plant.seller?.isBusiness || plant.sellerType === 'business' || plant.isBusinessListing;
+      const plantId = plant.id || plant._id;
+      const initialMessage = isBusinessProduct 
+        ? `Hi! I'm interested in your ${plant.title || plant.name}. Is it still available for pickup?`
+        : `Hi! I'm interested in your ${plant.title || plant.name}. Is it still available?`;
 
-  // Render rating - now with "New Product" for zero ratings
-  const renderRating = () => {
-    const rating = plant.rating;
-    
-    // Show "New Product" text for no ratings
-    if (!rating || rating === 0) {
-      return (
-        <Text style={styles.newProductText}>New Product</Text>
+      const response = await startConversation(
+        sellerId,
+        plantId,
+        initialMessage,
+        userEmail
       );
+
+      if (response.success) {
+        if (navigation.canNavigate('MainTabs')) {
+          navigation.navigate('MainTabs', {
+            screen: 'Messages',
+            params: {
+              chatId: response.messageId,
+              refresh: true
+            }
+          });
+        } else {
+          navigation.navigate('Messages', {
+            chatId: response.messageId,
+            refresh: true
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error starting conversation:', error);
+      Alert.alert('Error', 'Failed to start conversation. Please try again.');
+    } finally {
+      setIsMessageLoading(false);
     }
+  }, 1000), [plant, isMessageLoading, navigation]);
 
-    // Show star rating
+  // ENHANCED: Handle business product ordering
+  const handleOrderProduct = useCallback(debounce(async () => {
+    if (isOrderLoading || !isBusinessProduct) return;
+    
+    try {
+      setIsOrderLoading(true);
+      const userEmail = await AsyncStorage.getItem('userEmail');
+      const userName = await AsyncStorage.getItem('userName');
+      
+      if (!userEmail) {
+        Alert.alert('Error', 'Please log in to place an order.');
+        return;
+      }
+
+      const businessId = plant.businessId || plant.sellerId;
+      const productId = plant.inventoryId || plant.id || plant._id;
+      
+      if (!businessId || !productId) {
+        Alert.alert('Error', 'Product information is incomplete.');
+        return;
+      }
+
+      // Show confirmation dialog with business info
+      Alert.alert(
+        'Confirm Order',
+        `Order ${plant.title || plant.name} from ${getBusinessDisplayName()}?\n\nPrice: $${plant.price}\nPickup: ${getLocationDisplay()}`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Place Order',
+            onPress: async () => {
+              try {
+                const orderResponse = await purchaseBusinessProduct(
+                  productId,
+                  businessId,
+                  1, // quantity
+                  {
+                    email: userEmail,
+                    name: userName || 'Customer',
+                    phone: '', // Could add phone input later
+                    notes: `Order placed through marketplace app`
+                  }
+                );
+
+                if (orderResponse.success) {
+                  Alert.alert(
+                    'Order Placed!',
+                    `Your order has been placed successfully.\n\nConfirmation: ${orderResponse.confirmationNumber}\n\nThe business will prepare your order for pickup. You'll receive updates via messages.`,
+                    [
+                      { 
+                        text: 'View Messages', 
+                        onPress: () => {
+                          if (navigation.canNavigate('MainTabs')) {
+                            navigation.navigate('MainTabs', { screen: 'Messages' });
+                          } else {
+                            navigation.navigate('Messages');
+                          }
+                        }
+                      },
+                      { text: 'OK' }
+                    ]
+                  );
+                  
+                  // Trigger inventory update
+                  triggerUpdate(UPDATE_TYPES.INVENTORY, {
+                    businessId: businessId,
+                    productId: productId
+                  });
+                }
+              } catch (orderError) {
+                console.error('Order placement error:', orderError);
+                Alert.alert('Order Failed', orderError.message || 'Failed to place order. Please try again.');
+              }
+            }
+          }
+        ]
+      );
+      
+    } catch (error) {
+      console.error('Error preparing order:', error);
+      Alert.alert('Error', 'Failed to prepare order. Please try again.');
+    } finally {
+      setIsOrderLoading(false);
+    }
+  }, 1000), [plant, isBusinessProduct, isOrderLoading, navigation]);
+
+  // ENHANCED: Render business information section
+  const renderBusinessInfo = () => {
+    if (!isBusinessProduct) return null;
+
     return (
-      <View style={styles.productRatingContainer}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <FontAwesome
-            key={`rating-${star}`}
-            name={star <= Math.round(rating) ? 'star' : 'star-o'}
-            size={14}
-            color="#FFD700"
-            style={{ marginRight: 2 }}
-          />
-        ))}
-        {plant.reviewCount > 0 && (
-          <Text style={styles.reviewCount}>({plant.reviewCount})</Text>
-        )}
-      </View>
-    );
-  };
-
-  // Render seller rating with "New Seller" for zero ratings and business indicator
-  const renderSellerRating = () => {
-    const sellerRating = plant.seller?.rating;
-    const reviewCount = plant.seller?.totalReviews || 0;
-
-    return (
-      <View style={styles.sellerInfoContainer}>
-        {/* Business/Individual Indicator */}
-        <View style={[styles.sellerTypeBadge, isBusiness ? styles.businessBadge : styles.individualBadge]}>
-          <MaterialCommunityIcons 
-            name={isBusiness ? 'store' : 'account'} 
-            size={10} 
-            color={isBusiness ? '#FF9800' : '#2196F3'} 
-          />
-          <Text style={[styles.sellerTypeText, isBusiness ? styles.businessText : styles.individualText]}>
-            {isBusiness ? 'Business' : 'Individual'}
+      <View style={styles.businessInfoContainer}>
+        {/* Business Type Badge */}
+        <View style={styles.businessTypeBadge}>
+          <MaterialIcons name="business" size={10} color="#4CAF50" />
+          <Text style={styles.businessTypeText}>
+            {getBusinessType()}
           </Text>
         </View>
 
-        {/* Rating */}
-        {!sellerRating || sellerRating === 0 ? (
-          <Text style={styles.newSellerText}>New Seller</Text>
-        ) : (
-          <View style={styles.sellerRatingContainer}>
-            <FontAwesome name="star" size={10} color="#FFC107" />
-            <Text style={styles.sellerRatingText}>
-              {typeof sellerRating === 'number' ? sellerRating.toFixed(1) : sellerRating}
-              {reviewCount > 0 && ` (${reviewCount})`}
-            </Text>
+        {/* Business Name */}
+        <Text style={styles.businessName} numberOfLines={1}>
+          {getBusinessDisplayName()}
+        </Text>
+
+        {/* Verification Badge */}
+        {isVerified() && (
+          <View style={styles.verifiedBadge}>
+            <MaterialIcons name="verified" size={10} color="#2196F3" />
+            <Text style={styles.verifiedText}>Verified</Text>
           </View>
         )}
       </View>
     );
   };
 
-  const isList = layout === 'list';
+  // ENHANCED: Render location information
+  const renderLocationInfo = () => {
+    const locationDisplay = getLocationDisplay();
+    
+    return (
+      <View style={styles.locationContainer}>
+        <MaterialIcons 
+          name={isBusinessProduct ? "store" : "location-on"} 
+          size={12} 
+          color="#666" 
+        />
+        <Text style={styles.locationText} numberOfLines={2}>
+          {locationDisplay}
+        </Text>
+      </View>
+    );
+  };
+
+  // ENHANCED: Render action buttons
+  const renderActionButtons = () => {
+    if (!showActions) return null;
+
+    return (
+      <View style={styles.actionContainer}>
+        {/* Wishlist Button */}
+        <TouchableOpacity
+          style={[styles.actionButton, styles.wishButton]}
+          onPress={handleWishToggle}
+          disabled={isWishLoading}
+        >
+          {isWishLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <MaterialIcons
+              name={isFavorite ? "favorite" : "favorite-border"}
+              size={18}
+              color="#fff"
+            />
+          )}
+        </TouchableOpacity>
+
+        {/* Message Button */}
+        <TouchableOpacity
+          style={[styles.actionButton, styles.messageButton]}
+          onPress={handleMessageSeller}
+          disabled={isMessageLoading}
+        >
+          {isMessageLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <MaterialIcons name="message" size={18} color="#fff" />
+          )}
+        </TouchableOpacity>
+
+        {/* Business Order Button or Individual Contact */}
+        {isBusinessProduct ? (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.orderButton]}
+            onPress={handleOrderProduct}
+            disabled={isOrderLoading || !availability.inStock}
+          >
+            {isOrderLoading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <MaterialIcons name="shopping-cart" size={16} color="#fff" />
+                <Text style={styles.orderButtonText}>
+                  {availability.inStock ? 'Order' : 'Sold Out'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.contactButton]}
+            onPress={handleMessageSeller}
+            disabled={isMessageLoading}
+          >
+            <MaterialIcons name="contact-phone" size={16} color="#fff" />
+            <Text style={styles.contactButtonText}>Contact</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
+  // Calculate card dimensions based on layout
+  const cardWidth = layout === 'grid' 
+    ? (screenWidth - 32) / (Platform.OS === 'web' ? 3 : 2) - 8
+    : screenWidth - 32;
+
+  const imageHeight = layout === 'grid' ? cardWidth * 0.75 : 120;
 
   return (
     <TouchableOpacity
-      ref={cardRef}
       style={[
         styles.card,
-        isList && styles.listCard,
-        isOffline && styles.offlineCard,
-        isBusiness && styles.businessCard, // Add business styling
+        { width: cardWidth },
+        layout === 'list' && styles.listCard,
+        style
       ]}
-      onPress={handlePress}
+      onPress={handleCardPress}
       activeOpacity={0.8}
     >
-      <View style={[styles.imageContainer, isList && styles.listImageContainer]}>
+      {/* Product Image */}
+      <View style={[styles.imageContainer, { height: imageHeight }]}>
         <Image
-          source={{ uri: plant.image || plant.imageUrl || 'https://via.placeholder.com/150?text=Plant' }}
-          style={isList ? styles.listImage : styles.image}
-          resizeMode="contain"
+          source={{
+            uri: plant.mainImage || 
+                 (plant.images && plant.images[0]) || 
+                 'https://via.placeholder.com/300x200/4CAF50/FFFFFF?text=Plant'
+          }}
+          style={styles.image}
+          defaultSource={{ uri: 'https://via.placeholder.com/300x200/4CAF50/FFFFFF?text=Plant' }}
         />
         
-        {/* Business Indicator Overlay */}
-        {isBusiness && (
-          <View style={styles.businessIndicator}>
-            <MaterialCommunityIcons name="store" size={12} color="#fff" />
+        {/* Price Badge */}
+        <View style={styles.priceBadge}>
+          <Text style={styles.priceText}>
+            ${plant.finalPrice || plant.price || '0'}
+          </Text>
+          {plant.discount > 0 && (
+            <Text style={styles.originalPrice}>
+              ${plant.originalPrice || plant.price}
+            </Text>
+          )}
+        </View>
+
+        {/* Stock Status for Business Products */}
+        {isBusinessProduct && (
+          <View style={[
+            styles.stockBadge,
+            availability.inStock ? styles.inStockBadge : styles.outOfStockBadge
+          ]}>
+            <Text style={[
+              styles.stockText,
+              availability.inStock ? styles.inStockText : styles.outOfStockText
+            ]}>
+              {availability.inStock ? 'In Stock' : 'Sold Out'}
+            </Text>
           </View>
         )}
-        
-        {isOffline && (
-          <View style={styles.offlineIndicator}>
-            <MaterialIcons name="cloud-off" size={12} color="#fff" />
-          </View>
-        )}
-        
-        <TouchableOpacity style={styles.favoriteButton} onPress={toggleFavorite}>
-          <MaterialIcons
-            name={isFavorite ? 'favorite' : 'favorite-border'}
-            size={18}
-            color={isFavorite ? '#f44336' : '#fff'}
-          />
-        </TouchableOpacity>
       </View>
 
-      <View style={isList ? styles.listInfoContainer : styles.infoContainer}>
-        <View style={styles.titleRow}>
-          <Text style={[styles.name, isList && styles.listName]} numberOfLines={isList ? 2 : 1}>
-            {plant.title || plant.name}
+      {/* Product Information */}
+      <View style={styles.infoContainer}>
+        {/* Product Title */}
+        <Text style={styles.title} numberOfLines={2}>
+          {plant.title || plant.name || 'Unnamed Plant'}
+        </Text>
+
+        {/* Business Info or Individual Seller */}
+        {isBusinessProduct ? renderBusinessInfo() : (
+          <Text style={styles.sellerName} numberOfLines={1}>
+            by {sellerInfo.name || 'Plant Enthusiast'}
           </Text>
-          <Text style={styles.price}>${parseFloat(plant.price).toFixed(2)}</Text>
-        </View>
+        )}
 
-        {renderRating()}
+        {/* Location Information */}
+        {renderLocationInfo()}
 
-        <View style={styles.locationRow}>
-          <MaterialIcons name="location-on" size={12} color="#666" />
-          <Text style={styles.locationText} numberOfLines={1}>{getLocationText()}</Text>
-          {hasLocationCoordinates() && (
-            <TouchableOpacity style={styles.mapButton} onPress={handleOpenMap}>
-              <MaterialIcons name="map" size={16} color="#fff" />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {!isList && <Text style={styles.category} numberOfLines={1}>{plant.category}</Text>}
-
-        <TouchableOpacity onPress={handleSellerPress} style={styles.sellerRow}>
-          <View style={styles.sellerNameContainer}>
-            <Text style={styles.sellerName} numberOfLines={1}>
-              {plant.seller?.name || plant.sellerName || (isBusiness ? 'Business Seller' : 'Individual Seller')}
-            </Text>
-            <MaterialIcons name="chevron-right" size={14} color="#999" />
-          </View>
-          {renderSellerRating()}
-        </TouchableOpacity>
-
-        <View style={styles.footer}>
-          <Text style={styles.date}>
-            {formatDate(plant.addedAt || plant.listedDate)}
+        {/* Scientific Name (if available) */}
+        {plant.scientific_name && (
+          <Text style={styles.scientificName} numberOfLines={1}>
+            <Text style={styles.italic}>{plant.scientific_name}</Text>
           </Text>
-          {showActions && (
-            <View style={styles.actionButtons}>
-              <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-                <MaterialIcons name="share" size={14} color="#4CAF50" />
-                <Text style={styles.actionText}>Share</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionButton} onPress={handleContact}>
-                <MaterialIcons name="chat" size={14} color="#4CAF50" />
-                <Text style={[styles.actionText, isSubmitting && styles.disabledText]}>
-                  Contact
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
+        )}
+
+        {/* Action Buttons */}
+        {renderActionButtons()}
       </View>
     </TouchableOpacity>
   );
@@ -334,246 +477,195 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid', isOffline = fal
 const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
-    borderRadius: 8,
-    margin: 8,
+    borderRadius: 12,
+    marginHorizontal: 4,
+    marginVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
     overflow: 'hidden',
-    flex: 1,
-    maxWidth: Platform.OS === 'web' ? '31%' : '47%',
-    ...(Platform.OS === 'web'
-      ? { boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }
-      : Platform.select({
-          ios: {
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 4,
-          },
-          android: {
-            elevation: 2,
-          },
-        })),
-  },
-  businessCard: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#FF9800',
   },
   listCard: {
     flexDirection: 'row',
-    maxWidth: '100%',
-    height: 130,
-  },
-  offlineCard: {
-    opacity: 0.9,
-    ...(Platform.OS === 'android' ? { elevation: 1 } : {}),
+    width: '100%',
+    marginHorizontal: 0,
   },
   imageContainer: {
     position: 'relative',
-  },
-  listImageContainer: {
-    width: 130,
+    width: '100%',
   },
   image: {
-    height: 180,
     width: '100%',
-    backgroundColor: '#f0f0f0',
+    height: '100%',
+    resizeMode: 'cover',
   },
-  listImage: {
-    height: 130,
-    width: 130,
-    backgroundColor: '#f0f0f0',
-  },
-  businessIndicator: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    backgroundColor: '#FF9800',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  offlineIndicator: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 12,
-    padding: 4,
-  },
-  favoriteButton: {
+  priceBadge: {
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 16,
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+  },
+  priceText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  originalPrice: {
+    color: '#ccc',
+    fontSize: 10,
+    textDecorationLine: 'line-through',
+  },
+  stockBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  inStockBadge: {
+    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+  },
+  outOfStockBadge: {
+    backgroundColor: 'rgba(244, 67, 54, 0.9)',
+  },
+  stockText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  inStockText: {
+    color: '#fff',
+  },
+  outOfStockText: {
+    color: '#fff',
   },
   infoContainer: {
     padding: 12,
-  },
-  listInfoContainer: {
     flex: 1,
-    padding: 12,
   },
-  titleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
-  },
-  name: {
+  title: {
     fontSize: 16,
-    fontWeight: 'bold',
-    flex: 1,
-    marginRight: 8,
+    fontWeight: '600',
     color: '#333',
-  },
-  listName: {
-    fontSize: 17,
-  },
-  price: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
-  productRatingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  reviewCount: {
-    fontSize: 12,
-    color: '#888',
-    marginLeft: 4,
-  },
-  newProductText: {
-    fontSize: 12,
-    color: '#888',
-    fontStyle: 'italic',
-    marginBottom: 6,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  locationText: {
-    fontSize: 12,
-    color: '#666',
-    marginLeft: 4,
-    flex: 1,
-  },
-  mapButton: {
-    backgroundColor: '#388E3C',
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    marginLeft: 8,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
-      },
-      android: {
-        elevation: 1,
-      },
-    }),
-  },
-  category: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
-  sellerRow: {
-    marginBottom: 8,
-  },
-  sellerNameContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: 4,
   },
   sellerName: {
     fontSize: 12,
     color: '#666',
-    fontWeight: '500',
-    flex: 1,
+    marginBottom: 4,
   },
-  sellerInfoContainer: {
+  businessInfoContainer: {
+    marginBottom: 6,
+    gap: 4,
+  },
+  businessTypeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-  },
-  sellerTypeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: '#E8F5E8',
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 8,
-    marginRight: 8,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+    gap: 2,
   },
-  businessBadge: {
-    backgroundColor: '#FFF3E0',
-  },
-  individualBadge: {
-    backgroundColor: '#E3F2FD',
-  },
-  sellerTypeText: {
-    fontSize: 9,
+  businessTypeText: {
+    fontSize: 10,
     fontWeight: '600',
-    marginLeft: 2,
+    color: '#4CAF50',
+    textTransform: 'capitalize',
   },
-  businessText: {
-    color: '#FF9800',
+  businessName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
   },
-  individualText: {
-    color: '#2196F3',
-  },
-  sellerRatingContainer: {
+  verifiedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    gap: 2,
   },
-  sellerRatingText: {
-    marginLeft: 2,
+  verifiedText: {
+    fontSize: 9,
+    fontWeight: '500',
+    color: '#2196F3',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+    gap: 4,
+  },
+  locationText: {
+    fontSize: 11,
+    color: '#666',
+    flex: 1,
+    lineHeight: 14,
+  },
+  scientificName: {
     fontSize: 10,
     color: '#888',
+    marginBottom: 8,
   },
-  newSellerText: {
-    fontSize: 10,
-    color: '#888',
+  italic: {
     fontStyle: 'italic',
   },
-  footer: {
+  actionContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 4,
-  },
-  date: {
-    fontSize: 12,
-    color: '#999',
-  },
-  actionButtons: {
-    flexDirection: 'row',
+    marginTop: 8,
+    gap: 6,
   },
   actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f9f0',
-    paddingVertical: 4,
+    borderRadius: 6,
+    paddingVertical: 6,
     paddingHorizontal: 8,
-    borderRadius: 4,
-    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 32,
   },
-  actionText: {
-    fontSize: 12,
-    color: '#4CAF50',
-    marginLeft: 4,
+  wishButton: {
+    backgroundColor: '#E91E63',
+    width: 32,
   },
-  disabledText: {
-    color: '#aaa',
+  messageButton: {
+    backgroundColor: '#2196F3',
+    width: 32,
+  },
+  orderButton: {
+    backgroundColor: '#4CAF50',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  contactButton: {
+    backgroundColor: '#FF9800',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  orderButtonText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  contactButtonText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 

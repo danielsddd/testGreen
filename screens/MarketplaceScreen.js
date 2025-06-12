@@ -1,4 +1,4 @@
-// screens/MarketplaceScreen.js - FIXED VERSION (Removed duplicate filter)
+// screens/MarketplaceScreen.js - SURGICAL FIX: Only State Timing Changes
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, FlatList, ActivityIndicator, StyleSheet, Text, TouchableOpacity,
@@ -11,9 +11,7 @@ import MarketplaceHeader from '../components/MarketplaceHeader';
 import PlantCard from '../components/PlantCard';
 import SearchBar from '../components/SearchBar';
 import CategoryFilter from '../components/CategoryFilter';
-import MarketplaceFilterToggle from '../components/MarketplaceFilterToggle';
-import SortOptions from '../components/SortOptions';
-import MapToggle from '../components/MapToggle';
+import FilterSection from '../components/FilterSection'; // RESTORED ORIGINAL FILTER SECTION
 import { getAll, getNearbyProducts, geocodeAddress } from '../services/marketplaceApi';
 import syncService from '../services/SyncService';
 import { checkForUpdate, clearUpdate, UPDATE_TYPES, addUpdateListener, removeUpdateListener, triggerUpdate } from '../services/MarketplaceUpdates';
@@ -41,14 +39,14 @@ const MarketplaceScreen = ({ navigation, route }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sellerType, setSellerType] = useState('all'); // 'all', 'individual', 'business'
-  const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 });
+  const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 }); // RESTORED PRICE RANGE
   const [sortOption, setSortOption] = useState('recent');
   const [viewMode, setViewMode] = useState('grid');
   const [page, setPage] = useState(1);
   const [hasMorePages, setHasMorePages] = useState(true);
   const [error, setError] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
-  const [activeFilters, setActiveFilters] = useState([]);
+  const [activeFilters, setActiveFilters] = useState([]); // RESTORED ACTIVE FILTERS
   const [isOnline, setIsOnline] = useState(true);
   const [lastRefreshTime, setLastRefreshTime] = useState(Date.now());
   const [showFilters, setShowFilters] = useState(false);
@@ -121,7 +119,8 @@ const MarketplaceScreen = ({ navigation, route }) => {
     });
   };
 
-  const loadPlants = useCallback(async (pageNum = 1, resetData = false) => {
+  // 🔧 FIXED: Added overrideSellerType parameter to fix state timing
+  const loadPlants = useCallback(async (pageNum = 1, resetData = false, overrideSellerType = null) => {
     if (!hasMorePages && pageNum > 1 && !resetData) return;
     try {
       setError(null);
@@ -150,6 +149,11 @@ const MarketplaceScreen = ({ navigation, route }) => {
         }
       }
 
+      // 🔧 FIXED: Use override value if provided, otherwise use current state
+      const currentSellerType = overrideSellerType !== null ? overrideSellerType : sellerType;
+      console.log('📞 [CALLING API] with sellerType:', currentSellerType, 'override:', overrideSellerType, 'state:', sellerType);
+
+      // ENHANCED API CALL with all filter options
       const data = await getAll(
         pageNum,
         selectedCategory === 'All' ? null : selectedCategory,
@@ -158,7 +162,7 @@ const MarketplaceScreen = ({ navigation, route }) => {
           minPrice: priceRange.min, 
           maxPrice: priceRange.max,
           sortBy: sortOption,
-          sellerType: sellerType === 'all' ? null : sellerType
+          sellerType: currentSellerType === 'all' ? null : currentSellerType // 🔧 FIXED: Use currentSellerType
         }
       );
       
@@ -172,8 +176,12 @@ const MarketplaceScreen = ({ navigation, route }) => {
         setPage(pageNum);
         setHasMorePages(data.pages > pageNum);
         
-        // Calculate seller type counts
-        calculateSellerTypeCounts(normalizedProducts);
+        // Calculate seller type counts from API response or calculate locally
+        if (data.sellerTypeCounts) {
+          setSellerTypeCounts(data.sellerTypeCounts);
+        } else {
+          calculateSellerTypeCounts(normalizedProducts);
+        }
         
         await syncService.cacheData('marketplace_plants', normalizedProducts);
       }
@@ -315,9 +323,10 @@ const MarketplaceScreen = ({ navigation, route }) => {
 
   useMarketplaceUpdates(handleMarketplaceUpdate);
 
+  // 🔧 FIXED: Pass current sellerType to ensure consistency
   const onRefresh = async () => {
     setIsRefreshing(true);
-    await loadPlants(1, true);
+    await loadPlants(1, true, sellerType);
   };
 
   const applyFilters = () => {
@@ -394,28 +403,46 @@ const MarketplaceScreen = ({ navigation, route }) => {
     }
   };
 
+  // 🔧 FIXED: Pass current sellerType to ensure consistency
   const handleSearch = (query) => {
     setSearchQuery(query);
     if (query !== searchQuery) {
-      loadPlants(1, true);
+      loadPlants(1, true, sellerType);
     }
   };
 
+  // 🔧 FIXED: Pass current sellerType to ensure consistency
+  const handleSubmitSearch = () => {
+    loadPlants(1, true, sellerType);
+  };
+
+  // 🔧 FIXED: Pass current sellerType to ensure consistency
   const handleCategorySelect = (categoryId) => {
     setSelectedCategory(categoryId);
     if (categoryId !== selectedCategory) {
-      loadPlants(1, true);
+      loadPlants(1, true, sellerType);
     }
   };
 
-  const handleSellerTypeChange = (type) => {
-    setSellerType(type);
+  // 🔧 FIXED: Most important - handleSellerTypeChange function with immediate new value
+  const handleSellerTypeChange = (newSellerType) => {
+    console.log(`[MarketplaceScreen] Changing seller type from ${sellerType} to ${newSellerType}`);
+    setSellerType(newSellerType);
     setPage(1);
-    loadPlants(1, true);
+    setHasMorePages(true);
+    // Clear current plants and reload with new filter
+    setPlants([]);
+    setFilteredPlants([]);
+    // 🔧 FIXED: Pass the new value directly to avoid state timing issues
+    loadPlants(1, true, newSellerType);
   };
 
+  // RESTORED PRICE RANGE HANDLING
   const handlePriceRangeChange = (range) => {
+    console.log(`[MarketplaceScreen] Price range changed:`, range);
     setPriceRange(range);
+    // Apply filters immediately when price changes
+    applyFilters();
   };
 
   const handleSortChange = (option) => {
@@ -439,6 +466,22 @@ const MarketplaceScreen = ({ navigation, route }) => {
     }
   };
 
+  // RESTORED FILTER FUNCTIONS
+  const handleRemoveFilter = (filterId) => {
+    setActiveFilters(prev => prev.filter(f => f.id !== filterId));
+  };
+
+  // 🔧 FIXED: handleResetFilters to pass 'all' directly
+  const handleResetFilters = () => {
+    setSellerType('all');
+    setSelectedCategory('All');
+    setSearchQuery('');
+    setPriceRange({ min: 0, max: 1000 });
+    setActiveFilters([]);
+    // 🔧 FIXED: Pass 'all' directly to avoid state timing
+    loadPlants(1, true, 'all');
+  };
+
   const renderEmptyList = () => {
     if (isLoading) {
       return (
@@ -453,7 +496,7 @@ const MarketplaceScreen = ({ navigation, route }) => {
         <View style={styles.centerContainer}>
           <MaterialIcons name="error-outline" size={48} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => loadPlants(1, true)}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadPlants(1, true, sellerType)}>
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -472,13 +515,7 @@ const MarketplaceScreen = ({ navigation, route }) => {
       <View style={styles.centerContainer}>
         <MaterialIcons name="eco" size={48} color="#aaa" />
         <Text style={styles.noResultsText}>No plants found matching your criteria</Text>
-        <TouchableOpacity style={styles.resetButton} onPress={() => {
-          setSellerType('all');
-          setSelectedCategory('All');
-          setSearchQuery('');
-          setPriceRange({ min: 0, max: 1000 });
-          loadPlants(1, true);
-        }}>
+        <TouchableOpacity style={styles.resetButton} onPress={handleResetFilters}>
           <Text style={styles.resetButtonText}>Reset Filters</Text>
         </TouchableOpacity>
       </View>
@@ -524,7 +561,7 @@ const MarketplaceScreen = ({ navigation, route }) => {
         <View style={styles.centerContainer}>
           <MaterialIcons name="error-outline" size={48} color="#f44336" />
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => loadPlants(1, true)}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadPlants(1, true, sellerType)}>
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -544,14 +581,9 @@ const MarketplaceScreen = ({ navigation, route }) => {
       <SearchBar
         value={searchQuery}
         onChangeText={handleSearch}
-        onSubmit={() => loadPlants(1, true)}
-        style={styles.searchBarContainer}
-      />
-      
-      <MarketplaceFilterToggle
+        onSubmit={handleSubmitSearch}
         sellerType={sellerType}
-        onSellerTypeChange={handleSellerTypeChange}
-        counts={sellerTypeCounts}
+        style={styles.searchBarContainer}
       />
       
       <CategoryFilter
@@ -559,20 +591,23 @@ const MarketplaceScreen = ({ navigation, route }) => {
         onSelect={handleCategorySelect}
       />
       
-      {/* SIMPLIFIED FILTER ROW - Only Sort and Map Toggle */}
-      <View style={styles.filterRow}>
-        <SortOptions 
-          selectedOption={sortOption}
-          onSelectOption={handleSortChange}
-        />
-        
-        <View style={styles.spacer} />
-        
-        <MapToggle 
-          viewMode={viewMode} 
-          onViewModeChange={handleViewModeChange} 
-        />
-      </View>
+      {/* RESTORED ORIGINAL FILTER SECTION with all features */}
+      <FilterSection
+        sortOption={sortOption}
+        onSortChange={handleSortChange}
+        priceRange={priceRange}
+        onPriceChange={handlePriceRangeChange}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+        category={selectedCategory}
+        onCategoryChange={handleCategorySelect}
+        sellerType={sellerType}
+        onSellerTypeChange={handleSellerTypeChange}
+        activeFilters={activeFilters}
+        onRemoveFilter={handleRemoveFilter}
+        onResetFilters={handleResetFilters}
+        businessCounts={sellerTypeCounts}
+      />
       
       <FlatList
         data={filteredPlants}
@@ -630,18 +665,6 @@ const styles = StyleSheet.create({
   },
   listViewContainer: { 
     paddingHorizontal: 16 
-  },
-  filterRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  spacer: {
-    flex: 1,
   },
   centerContainer: { 
     flex: 1, 

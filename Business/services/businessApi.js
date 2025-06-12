@@ -618,10 +618,8 @@ export const checkApiHealth = async () => {
     return { healthy: false, error: error.message };
   }
 };
-
-// Export all functions
+// Default export only - NO DUPLICATES
 export default {
-  // Existing functions
   getBusinessDashboard,
   getBusinessInventory,
   searchPlants,
@@ -632,11 +630,10 @@ export default {
   createBusinessProfile,
   getBusinessProfile,
   checkApiHealth,
-  
-  // New map-related functions
   fetchBusinessProfile,
   getNearbyBusinesses,
   getBusinessHoursStatus,
   calculateDistance,
   clearBusinessCache
 };
+
