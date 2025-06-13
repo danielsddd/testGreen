@@ -1,4 +1,4 @@
-// services/marketplaceApi.js - FAST PRODUCTION VERSION
+// services/marketplaceApi.js - ENHANCED PRODUCTION VERSION WITH IMPROVED IMAGE HANDLING
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import config from './config';
@@ -72,6 +72,339 @@ const apiRequest = async (endpoint, options = {}) => {
     throw error;
   }
 };
+
+// ==========================================
+// ENHANCED IMAGE PROCESSING FUNCTIONS
+// ==========================================
+
+/**
+ * Process business product images for marketplace display
+ */
+const processBusinessProductImages = (item, business) => {
+  // Collect all possible image sources
+  const allImageSources = [];
+  
+  // Primary image sources
+  if (item.mainImage) allImageSources.push(item.mainImage);
+  if (item.image && item.image !== item.mainImage) allImageSources.push(item.image);
+  
+  // Additional images
+  if (item.images && Array.isArray(item.images)) {
+    item.images.forEach(img => {
+      if (img && !allImageSources.includes(img)) {
+        allImageSources.push(img);
+      }
+    });
+  }
+  
+  // Alternative image field names
+  if (item.imageUrls && Array.isArray(item.imageUrls)) {
+    item.imageUrls.forEach(img => {
+      if (img && !allImageSources.includes(img)) {
+        allImageSources.push(img);
+      }
+    });
+  }
+  
+  // Filter out empty/null images and ensure they're valid URLs
+  const validImages = allImageSources.filter(img => {
+    if (!img || typeof img !== 'string') return false;
+    // Basic URL validation and exclude malformed URLs
+    if (img.startsWith('http') && img.length > 20) {
+      // Exclude obvious malformed URLs
+      if (img.includes('FFFFFF') || img.includes('500') || img.match(/^[A-F0-9]{1,6}$/i)) {
+        return false;
+      }
+      return true;
+    }
+    return img.startsWith('data:') || img.startsWith('/');
+  });
+  
+  // Process images for different display needs
+  const mainImage = validImages[0] || null;
+  const additionalImages = validImages.slice(1);
+  const allImages = validImages;
+  
+  // Create different image sizes for optimization
+  const thumbnails = validImages.map(url => createThumbnailUrl(url));
+  const highRes = validImages.map(url => createHighResUrl(url));
+  
+  return {
+    mainImage,
+    additionalImages,
+    allImages,
+    hasImages: validImages.length > 0,
+    imageCount: validImages.length,
+    thumbnails,
+    highRes,
+  };
+};
+
+/**
+ * Create thumbnail URL
+ */
+const createThumbnailUrl = (originalUrl) => {
+  if (!originalUrl) return null;
+  
+  // In a real implementation, this would integrate with an image processing service
+  if (originalUrl.includes('?')) {
+    return `${originalUrl}&thumbnail=true`;
+  }
+  return `${originalUrl}?thumbnail=true`;
+};
+
+/**
+ * Create high-res URL
+ */
+const createHighResUrl = (originalUrl) => {
+  if (!originalUrl) return null;
+  
+  // In a real implementation, this would ensure high quality
+  if (originalUrl.includes('?')) {
+    return `${originalUrl}&quality=high`;
+  }
+  return `${originalUrl}?quality=high`;
+};
+
+/**
+ * Get difficulty text for plants
+ */
+const getDifficultyText = (difficulty) => {
+  if (!difficulty) return 'Unknown';
+  
+  const level = parseInt(difficulty);
+  if (level <= 3) return 'Beginner-friendly';
+  if (level <= 6) return 'Moderate care';
+  if (level <= 8) return 'Advanced care';
+  return 'Expert level';
+};
+
+/**
+ * Get business location display text
+ */
+const getBusinessLocationDisplay = (business) => {
+  const location = business.address || business.location || {};
+  
+  if (location.city && location.address) {
+    return `${location.address}, ${location.city}`;
+  } else if (location.city) {
+    return location.city;
+  } else if (location.address) {
+    return location.address;
+  } else if (business.businessName) {
+    return `${business.businessName} - Contact for pickup`;
+  } else {
+    return 'Contact seller for pickup location';
+  }
+};
+
+/**
+ * Get formatted address
+ */
+const getFormattedAddress = (location) => {
+  if (!location) return '';
+  
+  const parts = [];
+  if (location.address || location.street) parts.push(location.address || location.street);
+  if (location.city) parts.push(location.city);
+  if (location.country) parts.push(location.country);
+  
+  return parts.join(', ') || '';
+};
+
+/**
+ * Get pickup information
+ */
+const getPickupInfo = (business) => {
+  const location = business.address || business.location || {};
+  
+  return {
+    available: true, // Business products are always pickup
+    location: getBusinessLocationDisplay(business),
+    businessName: business.businessName || business.name || 'Business',
+    businessType: business.businessType || 'Business',
+    phone: business.phone || business.contactPhone || '',
+    email: business.email || business.contactEmail || '',
+    hours: business.businessHours || [],
+    instructions: business.pickupInstructions || 'Contact business for pickup details',
+    logo: business.logo || business.businessImage || business.avatar,
+  };
+};
+
+/**
+ * ENHANCED: Convert inventory to products with comprehensive image handling
+ */
+const convertInventoryToMarketplaceProductsFast = (inventory, business, category, search) => {
+  return inventory
+    .filter(item => {
+      // Basic active/stock filter
+      if (item.status !== 'active' || (item.quantity || 0) <= 0) return false;
+      
+      // Category filter
+      if (category && category !== 'All') {
+        if (item.category?.toLowerCase() !== category.toLowerCase()) return false;
+      }
+      
+      // Search filter
+      if (search) {
+        const searchLower = search.toLowerCase();
+        const itemName = (item.name || item.common_name || '').toLowerCase();
+        const itemDesc = (item.description || '').toLowerCase();
+        const businessName = (business.businessName || business.name || '').toLowerCase();
+        const businessType = (business.businessType || '').toLowerCase();
+        
+        if (!itemName.includes(searchLower) && 
+            !itemDesc.includes(searchLower) && 
+            !businessName.includes(searchLower) &&
+            !businessType.includes(searchLower)) return false;
+      }
+      
+      return true;
+    })
+    .map(item => {
+      // ENHANCED: Process images properly for marketplace display
+      const processedImages = processBusinessProductImages(item, business);
+      
+      // ENHANCED: Better business location handling
+      const businessLocation = business.address || business.location || {};
+      const locationDisplay = getBusinessLocationDisplay(business);
+      
+      return {
+        id: item.id,
+        _id: item.id,
+        title: item.name || item.common_name || 'Business Product',
+        name: item.name || item.common_name || 'Business Product',
+        common_name: item.common_name,
+        scientific_name: item.scientific_name || item.scientificName,
+        description: item.description || `${item.name || item.common_name} from ${business.businessName || business.name}`,
+        price: item.finalPrice || item.price || 0,
+        originalPrice: item.price || 0,
+        discount: item.discount || 0,
+        category: item.category || 'Plants',
+        productType: item.productType || 'plant',
+        
+        // ENHANCED: Proper image handling for PlantCard component
+        image: processedImages.mainImage, // Main image for PlantCard
+        mainImage: processedImages.mainImage,
+        images: processedImages.allImages, // All images array
+        imageUrls: processedImages.allImages, // Alternative field name
+        hasImages: processedImages.hasImages,
+        imageCount: processedImages.imageCount,
+        
+        // Enhanced image metadata for better display
+        imageInfo: {
+          main: processedImages.mainImage,
+          additional: processedImages.additionalImages,
+          count: processedImages.imageCount,
+          hasImages: processedImages.hasImages,
+          thumbnails: processedImages.thumbnails,
+          highRes: processedImages.highRes,
+        },
+        
+        businessId: business.id || business.email,
+        sellerId: business.id || business.email,
+        sellerType: 'business',
+        isBusinessListing: true,
+        inventoryId: item.id,
+        
+        // ENHANCED: Better seller info
+        seller: {
+          _id: business.id || business.email,
+          name: business.businessName || business.name || 'Business',
+          email: business.email || business.id,
+          isBusiness: true,
+          businessName: business.businessName || business.name,
+          businessType: business.businessType || 'Business',
+          logo: business.logo || business.businessImage || business.avatar,
+          hasLogo: !!(business.logo || business.businessImage || business.avatar),
+          rating: business.rating || 0,
+          reviewCount: business.reviewCount || 0,
+          description: business.description || '',
+          phone: business.phone || business.contactPhone || '',
+          
+          location: {
+            address: businessLocation.address || businessLocation.street || '',
+            city: businessLocation.city || 'Unknown location',
+            country: businessLocation.country || '',
+            latitude: businessLocation.latitude,
+            longitude: businessLocation.longitude,
+            formattedAddress: getFormattedAddress(businessLocation)
+          }
+        },
+        
+        // ENHANCED: Better availability display
+        availability: {
+          inStock: (item.quantity || 0) > 0,
+          quantity: item.quantity || 0,
+          showQuantity: true,
+          pickupLocation: locationDisplay,
+          businessType: business.businessType || 'Business',
+          pickupOnly: true,
+          deliveryOptions: [],
+        },
+        
+        // ENHANCED: Location for product display
+        location: {
+          city: businessLocation.city || 'Unknown location',
+          address: businessLocation.address || businessLocation.street || '',
+          latitude: businessLocation.latitude,
+          longitude: businessLocation.longitude,
+          formattedAddress: getFormattedAddress(businessLocation),
+          displayText: locationDisplay,
+          isBusinessLocation: true,
+        },
+        
+        addedAt: item.addedAt || item.dateAdded || new Date().toISOString(),
+        listedDate: item.addedAt || item.dateAdded || new Date().toISOString(),
+        lastUpdated: item.updatedAt || item.lastUpdated,
+        
+        stats: {
+          views: item.viewCount || 0,
+          wishlistCount: 0,
+          messageCount: 0
+        },
+        
+        source: 'business_inventory',
+        
+        // Business-specific display info
+        businessInfo: {
+          type: business.businessType || 'Business',
+          name: business.businessName || business.name || 'Business',
+          verified: business.verificationStatus === 'verified' || business.isVerified || false,
+          description: business.description || '',
+          logo: business.logo || business.businessImage || business.avatar,
+          hasLogo: !!(business.logo || business.businessImage || business.avatar),
+          pickupInfo: getPickupInfo(business),
+          galleryImages: business.galleryImages || [],
+          hasGallery: !!(business.galleryImages && business.galleryImages.length > 0),
+        },
+        
+        // Enhanced care information for plants
+        careInfo: item.plantData ? {
+          watering: item.plantData.water_days ? `Every ${item.plantData.water_days} days` : 'Standard watering',
+          light: item.plantData.light || 'Bright indirect light',
+          humidity: item.plantData.humidity || 'Average humidity',
+          temperature: item.plantData.temperature || 'Room temperature',
+          difficulty: item.plantData.difficulty || 5,
+          difficultyText: getDifficultyText(item.plantData.difficulty),
+          pets: item.plantData.pets || 'Unknown pet safety',
+          repot: item.plantData.repot || 'As needed',
+          feed: item.plantData.feed || 'Monthly during growing season',
+          commonProblems: item.plantData.common_problems || [],
+        } : null,
+        
+        // Marketplace optimization flags
+        marketplaceOptimized: true,
+        displayReady: true,
+        searchable: true,
+        imagesProcessed: true,
+      };
+    });
+};
+
+// ==========================================
+// CORE MARKETPLACE FUNCTIONS
+// ==========================================
 
 /**
  * OPTIMIZED: Get marketplace products - Fast and reliable
@@ -291,14 +624,14 @@ const getBusinessCountFast = async () => {
 };
 
 /**
- * FAST: Get business products with caching and parallel processing
+ * ENHANCED: Get business products with comprehensive image support
  */
 const getBusinessProductsFast = async (category, search, options) => {
-  const cacheKey = `business_products_${category || 'all'}_${search || 'none'}`;
+  const cacheKey = `business_products_${category || 'all'}_${search || 'none'}_${options.includeImages ? 'with_images' : 'no_images'}`;
   const cached = businessCache.get(cacheKey);
   
   if (cached && Date.now() - cached.timestamp < cacheTimeout) {
-    console.log('🚀 [CACHE] Using cached business products');
+    console.log('🚀 [CACHE] Using cached business products with images');
     return cached.data;
   }
   
@@ -309,16 +642,23 @@ const getBusinessProductsFast = async (category, search, options) => {
       return [];
     }
     
-    // Process businesses in parallel for speed (max 3)
-    const businessPromises = businesses.slice(0, 3).map(async business => {
+    // Process businesses in parallel for speed (max 5 for better image loading)
+    const businessPromises = businesses.slice(0, 5).map(async business => {
       try {
-        const response = await apiRequest(`marketplace/business-profile/${business.id || business.email}`);
+        const response = await apiRequest(`marketplace/business-profile/${business.id || business.email}`, {
+          headers: {
+            'X-Include-Images': 'true',
+            'X-Image-Quality': 'marketplace',
+            'X-Generate-Thumbnails': 'true',
+          }
+        });
+        
         const businessProfile = response.business || response;
         const inventory = businessProfile.inventory || [];
         
         return convertInventoryToMarketplaceProductsFast(inventory, businessProfile, category, search);
       } catch (error) {
-        console.warn(`Business ${business.id} failed:`, error.message);
+        console.warn(`Business ${business.id} failed (images):`, error.message);
         return [];
       }
     });
@@ -326,17 +666,43 @@ const getBusinessProductsFast = async (category, search, options) => {
     const businessProductArrays = await Promise.all(businessPromises);
     const allBusinessProducts = businessProductArrays.flat();
     
-    // Cache the result
+    // ENHANCED: Validate that products have proper image data
+    const validatedProducts = allBusinessProducts.map(product => ({
+      ...product,
+      // Ensure image fields are properly set for PlantCard component
+      image: product.image || product.mainImage || null,
+      images: product.images || product.allImages || [],
+      hasValidImages: !!(product.image || product.mainImage),
+      
+      // Add marketplace display metadata
+      displayMetadata: {
+        hasImages: !!(product.image || product.mainImage),
+        imageCount: (product.images || []).length + (product.image ? 1 : 0),
+        businessName: product.seller?.businessName || 'Business',
+        businessType: product.seller?.businessType || 'Business',
+        pickupLocation: product.location?.displayText || 'Contact for pickup',
+        verified: product.businessInfo?.verified || false,
+      }
+    }));
+    
+    // Cache the result with image metadata
     businessCache.set(cacheKey, {
-      data: allBusinessProducts,
-      timestamp: Date.now()
+      data: validatedProducts,
+      timestamp: Date.now(),
+      metadata: {
+        totalProducts: validatedProducts.length,
+        productsWithImages: validatedProducts.filter(p => p.hasValidImages).length,
+        businesses: businesses.length,
+      }
     });
     
-    console.log(`✅ [FAST] Loaded ${allBusinessProducts.length} business products`);
-    return allBusinessProducts;
+    console.log(`✅ [FAST] Loaded ${validatedProducts.length} business products with images`);
+    console.log(`📸 [IMAGES] ${validatedProducts.filter(p => p.hasValidImages).length} products have images`);
+    
+    return validatedProducts;
     
   } catch (error) {
-    console.error('❌ Business products failed:', error);
+    console.error('❌ Business products with images failed:', error);
     return [];
   }
 };
@@ -380,179 +746,6 @@ const getAllBusinessesFast = async () => {
     
     return fallback;
   }
-};
-
-/**
- * ENHANCED: Convert inventory to products with better business info display
- */
-const convertInventoryToMarketplaceProductsFast = (inventory, business, category, search) => {
-  return inventory
-    .filter(item => {
-      // Basic active/stock filter
-      if (item.status !== 'active' || (item.quantity || 0) <= 0) return false;
-      
-      // Category filter
-      if (category && category !== 'All') {
-        if (item.category?.toLowerCase() !== category.toLowerCase()) return false;
-      }
-      
-      // Search filter
-      if (search) {
-        const searchLower = search.toLowerCase();
-        const itemName = (item.name || item.common_name || '').toLowerCase();
-        const itemDesc = (item.description || '').toLowerCase();
-        const businessName = (business.businessName || business.name || '').toLowerCase();
-        const businessType = (business.businessType || '').toLowerCase();
-        
-        if (!itemName.includes(searchLower) && 
-            !itemDesc.includes(searchLower) && 
-            !businessName.includes(searchLower) &&
-            !businessType.includes(searchLower)) return false;
-      }
-      
-      return true;
-    })
-    .map(item => {
-      // ENHANCED: Better business location handling
-      const businessLocation = business.address || business.location || {};
-      const locationDisplay = getBusinessLocationDisplay(business);
-      
-      return {
-        id: item.id,
-        _id: item.id,
-        title: item.name || item.common_name || 'Business Product',
-        name: item.name || item.common_name || 'Business Product',
-        common_name: item.common_name,
-        scientific_name: item.scientific_name || item.scientificName,
-        description: item.description || `${item.name || item.common_name} from ${business.businessName || business.name}`,
-        price: item.finalPrice || item.price || 0,
-        originalPrice: item.price || 0,
-        discount: item.discount || 0,
-        category: item.category || 'Plants',
-        productType: item.productType || 'plant',
-        images: item.images || [],
-        mainImage: item.mainImage,
-        businessId: business.id || business.email,
-        sellerId: business.id || business.email,
-        sellerType: 'business',
-        isBusinessListing: true,
-        inventoryId: item.id,
-        
-        // ENHANCED: Better seller info with business type
-        seller: {
-          _id: business.id || business.email,
-          name: business.businessName || business.name || 'Business',
-          email: business.email || business.id,
-          isBusiness: true,
-          businessName: business.businessName || business.name,
-          businessType: business.businessType || 'Business', // ADDED: Business type
-          logo: business.logo,
-          rating: business.rating || 0,
-          reviewCount: business.reviewCount || 0,
-          description: business.description || '',
-          phone: business.phone || business.contactPhone || '',
-          
-          // ENHANCED: Complete location info
-          location: {
-            address: businessLocation.address || businessLocation.street || '',
-            city: businessLocation.city || 'Unknown location',
-            country: businessLocation.country || '',
-            latitude: businessLocation.latitude,
-            longitude: businessLocation.longitude,
-            formattedAddress: getFormattedAddress(businessLocation)
-          }
-        },
-        
-        // ENHANCED: Better availability display
-        availability: {
-          inStock: (item.quantity || 0) > 0,
-          quantity: item.quantity || 0,
-          showQuantity: true,
-          pickupLocation: locationDisplay, // ADDED: Pickup location info
-          businessType: business.businessType || 'Business' // ADDED: Business type for display
-        },
-        
-        // ENHANCED: Better location for product display
-        location: {
-          city: businessLocation.city || 'Unknown location',
-          address: businessLocation.address || businessLocation.street || '',
-          latitude: businessLocation.latitude,
-          longitude: businessLocation.longitude,
-          formattedAddress: getFormattedAddress(businessLocation),
-          displayText: locationDisplay // ADDED: Ready-to-display location text
-        },
-        
-        addedAt: item.addedAt || item.dateAdded || new Date().toISOString(),
-        listedDate: item.addedAt || item.dateAdded || new Date().toISOString(),
-        lastUpdated: item.updatedAt || item.lastUpdated,
-        stats: {
-          views: item.viewCount || 0,
-          wishlistCount: 0,
-          messageCount: 0
-        },
-        source: 'business_inventory',
-        
-        // ADDED: Business-specific display info
-        businessInfo: {
-          type: business.businessType || 'Business',
-          name: business.businessName || business.name || 'Business',
-          verified: business.verificationStatus === 'verified' || business.isVerified || false,
-          description: business.description || '',
-          pickupInfo: getPickupInfo(business)
-        }
-      };
-    });
-};
-
-/**
- * HELPER: Get business location display text
- */
-const getBusinessLocationDisplay = (business) => {
-  const location = business.address || business.location || {};
-  
-  if (location.city && location.address) {
-    return `${location.address}, ${location.city}`;
-  } else if (location.city) {
-    return location.city;
-  } else if (location.address) {
-    return location.address;
-  } else if (business.businessName) {
-    return `${business.businessName} - Contact for pickup`;
-  } else {
-    return 'Contact seller for pickup location';
-  }
-};
-
-/**
- * HELPER: Get formatted address
- */
-const getFormattedAddress = (location) => {
-  if (!location) return '';
-  
-  const parts = [];
-  if (location.address || location.street) parts.push(location.address || location.street);
-  if (location.city) parts.push(location.city);
-  if (location.country) parts.push(location.country);
-  
-  return parts.join(', ') || '';
-};
-
-/**
- * HELPER: Get pickup information
- */
-const getPickupInfo = (business) => {
-  const location = business.address || business.location || {};
-  
-  return {
-    available: true, // Business products are always pickup
-    location: getBusinessLocationDisplay(business),
-    businessName: business.businessName || business.name || 'Business',
-    businessType: business.businessType || 'Business',
-    phone: business.phone || business.contactPhone || '',
-    email: business.email || business.contactEmail || '',
-    hours: business.businessHours || [],
-    instructions: business.pickupInstructions || 'Contact business for pickup details'
-  };
 };
 
 /**
@@ -603,7 +796,7 @@ export const clearMarketplaceCache = () => {
 };
 
 // ==========================================
-// ALL OTHER FUNCTIONS REMAIN EXACTLY THE SAME
+// PRODUCT MANAGEMENT FUNCTIONS
 // ==========================================
 
 export const getSpecific = async (id) => {
@@ -667,6 +860,10 @@ export const markAsSold = async (productId, data = {}) => {
   });
 };
 
+// ==========================================
+// USER PROFILE FUNCTIONS
+// ==========================================
+
 export const fetchUserProfile = async (userId) => {
   if (!userId) {
     throw new Error('User ID is required');
@@ -707,6 +904,10 @@ export const getUserWishlist = async (userId) => {
   
   return apiRequest(endpoint);
 };
+
+// ==========================================
+// IMAGE UPLOAD FUNCTIONS
+// ==========================================
 
 export const uploadImage = async (imageData, type = 'plant') => {
   if (!imageData) {
@@ -751,6 +952,10 @@ export const uploadImage = async (imageData, type = 'plant') => {
   });
 };
 
+// ==========================================
+// BUSINESS PURCHASE FUNCTIONS
+// ==========================================
+
 export const purchaseBusinessProduct = async (productId, businessId, quantity = 1, customerInfo) => {
   try {
     const response = await apiRequest('business/orders/create', {
@@ -782,6 +987,10 @@ export const purchaseBusinessProduct = async (productId, businessId, quantity = 
     throw error;
   }
 };
+
+// ==========================================
+// LOCATION FUNCTIONS
+// ==========================================
 
 export const getNearbyProducts = async (latitude, longitude, radius = 10, category = null) => {
   try {
@@ -819,9 +1028,6 @@ export const getNearbyProducts = async (latitude, longitude, radius = 10, catego
   }
 };
 
-/**
- * ADDED: Get nearby businesses for map functionality
- */
 export const getNearbyBusinesses = async (latitude, longitude, radius = 10, businessType = null) => {
   try {
     if (typeof latitude !== 'number' || typeof longitude !== 'number') {
@@ -860,7 +1066,6 @@ export const getNearbyBusinesses = async (latitude, longitude, radius = 10, busi
       ...business,
       distance: business.distance || 0,
       isBusiness: true,
-      // Ensure consistent data structure for map display
       location: business.location || {
         latitude: business.address?.latitude,
         longitude: business.address?.longitude,
@@ -950,6 +1155,10 @@ export const reverseGeocode = async (latitude, longitude) => {
     throw error;
   }
 };
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
 
 export const speechToText = async (audioUrl, language = 'en-US') => {
   if (!audioUrl) {
@@ -1162,7 +1371,10 @@ export const deleteReview = async (targetType, targetId, reviewId) => {
   });
 };
 
-// Export all functions
+// ==========================================
+// EXPORT ALL FUNCTIONS
+// ==========================================
+
 export default {
   getAll,
   getSpecific,
@@ -1179,7 +1391,7 @@ export default {
   getUserWishlist,
   uploadImage,
   getNearbyProducts,
-  getNearbyBusinesses, // ADDED
+  getNearbyBusinesses, 
   geocodeAddress,
   reverseGeocode,
   speechToText,
