@@ -1,4 +1,4 @@
-// screens/MarketplaceScreen.js - FIXED LAYOUT AND SELLER NAMES
+// screens/MarketplaceScreen.js - FIXED GRID LAYOUT
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, FlatList, ActivityIndicator, StyleSheet, Text, TouchableOpacity,
@@ -598,39 +598,18 @@ const MarketplaceScreen = ({ navigation, route }) => {
     );
   };
 
-  // FIXED: Custom renderItem to handle layout properly
+  // FIXED: Simplified renderItem - removed complex grid logic
   const renderPlantItem = ({ item, index }) => {
-    const isLastItem = index === filteredPlants.length - 1;
-    const isGridView = viewMode === 'grid';
-    
-    // FIXED: For grid view, ensure even number of items per row
-    if (isGridView && isLastItem && filteredPlants.length % 2 !== 0) {
-      // If last item and odd number of items, render with flex: 1 but max width
-      return (
-        <View style={styles.gridItemContainer}>
-          <PlantCard 
-            plant={item} 
-            showActions={true} 
-            layout={viewMode}
-            onContactPress={() => handleContactSeller(item)}
-            onOrderPress={() => handleOrderPlant(item)}
-            style={styles.gridItemCard}
-          />
-          {/* Empty spacer to balance the row */}
-          <View style={styles.gridItemSpacer} />
-        </View>
-      );
-    }
-    
     return (
-      <PlantCard 
-        plant={item} 
-        showActions={true} 
-        layout={viewMode}
-        onContactPress={() => handleContactSeller(item)}
-        onOrderPress={() => handleOrderPlant(item)}
-        style={isGridView ? styles.gridItemCard : styles.listItemCard}
-      />
+      <View style={viewMode === 'grid' ? styles.gridItemWrapper : styles.listItemWrapper}>
+        <PlantCard 
+          plant={item} 
+          showActions={true} 
+          layout={viewMode}
+          onContactPress={() => handleContactSeller(item)}
+          onOrderPress={() => handleOrderPlant(item)}
+        />
+      </View>
     );
   };
 
@@ -718,8 +697,7 @@ const MarketplaceScreen = ({ navigation, route }) => {
         keyExtractor={(item) => (item.id?.toString() || item._id?.toString() || Math.random().toString())}
         contentContainerStyle={[
           styles.listContainer,
-          filteredPlants.length === 0 && styles.emptyListContainer,
-          viewMode === 'list' && styles.listViewContainer
+          filteredPlants.length === 0 && styles.emptyListContainer
         ]}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
@@ -728,7 +706,7 @@ const MarketplaceScreen = ({ navigation, route }) => {
         refreshControl={
           <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} colors={['#4CAF50']} tintColor="#4CAF50" />
         }
-        // FIXED: Ensure proper spacing for grid items
+        // FIXED: Clean grid spacing
         columnWrapperStyle={viewMode === 'grid' ? styles.gridRow : null}
         ItemSeparatorComponent={viewMode === 'list' ? () => <View style={styles.listSeparator} /> : null}
       />
@@ -765,28 +743,17 @@ const styles = StyleSheet.create({
   emptyListContainer: { 
     flexGrow: 1 
   },
-  listViewContainer: { 
-    paddingHorizontal: 16 
-  },
-  // FIXED: Grid layout styles
+  // FIXED: Clean grid layout styles
   gridRow: {
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start', // Changed from 'space-between'
     paddingHorizontal: 8,
   },
-  gridItemContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-  },
-  gridItemCard: {
-    width: (width - 32) / 2, // Account for padding and spacing
+  gridItemWrapper: {
+    width: (width - 24) / 2, // Clean calculation: screen width minus padding, divided by 2
     marginHorizontal: 4,
+    marginVertical: 4,
   },
-  gridItemSpacer: {
-    width: (width - 32) / 2,
-    marginHorizontal: 4,
-  },
-  listItemCard: {
+  listItemWrapper: {
     marginHorizontal: 8,
     marginVertical: 4,
   },

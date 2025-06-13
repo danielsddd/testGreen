@@ -1,4 +1,4 @@
-// components/PlantCard.js - FIXED: Responsive Images, Navigation, Order Confirmation
+// components/PlantCard.js - FIXED: Clean Grid Layout
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Image, Alert, Platform, Dimensions
@@ -13,40 +13,10 @@ import { triggerUpdate, UPDATE_TYPES } from '../services/MarketplaceUpdates';
 const { width: screenWidth } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 
-const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
+const PlantCard = ({ plant, showActions = true, layout = 'grid', style }) => {
   const navigation = useNavigation();
   const [isWished, setIsWished] = useState(plant.isFavorite || plant.isWished || false);
   const [isWishing, setIsWishing] = useState(false);
-
-  // FIXED: Calculate responsive image dimensions
-  const getImageDimensions = () => {
-    if (layout === 'list') {
-      return isWeb 
-        ? { width: 120, height: 120 }
-        : { width: 100, height: 100 };
-    }
-    
-    // Grid layout - responsive based on platform
-    if (isWeb) {
-      // Web: 3 columns on desktop, 2 on tablet, 1 on mobile
-      const webWidth = screenWidth > 1200 ? screenWidth / 3 - 40 : 
-                      screenWidth > 768 ? screenWidth / 2 - 30 : 
-                      screenWidth - 40;
-      return { 
-        width: Math.min(webWidth, 350), 
-        height: Math.min(webWidth * 0.75, 260) 
-      };
-    } else {
-      // Mobile: 2 columns
-      const mobileWidth = (screenWidth / 2) - 24;
-      return { 
-        width: mobileWidth, 
-        height: mobileWidth * 0.75 
-      };
-    }
-  };
-
-  const imageDimensions = getImageDimensions();
 
   // FIXED: Better navigation with error handling
   const navigateToDetails = useCallback(() => {
@@ -281,7 +251,7 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
     
     // Fallback placeholder - use a better placeholder service
     return { 
-      uri: `https://picsum.photos/${Math.floor(imageDimensions.width)}/${Math.floor(imageDimensions.height)}?random=${plant.id || Math.random()}` 
+      uri: `https://picsum.photos/300/200?random=${plant.id || Math.random()}` 
     };
   };
 
@@ -311,57 +281,53 @@ const PlantCard = ({ plant, showActions = true, layout = 'grid' }) => {
     );
   };
 
-  // FIXED: Responsive card styles
+  // FIXED: Clean card style that works with wrapper
   const cardStyle = [
     styles.card,
-    layout === 'list' ? styles.listCard : styles.gridCard,
+    layout === 'list' && styles.listCard,
     isWeb && styles.webCard,
-    { width: layout === 'list' ? '100%' : imageDimensions.width }
-  ];
-
-  const imageStyle = [
-    styles.image,
-    { 
-      width: imageDimensions.width, 
-      height: imageDimensions.height 
-    },
-    layout === 'list' && styles.listImage
+    style // Apply any external styles
   ];
 
   return (
     <TouchableOpacity style={cardStyle} onPress={navigateToDetails} activeOpacity={0.8}>
       {/* Plant Image */}
-      <Image
-        source={getPlantImage()}
-        style={imageStyle}
-        resizeMode="cover"
-        onError={(e) => {
-          console.log('Image load error:', e.nativeEvent.error);
-        }}
-      />
-      
-      {/* Wishlist Button */}
-      {showActions && (
-        <TouchableOpacity
-          style={styles.wishButton}
-          onPress={handleWishToggle}
-          disabled={isWishing}
-        >
-          <MaterialIcons
-            name={isWished ? 'favorite' : 'favorite-border'}
-            size={20}
-            color={isWished ? '#ff4444' : '#666'}
-          />
-        </TouchableOpacity>
-      )}
+      <View style={styles.imageContainer}>
+        <Image
+          source={getPlantImage()}
+          style={[
+            styles.image,
+            layout === 'list' && styles.listImage
+          ]}
+          resizeMode="cover"
+          onError={(e) => {
+            console.log('Image load error:', e.nativeEvent.error);
+          }}
+        />
+        
+        {/* Wishlist Button */}
+        {showActions && (
+          <TouchableOpacity
+            style={styles.wishButton}
+            onPress={handleWishToggle}
+            disabled={isWishing}
+          >
+            <MaterialIcons
+              name={isWished ? 'favorite' : 'favorite-border'}
+              size={20}
+              color={isWished ? '#ff4444' : '#666'}
+            />
+          </TouchableOpacity>
+        )}
 
-      {/* Business Badge on Image */}
-      {(plant.seller?.isBusiness || plant.sellerType === 'business') && (
-        <View style={styles.businessImageBadge}>
-          <MaterialIcons name="store" size={12} color="#fff" />
-          <Text style={styles.businessImageText}>Business</Text>
-        </View>
-      )}
+        {/* Business Badge on Image */}
+        {(plant.seller?.isBusiness || plant.sellerType === 'business') && (
+          <View style={styles.businessImageBadge}>
+            <MaterialIcons name="store" size={12} color="#fff" />
+            <Text style={styles.businessImageText}>Business</Text>
+          </View>
+        )}
+      </View>
 
       {/* Content */}
       <View style={styles.content}>
@@ -407,32 +373,34 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    marginHorizontal: 8,
-    marginVertical: 6,
     elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     overflow: 'hidden',
-  },
-  gridCard: {
-    // Grid-specific styles
+    // FIXED: Remove fixed width - let wrapper control it
   },
   listCard: {
     flexDirection: 'row',
-    marginHorizontal: 16,
-    marginVertical: 8,
   },
   webCard: {
     // Enhanced shadow for web
     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
     transition: 'transform 0.2s ease-in-out',
   },
+  imageContainer: {
+    position: 'relative',
+  },
   image: {
+    // FIXED: Use flex instead of fixed dimensions
+    width: '100%',
+    height: 180,
     backgroundColor: '#f5f5f5',
   },
   listImage: {
+    width: 120,
+    height: 120,
     borderRadius: 8,
     margin: 12,
   },
