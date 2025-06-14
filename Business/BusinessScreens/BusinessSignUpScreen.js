@@ -18,6 +18,7 @@ import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LocationPicker from '../../marketplace/components/LocationPicker';
 import { useForm } from '../../context/FormContext';
+import { useBusinessFirebaseNotifications } from '../hooks/useBusinessFirebaseNotifications';
 
 // Safe ImagePicker import with web compatibility
 let ImagePicker;
@@ -34,8 +35,51 @@ try {
   };
 }
 
+// Import business API services for proper service usage
+import { 
+  getBusinessProfile, 
+  createBusinessProfile, 
+  updateBusinessProfile,
+  uploadBusinessImages,
+  checkApiHealth 
+} from '../services/businessApi';
+import { 
+  getBusinessMarketplaceProfile,
+  updateBusinessMarketplaceProfile 
+} from '../services/businessMarketplaceApi';
+
 // API Configuration
 const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
+
+// Toast notification function
+const showToast = (message, type = 'info') => {
+  if (Platform.OS === 'web') {
+    // Web toast implementation
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      color: white;
+      font-weight: 500;
+      z-index: 10000;
+      max-width: 300px;
+      word-wrap: break-word;
+      background-color: ${type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : '#2196f3'};
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+  } else {
+    // Mobile alert fallback
+    Alert.alert(
+      type === 'error' ? 'Error' : type === 'success' ? 'Success' : 'Info',
+      message
+    );
+  }
+};
 
 export default function BusinessSignUpScreen({ navigation }) {
   const { updateFormData } = useForm();
@@ -66,6 +110,15 @@ export default function BusinessSignUpScreen({ navigation }) {
     'Other'
   ]);
   
+  // Add Firebase notifications hook
+  const {
+    isInitialized,
+    hasPermission,
+    token,
+    initialize,
+    registerForWateringNotifications
+  } = useBusinessFirebaseNotifications(formData.email);
+
   const handleChange = (key, value) => {
     setFormData({
       ...formData,
@@ -216,8 +269,123 @@ export default function BusinessSignUpScreen({ navigation }) {
     return Object.keys(newErrors).length === 0;
   };
   
-  const handleNext = () => {
-    if (validateStep(currentStep)) {
+  /**
+   * Check if business account already exists - FIXED Azure Function implementation
+   * Following Azure best practices for proper 404 handling and error categorization
+   */
+  const checkExistingBusinessAccount = async (email) => {
+    try {
+      console.log('🔍 Checking for existing business account:', email);
+      
+      // FIXED: Use the correct Azure Functions endpoint - business-profile instead of marketplace
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-User-Email': email,
+        'X-User-Type': 'business'
+      };
+      
+      const response = await fetch(`${API_BASE_URL}/business-profile`, {
+        method: 'GET',
+        headers,
+        timeout: 10000
+      });
+      
+      if (response.ok) {
+        const existingProfile = await response.json();
+        
+        if (existingProfile && existingProfile.business) {
+          console.log('⚠️ Business account already exists:', existingProfile.business.businessName);
+          return {
+            exists: true,
+            businessName: existingProfile.business.businessName || existingProfile.business.name,
+            businessType: existingProfile.business.businessType,
+            registrationDate: existingProfile.business.joinDate || existingProfile.business.createdAt
+          };
+        }
+      } else if (response.status === 404) {
+        // Azure best practice: 404 means business not found - this is expected for new signups
+        console.log('✅ No existing business found - can proceed with registration');
+        return { exists: false };
+      } else {
+        // Other HTTP errors - handle appropriately
+        const errorText = await response.text();
+        console.error(`💥 Server error checking business account (${response.status}):`, errorText);
+        
+        if (response.status >= 500) {
+          throw new Error('Server temporarily unavailable. Please try again.');
+        } else {
+          // For other errors, allow signup to proceed with warning
+          console.warn('⚠️ Non-critical error, proceeding with signup');
+          return { exists: false };
+        }
+      }
+      
+      return { exists: false };
+    } catch (error) {
+      // Azure best practice: Handle network and timeout errors gracefully
+      if (error.name === 'AbortError' || error.message.includes('timeout')) {
+        console.error('⏰ Request timeout checking business account');
+        throw new Error('Request timeout. Please check your connection and try again.');
+      } else {
+        console.error('❌ Network error checking existing business:', error);
+        // For network errors, allow signup to proceed (user might be offline)
+        console.warn('⚠️ Network error, proceeding with signup');
+        return { exists: false };
+      }
+    }
+  };
+
+  const handleNext = async () => {
+    if (!validateStep(currentStep)) return;
+    
+    // Azure security best practice: Check for duplicate accounts before proceeding to step 2
+    if (currentStep === 1 && formData.email) {
+      setIsLoading(true);
+      try {
+        const existingAccount = await checkExistingBusinessAccount(formData.email);
+        
+        if (existingAccount.exists) {
+          setIsLoading(false);
+          
+          // Show professional toast notification
+          showToast(
+            `A business account already exists for ${formData.email}. Business: "${existingAccount.businessName}". Please use a different email or sign in to your existing account.`,
+            'error'
+          );
+          
+          // Azure UX best practice: Offer actionable solutions
+          Alert.alert(
+            'Business Account Already Exists',
+            `A business account for "${existingAccount.businessName}" is already registered with this email address.\n\nRegistered: ${new Date(existingAccount.registrationDate).toLocaleDateString()}\nType: ${existingAccount.businessType}`,
+            [
+              {
+                text: 'Use Different Email',
+                style: 'default',
+                onPress: () => {
+                  // Clear email field to let user try again
+                  handleChange('email', '');
+                }
+              },
+              {
+                text: 'Sign In Instead',
+                style: 'default',
+                onPress: () => {
+                  // Navigate to business sign in
+                  navigation.navigate('BusinessSignInScreen');
+                }
+              }
+            ]
+          );
+          return;
+        }
+        
+        setIsLoading(false);
+        setCurrentStep(currentStep + 1);
+      } catch (error) {
+        setIsLoading(false);
+        showToast(error.message, 'error');
+      }
+    } else {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -232,12 +400,35 @@ export default function BusinessSignUpScreen({ navigation }) {
     setIsLoading(true);
     
     try {
+      // Initialize Firebase notifications during signup
+      console.log('🔔 Setting up Firebase notifications...');
+      await initialize(formData.email);
+      
+      // Prepare notification data
+      const notificationData = {
+        fcmToken: token || null,
+        platform: Platform.OS,
+        notificationSettings: {
+          enabled: hasPermission,
+          wateringReminders: hasPermission,
+          platform: Platform.OS
+        }
+      };
+      
       // Prepare user data
       const userData = {
         email: formData.email,
         type: 'business',
         name: formData.contactName,
-        businessType: 'business'
+        businessType: 'business',
+        // Add Firebase notification token if available
+        fcmToken: token || null,
+        platform: Platform.OS,
+        notificationSettings: {
+          enabled: hasPermission,
+          wateringReminders: hasPermission,
+          platform: Platform.OS
+        }
       };
       
       // Prepare business data with ALL form fields
@@ -268,7 +459,8 @@ export default function BusinessSignUpScreen({ navigation }) {
           city: formData.location?.city || '',
           country: formData.location?.country || 'Israel'
         },
-        joinDate: new Date().toISOString(),
+        registrationDate: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
         status: 'active',
         verificationStatus: 'pending',
         businessHours: [], // Can be set later
@@ -297,6 +489,18 @@ export default function BusinessSignUpScreen({ navigation }) {
       
       // Then create a business account (without logo first)
       const businessResult = await saveBusinessToBackend(businessData);
+      
+      // Set up notifications if permission is granted
+      if (hasPermission && token) {
+        try {
+          console.log('🔔 Setting up business notifications...');
+          await registerForWateringNotifications('07:00');
+          console.log('✅ Business notifications configured');
+        } catch (notificationError) {
+          console.warn('⚠️ Failed to setup notifications, but continuing with signup:', notificationError);
+          // Don't fail the entire signup if notifications fail
+        }
+      }
       
       // If we have a logo, upload it and update the business profile
       let logoUrl = null;
@@ -369,7 +573,8 @@ export default function BusinessSignUpScreen({ navigation }) {
     try {
       console.log('Creating business profile:', businessData);
       
-      const response = await fetch(`${API_BASE_URL}/business/profile`, {
+      // FIXED: Use the correct endpoint that matches the backend route
+      const response = await fetch(`${API_BASE_URL}/business-profile`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -396,7 +601,8 @@ export default function BusinessSignUpScreen({ navigation }) {
     try {
       console.log('Updating business profile with logo:', businessData.logo);
       
-      const response = await fetch(`${API_BASE_URL}/business/profile`, {
+      // FIXED: Use the correct endpoint that matches the backend route
+      const response = await fetch(`${API_BASE_URL}/business-profile`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

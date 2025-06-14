@@ -18,12 +18,25 @@ import {
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Import business services
+// Import business services - UPDATED to use proper service structure
 import { 
   getBusinessInventory, 
   getBusinessDashboard,
-  checkApiHealth 
+  checkApiHealth,
+  createInventoryItem,
+  updateInventoryItem,
+  deleteInventoryItem 
 } from '../services/businessApi';
+import { 
+  getBusinessMarketplaceProfile 
+} from '../services/businessMarketplaceApi';
+import { 
+  getDetailedAnalytics 
+} from '../services/businessReportsApi';
+import { 
+  searchPlantsForBusiness,
+  getBusinessWeatherAdvice 
+} from '../services/businessPlantApi';
 
 // Import reusable components
 import KPIWidget from '../components/KPIWidget';

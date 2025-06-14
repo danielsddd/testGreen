@@ -32,7 +32,10 @@ CONTAINER_NAME_MAPPING = {
     
     # User containers  
     "users": "users",
-    "Users": "Users"
+    "Users": "Users",
+    
+    # Forum container
+    "forum": "forum"
 }
 
 # FIXED: Complete partition key mapping for all containers
@@ -49,7 +52,8 @@ PARTITION_KEY_MAPPING = {
     "orders": "/businessId",
     "watering_notifications": "/businessId",
     "users": "/id",
-    "Users": "/id"
+    "Users": "/id",
+    "forum": "/category"  # Forum uses category as partition key
 }
 
 def get_database_client():
@@ -151,7 +155,7 @@ def get_container(container_name):
         if (container_name.startswith('marketplace') or 
             actual_container_name.startswith('marketplace') or
             container_name in ['users', 'inventory', 'business_users', 'business_customers', 
-                              'business_transactions', 'orders', 'watering_notifications']):
+                              'business_transactions', 'orders', 'watering_notifications', 'forum']):
             database = get_marketplace_db_client()
             logging.info(f"🔗 Using marketplace database for container: {actual_container_name}")
         else:
@@ -300,7 +304,7 @@ def get_container_info(container_name):
         container_name.startswith('marketplace') or 
         actual_container_name.startswith('marketplace') or
         container_name in ['users', 'inventory', 'business_users', 'business_customers', 
-                          'business_transactions', 'orders', 'watering_notifications']
+                          'business_transactions', 'orders', 'watering_notifications', 'forum']
     ) else "main"
     
     return {
