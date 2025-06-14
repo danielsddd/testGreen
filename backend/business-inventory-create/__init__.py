@@ -1,4 +1,4 @@
-# backend/business-inventory-create/__init__.py - FIXED TO CREATE CORRECT DATA
+# backend/business-inventory-create/__init__.py - COMPLETE WATERING SCHEDULE FIX
 import logging
 import json
 import uuid
@@ -20,8 +20,8 @@ def add_cors_headers(response):
     })
     return response
 
-def create_proper_watering_schedule(water_days):
-    """Create complete watering schedule from the start - NO FIXING NEEDED"""
+def create_complete_watering_schedule(water_days):
+    """Create complete watering schedule from the start - PROPERLY INITIALIZED"""
     current_time = datetime.now(timezone.utc)
     
     return {
@@ -34,7 +34,9 @@ def create_proper_watering_schedule(water_days):
         'wateredBy': None,
         'wateredAt': None,
         'createdAt': current_time.isoformat(),
-        'updatedAt': current_time.isoformat()
+        'updatedAt': current_time.isoformat(),
+        'isInitialized': True,  # Flag to indicate proper initialization
+        'scheduleVersion': '2.0'  # Version for future migrations
     }
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -116,7 +118,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         current_time = datetime.now(timezone.utc)
         
         if product_type == 'plant':
-            # Handle plant creation with PROPER watering schedule
+            # Handle plant creation with COMPLETE watering schedule
             plant_data = request_body.get('plantData', {})
             
             if not plant_data:
@@ -130,7 +132,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             # Get watering days for schedule creation
             water_days = plant_data.get('water_days', 7)
             
-            # Create inventory item with COMPLETE watering schedule
+            # FIXED: Create inventory item with COMPLETE watering schedule
             inventory_item = {
                 "id": inventory_id,
                 "businessId": business_id,
@@ -164,8 +166,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "lastUpdated": current_time.isoformat(),
                 "soldCount": 0,
                 "viewCount": 0,
-                # ✅ CREATE PROPER WATERING SCHEDULE FROM START - NO FIXING NEEDED
-                "wateringSchedule": create_proper_watering_schedule(water_days)
+                # ✅ PROPERLY INITIALIZED WATERING SCHEDULE
+                "wateringSchedule": create_complete_watering_schedule(water_days),
+                # Add images if provided
+                "mainImage": request_body.get('mainImage'),
+                "images": request_body.get('images', []),
+                "imageUrls": request_body.get('images', []),
+                "hasImages": bool(request_body.get('mainImage') or request_body.get('images'))
             }
             
         elif product_type in ['tool', 'accessory', 'supply']:
@@ -191,7 +198,12 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 "addedAt": current_time.isoformat(),
                 "lastUpdated": current_time.isoformat(),
                 "soldCount": 0,
-                "viewCount": 0
+                "viewCount": 0,
+                # Add images if provided
+                "mainImage": request_body.get('mainImage'),
+                "images": request_body.get('images', []),
+                "imageUrls": request_body.get('images', []),
+                "hasImages": bool(request_body.get('mainImage') or request_body.get('images'))
             }
         else:
             response = func.HttpResponse(
@@ -204,13 +216,14 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Save to database
         try:
             inventory_container.create_item(inventory_item)
-            logging.info(f"✅ Created inventory item {inventory_id} with proper watering schedule")
+            logging.info(f"✅ Created inventory item {inventory_id} with complete watering schedule")
             
             response_data = {
                 "success": True,
                 "inventoryId": inventory_id,
                 "message": f"{product_type.title()} added to inventory successfully",
-                "item": inventory_item
+                "item": inventory_item,
+                "wateringSchedule": inventory_item.get('wateringSchedule', {})
             }
             
             response = func.HttpResponse(
