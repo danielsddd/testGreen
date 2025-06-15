@@ -335,13 +335,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     paddingTop: 8,
     paddingBottom: 16,
-    elevation: 8,
+    elevation: 15, // Increased elevation for Android
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: -4 }, // Stronger shadow
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
     overflow: 'hidden',
-    zIndex: 10,
+    zIndex: 1000, // Much higher z-index to ensure it's on top
   },
   header: {
     flexDirection: 'row',

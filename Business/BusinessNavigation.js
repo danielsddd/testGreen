@@ -8,6 +8,7 @@ import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import BusinessWelcomeScreen from './BusinessScreens/BusinessWelcomeScreen';
 import BusinessSignUpScreen from './BusinessScreens/BusinessSignUpScreen';
 import BusinessSignInScreen from './BusinessScreens/BusinessSignInScreen';
+import BusinessInventoryChoiceScreen from './BusinessScreens/BusinessInventoryChoiceScreen'; // NEW: Import the choice screen
 import BusinessInventoryScreen from './BusinessScreens/BusinessInventoryScreen';
 import BusinessHomeScreen from './BusinessScreens/BusinessHomeScreen';
 import BusinessProfileScreen from './BusinessScreens/BusinessProfileScreen';
@@ -46,7 +47,7 @@ const BusinessTabs = () => {
           } else if (route.name === 'BusinessProfile') {
             iconName = 'person';
           } else if (route.name === 'WateringChecklist') {
-            iconName = 'water-drop';
+            iconName = 'water';
             iconType = 'MaterialCommunityIcons';
           }
 
@@ -124,10 +125,22 @@ const BusinessNavigation = () => {
         component={BusinessSignInScreen}
       />
       
+      {/* NEW: Post-signup choice screen */}
+      <Stack.Screen 
+        name="BusinessInventoryChoiceScreen" 
+        component={BusinessInventoryChoiceScreen}
+        options={{ title: 'Setup Your Business' }}
+      />
+      
       {/* Setup Flow */}
       <Stack.Screen 
         name="BusinessInventoryScreen" 
         component={BusinessInventoryScreen}
+      />
+      <Stack.Screen 
+        name="BusinessInventorySetupScreen" 
+        component={BusinessInventoryScreen}
+        options={{ title: 'Setup Inventory' }}
       />
       
       {/* Main App Flow */}

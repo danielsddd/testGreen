@@ -175,6 +175,7 @@ def handle_create_topic(req: func.HttpRequest) -> func.HttpResponse:
             "author": req_body['author'],
             "category": req_body['category'],  # This is our partition key
             "tags": req_body.get('tags', []),
+            "images": req_body.get('images', []),  # Support for image attachments
             "timestamp": timestamp,
             "lastActivity": timestamp,
             "replies": 0,
@@ -183,13 +184,14 @@ def handle_create_topic(req: func.HttpRequest) -> func.HttpResponse:
             "isAnswered": False,
             "isPinned": False,
             "isClosed": False,
-            "authorType": req_body.get('authorType', 'customer')  # customer or business
+            "authorType": req_body.get('authorType', 'customer'),  # customer or business
+            "hasImages": bool(req_body.get('images', []))  # Flag for quick filtering
         }
         
         # Save to database with category as partition key
         container.create_item(body=topic)
         
-        logging.info(f"Created forum topic: {topic_id} in category: {req_body['category']}")
+        logging.info(f"Created forum topic: {topic_id} in category: {req_body['category']} with {len(req_body.get('images', []))} images")
         
         return func.HttpResponse(
             json.dumps({

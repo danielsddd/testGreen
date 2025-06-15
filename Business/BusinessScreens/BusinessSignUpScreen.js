@@ -1,5 +1,5 @@
-// frontend/Business/BusinessScreens/BusinessSignUpScreen.js
-import React, { useState, useRef } from 'react';
+// frontend/Business/BusinessScreens/BusinessSignUpScreen.js - OPTIMAL VERSION
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,16 +17,18 @@ import {
 import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LocationPicker from '../../marketplace/components/LocationPicker';
+import BusinessHoursEditor from '../components/BusinessHoursEditor';
 import { useForm } from '../../context/FormContext';
 import { useBusinessFirebaseNotifications } from '../hooks/useBusinessFirebaseNotifications';
+import ToastMessage from '../../marketplace/components/ToastMessage';
+import { colors, spacing, typography, borderRadius, getShadow, getWebSafeShadow } from '../../marketplace/services/theme';
 
-// Safe ImagePicker import with web compatibility
+// Safe ImagePicker import
 let ImagePicker;
 try {
   ImagePicker = require('expo-image-picker');
 } catch (error) {
   console.warn('expo-image-picker not available:', error);
-  // Mock ImagePicker for web compatibility
   ImagePicker = {
     launchImageLibraryAsync: () => Promise.resolve({ canceled: true }),
     requestMediaLibraryPermissionsAsync: () => Promise.resolve({ status: 'denied' }),
@@ -35,55 +37,95 @@ try {
   };
 }
 
-// Import business API services for proper service usage
+// OPTIMAL: Only import the enhanced API functions we need
 import { 
-  getBusinessProfile, 
   createBusinessProfile, 
-  updateBusinessProfile,
-  uploadBusinessImages,
-  checkApiHealth 
+  onBusinessRefresh,
+  checkApiHealth,
+  getBusinessProfile 
 } from '../services/businessApi';
-import { 
-  getBusinessMarketplaceProfile,
-  updateBusinessMarketplaceProfile 
-} from '../services/businessMarketplaceApi';
 
 // API Configuration
 const API_BASE_URL = 'https://usersfunctions.azurewebsites.net/api';
 
-// Toast notification function
-const showToast = (message, type = 'info') => {
-  if (Platform.OS === 'web') {
-    // Web toast implementation
-    const toast = document.createElement('div');
-    toast.textContent = message;
-    toast.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      padding: 12px 20px;
-      border-radius: 8px;
-      color: white;
-      font-weight: 500;
-      z-index: 10000;
-      max-width: 300px;
-      word-wrap: break-word;
-      background-color: ${type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : '#2196f3'};
-    `;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
-  } else {
-    // Mobile alert fallback
-    Alert.alert(
-      type === 'error' ? 'Error' : type === 'success' ? 'Success' : 'Info',
-      message
-    );
+// ADDED: Missing helper functions for business check
+const getEnhancedHeaders = async () => {
+  try {
+    const [userEmail, userType, businessId, authToken] = await Promise.all([
+      AsyncStorage.getItem('userEmail'),
+      AsyncStorage.getItem('userType'),
+      AsyncStorage.getItem('businessId'),
+      AsyncStorage.getItem('googleAuthToken')
+    ]);
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-API-Version': '1.0',
+      'X-Client': 'greener-mobile'
+    };
+
+    // Always include X-User-Email for business profile operations
+    if (userEmail) {
+      headers['X-User-Email'] = userEmail;
+      headers['X-Business-ID'] = userEmail; // Use email as business ID
+    }
+    if (userType) headers['X-User-Type'] = userType;
+    if (businessId) headers['X-Business-ID'] = businessId;
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+    return headers;
+  } catch (error) {
+    console.error('❌ Error getting headers:', error);
+    return { 'Content-Type': 'application/json' };
+  }
+};
+
+// Simple single check function - no retries
+const checkBusinessExists = async (url, options = {}, context = 'Request') => {
+  try {
+    console.log(`🔍 Single check - ${context}: ${url}`);
+    const response = await fetch(url, {
+      timeout: 10000, // Shorter timeout for single check
+      ...options
+    });
+    
+    // Simple response handling - just check if it exists or not
+    if (response.status === 404) {
+      console.log('✅ Business profile not found - ready for signup');
+      return { exists: false };
+    }
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('⚠️ Business profile already exists');
+      return { exists: true, data };
+    }
+    
+    // For other errors, log and assume doesn't exist (allow signup)
+    console.warn(`⚠️ Check failed with status ${response.status}, assuming business doesn't exist`);
+    return { exists: false };
+    
+  } catch (error) {
+    console.warn(`⚠️ Network error during check: ${error.message}, assuming business doesn't exist`);
+    return { exists: false }; // On error, allow signup to proceed
   }
 };
 
 export default function BusinessSignUpScreen({ navigation }) {
   const { updateFormData } = useForm();
   const webFileInputRef = useRef(null);
+  
+  // Add refs to track API calls and prevent loops
+  const checkingBusinessRef = useRef(false);
+  const lastCheckedEmailRef = useRef('');
+  const debounceTimeoutRef = useRef(null);
+  
+  // Toast state for proper ToastMessage component
+  const [toast, setToast] = useState({
+    visible: false,
+    message: '',
+    type: 'info'
+  });
   
   const [formData, setFormData] = useState({
     email: '',
@@ -96,6 +138,23 @@ export default function BusinessSignUpScreen({ navigation }) {
     description: '',
     logo: null,
     location: null,
+    // FIXED: Business hours - all days start open with default hours
+    businessHours: {
+      monday: { isOpen: true, openTime: '09:00', closeTime: '16:00' },
+      tuesday: { isOpen: true, openTime: '09:00', closeTime: '16:00' },
+      wednesday: { isOpen: true, openTime: '09:00', closeTime: '16:00' },
+      thursday: { isOpen: true, openTime: '09:00', closeTime: '16:00' },
+      friday: { isOpen: true, openTime: '09:00', closeTime: '16:00' },
+      saturday: { isOpen: true, openTime: '09:00', closeTime: '16:00' }, // FIXED: Saturday now defaults to open
+      sunday: { isOpen: true, openTime: '09:00', closeTime: '16:00' } // FIXED: Sunday now defaults to open
+    },
+    socialMedia: {
+      website: '',
+      facebook: '',
+      instagram: '',
+      twitter: '',
+      whatsapp: ''
+    }
   });
   
   const [errors, setErrors] = useState({});
@@ -110,7 +169,7 @@ export default function BusinessSignUpScreen({ navigation }) {
     'Other'
   ]);
   
-  // Add Firebase notifications hook
+  // Firebase notifications hook
   const {
     isInitialized,
     hasPermission,
@@ -118,6 +177,35 @@ export default function BusinessSignUpScreen({ navigation }) {
     initialize,
     registerForWateringNotifications
   } = useBusinessFirebaseNotifications(formData.email);
+
+  // Show toast message
+  const showToast = (message, type = 'info') => {
+    setToast({
+      visible: true,
+      message,
+      type
+    });
+  };
+  
+  // Hide toast message
+  const hideToast = () => {
+    setToast(prev => ({
+      ...prev,
+      visible: false
+    }));
+  };
+  
+  // OPTIMAL: Set up auto-refresh listener
+  useEffect(() => {
+    const unsubscribe = onBusinessRefresh((data) => {
+      if (data.type === 'created') {
+        console.log('✅ Business profile created, auto-refreshing UI');
+        showInventoryChoiceDialog();
+      }
+    });
+
+    return unsubscribe; // Cleanup on unmount
+  }, []);
 
   const handleChange = (key, value) => {
     setFormData({
@@ -134,42 +222,34 @@ export default function BusinessSignUpScreen({ navigation }) {
     }
   };
   
-  // Web file picker handler
+  // Image picker functions (same as before)
   const handleWebFilePick = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
     
     try {
-      // Validate file type
       if (!file.type.startsWith('image/')) {
         Alert.alert('Error', 'Please select an image file');
         return;
       }
       
-      // Validate file size (2MB limit)
       const maxSize = 2 * 1024 * 1024; // 2MB
       if (file.size > maxSize) {
         Alert.alert('Error', 'Image size must be less than 2MB');
         return;
       }
       
-      // Create object URL for preview
       const imageUrl = URL.createObjectURL(file);
       handleChange('logo', imageUrl);
-      
-      // Reset input
       event.target.value = '';
-      
     } catch (error) {
       console.error('Web image pick error:', error);
       Alert.alert('Error', 'Failed to select image');
     }
   };
   
-  // Mobile image picker
   const pickImageMobile = async () => {
     try {
-      // Check permissions first
       if (ImagePicker.getMediaLibraryPermissionsAsync) {
         const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
@@ -181,7 +261,6 @@ export default function BusinessSignUpScreen({ navigation }) {
         }
       }
 
-      // Launch image picker with fallback options
       let result;
       try {
         result = await ImagePicker.launchImageLibraryAsync({
@@ -192,8 +271,6 @@ export default function BusinessSignUpScreen({ navigation }) {
           base64: false,
         });
       } catch (primaryError) {
-        console.log('Primary image picker failed, trying fallback...');
-        // Fallback with string format
         result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: 'images',
           allowsEditing: true,
@@ -202,16 +279,10 @@ export default function BusinessSignUpScreen({ navigation }) {
         });
       }
       
-      console.log('ImagePicker result:', result);
-      
       if (!result.canceled) {
         if (result.assets && result.assets.length > 0) {
-          const selectedImage = result.assets[0];
-          console.log('Image selected:', selectedImage.uri);
-          handleChange('logo', selectedImage.uri);
+          handleChange('logo', result.assets[0].uri);
         } else if (result.uri) {
-          // Fallback for older versions
-          console.log('Image selected (fallback):', result.uri);
           handleChange('logo', result.uri);
         }
       }
@@ -221,13 +292,10 @@ export default function BusinessSignUpScreen({ navigation }) {
     }
   };
   
-  // Unified image picker function
   const pickImage = async () => {
     if (Platform.OS === 'web') {
-      // Trigger web file input
       webFileInputRef.current?.click();
     } else {
-      // Use mobile image picker
       await pickImageMobile();
     }
   };
@@ -250,18 +318,14 @@ export default function BusinessSignUpScreen({ navigation }) {
       else if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
       
       if (!formData.businessName) newErrors.businessName = 'Business name is required';
-      
       if (!formData.contactName) newErrors.contactName = 'Contact name is required';
     }
     
     if (step === 2) {
       if (!formData.phone) newErrors.phone = 'Phone number is required';
-      
       if (!formData.businessType) newErrors.businessType = 'Business type is required';
-      
       if (!formData.description) newErrors.description = 'Description is required';
       else if (formData.description.length < 20) newErrors.description = 'Description should be at least 20 characters';
-      
       if (!formData.location) newErrors.location = 'Business location is required';
     }
     
@@ -269,124 +333,120 @@ export default function BusinessSignUpScreen({ navigation }) {
     return Object.keys(newErrors).length === 0;
   };
   
-  /**
-   * Check if business account already exists - FIXED Azure Function implementation
-   * Following Azure best practices for proper 404 handling and error categorization
-   */
+  // SIMPLIFIED: Single check for existing business - no retries, no loops
   const checkExistingBusinessAccount = async (email) => {
+    // Prevent multiple simultaneous checks for the same email
+    if (checkingBusinessRef.current || lastCheckedEmailRef.current === email) {
+      console.log('🔄 Business check already in progress or recently completed for:', email);
+      return { exists: false };
+    }
+    
     try {
-      console.log('🔍 Checking for existing business account:', email);
+      checkingBusinessRef.current = true;
+      lastCheckedEmailRef.current = email;
       
-      // FIXED: Use the correct Azure Functions endpoint - business-profile instead of marketplace
-      const headers = {
-        'Content-Type': 'application/json',
-        'X-User-Email': email,
-        'X-User-Type': 'business'
-      };
+      console.log('🔍 Single check for existing business account:', email);
       
-      const response = await fetch(`${API_BASE_URL}/business-profile`, {
+      // Temporarily set user email for the API call
+      await AsyncStorage.setItem('userEmail', email);
+      const headers = await getEnhancedHeaders();
+      
+      // Use the simple single check function instead of the retry-heavy getBusinessProfile
+      const url = `${API_BASE_URL}/business-profile`;
+      const result = await checkBusinessExists(url, {
         method: 'GET',
         headers,
-        timeout: 10000
-      });
+      }, 'Check Business Exists');
       
-      if (response.ok) {
-        const existingProfile = await response.json();
-        
-        if (existingProfile && existingProfile.business) {
-          console.log('⚠️ Business account already exists:', existingProfile.business.businessName);
-          return {
-            exists: true,
-            businessName: existingProfile.business.businessName || existingProfile.business.name,
-            businessType: existingProfile.business.businessType,
-            registrationDate: existingProfile.business.joinDate || existingProfile.business.createdAt
-          };
-        }
-      } else if (response.status === 404) {
-        // Azure best practice: 404 means business not found - this is expected for new signups
-        console.log('✅ No existing business found - can proceed with registration');
-        return { exists: false };
-      } else {
-        // Other HTTP errors - handle appropriately
-        const errorText = await response.text();
-        console.error(`💥 Server error checking business account (${response.status}):`, errorText);
-        
-        if (response.status >= 500) {
-          throw new Error('Server temporarily unavailable. Please try again.');
-        } else {
-          // For other errors, allow signup to proceed with warning
-          console.warn('⚠️ Non-critical error, proceeding with signup');
-          return { exists: false };
-        }
+      if (result.exists && result.data) {
+        const profile = result.data.profile || result.data.business || result.data;
+        return {
+          exists: true,
+          businessName: profile.businessName || 'Unknown Business',
+          businessType: profile.category || profile.businessType || 'Unknown Type',
+          registrationDate: profile.createdAt || profile.registrationDate || new Date().toISOString()
+        };
       }
       
       return { exists: false };
     } catch (error) {
-      // Azure best practice: Handle network and timeout errors gracefully
-      if (error.name === 'AbortError' || error.message.includes('timeout')) {
-        console.error('⏰ Request timeout checking business account');
-        throw new Error('Request timeout. Please check your connection and try again.');
-      } else {
-        console.error('❌ Network error checking existing business:', error);
-        // For network errors, allow signup to proceed (user might be offline)
-        console.warn('⚠️ Network error, proceeding with signup');
-        return { exists: false };
-      }
+      console.warn('⚠️ Business check failed:', error.message);
+      return { exists: false }; // On any error, allow signup to proceed
+    } finally {
+      // Reset the checking flag immediately since we're doing a single check
+      checkingBusinessRef.current = false;
     }
   };
 
   const handleNext = async () => {
-    if (!validateStep(currentStep)) return;
+    // Show validation toast message
+    showToast('Checking your fields...', 'info');
     
-    // Azure security best practice: Check for duplicate accounts before proceeding to step 2
+    if (!validateStep(currentStep)) {
+      // Show error toast for validation failures
+      showToast('Please check the required fields and try again', 'error');
+      return;
+    }
+    
     if (currentStep === 1 && formData.email) {
-      setIsLoading(true);
-      try {
-        const existingAccount = await checkExistingBusinessAccount(formData.email);
-        
-        if (existingAccount.exists) {
-          setIsLoading(false);
-          
-          // Show professional toast notification
-          showToast(
-            `A business account already exists for ${formData.email}. Business: "${existingAccount.businessName}". Please use a different email or sign in to your existing account.`,
-            'error'
-          );
-          
-          // Azure UX best practice: Offer actionable solutions
-          Alert.alert(
-            'Business Account Already Exists',
-            `A business account for "${existingAccount.businessName}" is already registered with this email address.\n\nRegistered: ${new Date(existingAccount.registrationDate).toLocaleDateString()}\nType: ${existingAccount.businessType}`,
-            [
-              {
-                text: 'Use Different Email',
-                style: 'default',
-                onPress: () => {
-                  // Clear email field to let user try again
-                  handleChange('email', '');
-                }
-              },
-              {
-                text: 'Sign In Instead',
-                style: 'default',
-                onPress: () => {
-                  // Navigate to business sign in
-                  navigation.navigate('BusinessSignInScreen');
-                }
-              }
-            ]
-          );
-          return;
-        }
-        
-        setIsLoading(false);
-        setCurrentStep(currentStep + 1);
-      } catch (error) {
-        setIsLoading(false);
-        showToast(error.message, 'error');
+      // Clear any existing debounce timeout
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
       }
+      
+      setIsLoading(true);
+      showToast('Validating email address...', 'info');
+      
+      // Debounce the business check to prevent rapid successive calls
+      debounceTimeoutRef.current = setTimeout(async () => {
+        try {
+          showToast('Checking if business account already exists...', 'info');
+          const existingAccount = await checkExistingBusinessAccount(formData.email);
+          
+          if (existingAccount.exists) {
+            setIsLoading(false);
+            showToast(
+              `A business account already exists for ${formData.email}. Business: "${existingAccount.businessName}". Please use a different email or sign in to your existing account.`,
+              'error'
+            );
+            Alert.alert(
+              'Business Account Already Exists',
+              `A business account for "${existingAccount.businessName}" is already registered with this email address.\n\nRegistered: ${new Date(existingAccount.registrationDate).toLocaleDateString()}\nType: ${existingAccount.businessType}`,
+              [
+                {
+                  text: 'Use Different Email',
+                  style: 'default',
+                  onPress: () => {
+                    handleChange('email', '');
+                    lastCheckedEmailRef.current = ''; // Reset the last checked email
+                  }
+                },
+                {
+                  text: 'Sign In Instead',
+                  style: 'default',
+                  onPress: () => navigation.navigate('BusinessSignInScreen')
+                }
+              ]
+            );
+            return;
+          }
+          
+          setIsLoading(false);
+          showToast('Email validated successfully! Moving to next step...', 'success');
+          setTimeout(() => {
+            setCurrentStep(currentStep + 1);
+          }, 500); // Small delay to show success message
+        } catch (error) {
+          setIsLoading(false);
+          showToast(error.message || 'Error checking business account', 'error');
+        }
+      }, 500); // 500ms debounce
     } else {
-      setCurrentStep(currentStep + 1);
+      // For step 2, just show validation success and move to next step
+      showToast('All fields look good! Proceeding...', 'success');
+      setTimeout(() => {
+        setCurrentStep(currentStep + 1);
+      }, 300);
     }
   };
   
@@ -394,163 +454,186 @@ export default function BusinessSignUpScreen({ navigation }) {
     setCurrentStep(currentStep - 1);
   };
   
+  // OPTIMAL: Simplified single-step signup using enhanced API
   const handleSubmit = async () => {
     if (!validateStep(currentStep)) return;
     
+    // Prevent multiple submissions
+    if (isLoading) {
+      console.log('🔒 Business creation already in progress');
+      return;
+    }
+    
     setIsLoading(true);
+    showToast('Creating your business account. Please wait while we set up everything for you...', 'info');
     
     try {
-      // Initialize Firebase notifications during signup
-      console.log('🔔 Setting up Firebase notifications...');
-      await initialize(formData.email);
+      console.log('🚀 Starting business signup process...');
       
-      // Prepare notification data
-      const notificationData = {
-        fcmToken: token || null,
-        platform: Platform.OS,
-        notificationSettings: {
-          enabled: hasPermission,
-          wateringReminders: hasPermission,
-          platform: Platform.OS
+      // STEP 1: Initialize Firebase notifications
+      showToast('Setting up notifications...', 'info');
+      try {
+        await initialize(formData.email);
+        console.log('✅ Firebase notifications initialized');
+      } catch (notifError) {
+        console.warn('⚠️ Firebase notifications failed:', notifError);
+      }
+      
+      // STEP 2: Create basic user account FIRST
+      showToast('Creating user account...', 'info');
+      await createUserAccount();
+      console.log('✅ User account created');
+      
+      // STEP 3: Update local storage immediately after user creation
+      console.log('💾 Updating local storage after user creation...');
+      updateFormData('email', formData.email);
+      updateFormData('businessId', formData.email);
+      
+      await AsyncStorage.setItem('userEmail', formData.email);
+      await AsyncStorage.setItem('userType', 'business');
+      await AsyncStorage.setItem('businessId', formData.email);
+      await AsyncStorage.setItem('isBusinessUser', 'true');
+      await AsyncStorage.setItem('userName', formData.contactName);
+      
+      // STEP 4: Create business profile (SINGLE CALL)
+      showToast('Creating business profile...', 'info');
+      const businessData = prepareBusinessData();
+      console.log('🏢 Creating business profile - SINGLE ATTEMPT');
+      
+      const result = await createBusinessProfile(businessData);
+      console.log('✅ Business profile created:', result?.businessId || 'success');
+      
+      // STEP 5: Initialize SignalR service NOW that user exists
+      showToast('Connecting to real-time services...', 'info');
+      try {
+        // Import SignalR service dynamically to avoid early initialization
+        const { initializeSignalRAfterSignup } = await import('../../marketplace/services/signalRservice');
+        await initializeSignalRAfterSignup(formData.email);
+        console.log('✅ SignalR service initialized successfully');
+      } catch (signalRError) {
+        console.warn('⚠️ SignalR initialization failed (will work in offline mode):', signalRError.message);
+        // Don't fail the entire signup for SignalR issues
+      }
+      
+      // STEP 6: Set up business notifications if available
+      if (hasPermission && token) {
+        try {
+          showToast('Configuring business notifications...', 'info');
+          await registerForWateringNotifications('07:00');
+          console.log('✅ Business notifications configured');
+        } catch (notificationError) {
+          console.warn('⚠️ Failed to setup notifications:', notificationError);
         }
+      }
+      
+      setIsLoading(false);
+      console.log('✅ Business signup completed successfully');
+      
+      // STEP 7: Show success and navigate
+      showToast('🎉 Business account created successfully! Welcome to Greener!', 'success');
+      
+      // SIMPLIFIED: Navigate directly to the new choice screen
+      const showInventoryChoiceDialog = () => {
+        console.log('✅ Business signup completed, navigating to choice screen');
+        showToast('🎉 Business account created successfully! Welcome to Greener!', 'success');
+        
+        // Navigate to the dedicated choice screen
+        setTimeout(() => {
+          navigation.replace('BusinessInventoryChoiceScreen', {
+            businessId: formData.email,
+            businessName: formData.businessName,
+            isNewUser: true
+          });
+        }, 1500);
       };
       
-      // Prepare user data
+      // Show inventory choice dialog after successful creation
+      setTimeout(() => {
+        showInventoryChoiceDialog();
+      }, 1500);
+      
+    } catch (error) {
+      console.error('❌ Error during business signup:', error);
+      setIsLoading(false);
+      
+      // Better error messages based on error type
+      let errorMessage = 'Could not create your business account.';
+      let errorDetails = error.message;
+      
+      if (error.message.includes('Business creation failed')) {
+        errorMessage = 'Failed to create business profile. This may be due to a network issue.';
+      } else if (error.message.includes('User creation failed')) {
+        errorMessage = 'Failed to create user account. Please check your information and try again.';
+      } else if (error.message.includes('timeout') || error.message.includes('network')) {
+        errorMessage = 'Network timeout. Please check your connection and try again.';
+      } else if (error.message.includes('already exists')) {
+        errorMessage = 'A business account with this email already exists.';
+      }
+      
+      showToast(errorMessage, 'error');
+      
+      Alert.alert(
+        'Business Signup Failed', 
+        `${errorMessage}\n\nPlease try again. If the problem persists, contact support.\n\nTechnical details: ${errorDetails}`,
+        [
+          { text: 'OK', style: 'default' },
+          { 
+            text: 'Retry', 
+            style: 'default',
+            onPress: () => {
+              // Reset loading state and allow retry
+              setIsLoading(false);
+            }
+          }
+        ]
+      );
+    }
+  };
+
+  // OPTIMAL: Simplified user creation (only what's needed for main user table)
+  const createUserAccount = async () => {
+    try {
+      console.log('👤 Creating basic user account');
+      
       const userData = {
         email: formData.email,
         type: 'business',
         name: formData.contactName,
-        businessType: 'business',
-        // Add Firebase notification token if available
+        businessName: formData.businessName,
+        businessType: formData.businessType,
+        // FIXED: Include business hours and social media in user creation
+        description: formData.description,
+        phone: formData.phone,
+        contactPhone: formData.phone,
+        businessHours: Object.entries(formData.businessHours).map(([day, hours]) => ({
+          day: day,
+          hours: hours.isOpen ? `${hours.openTime}-${hours.closeTime}` : 'Closed',
+          isOpen: hours.isOpen
+        })),
+        socialMedia: formData.socialMedia,
+        location: formData.location,
         fcmToken: token || null,
         platform: Platform.OS,
         notificationSettings: {
-          enabled: hasPermission,
-          wateringReminders: hasPermission,
+          enabled: true,
+          wateringReminders: true,
+          orderUpdates: true,
+          marketplaceUpdates: true,
+          reviewNotifications: true,
+          promotionalEmails: false,
           platform: Platform.OS
-        }
+        },
       };
       
-      // Prepare business data with ALL form fields
-      const businessData = {
-        id: formData.email,
-        email: formData.email,
-        name: formData.contactName,
-        businessName: formData.businessName,
-        businessType: formData.businessType,
-        description: formData.description,
-        contactPhone: formData.phone,
-        contactEmail: formData.email,
-        phone: formData.phone, // Add phone field
-        logo: null, // Will be updated after logo upload
-        address: {
-          street: formData.location?.street || '',
-          city: formData.location?.city || '',
-          postalCode: formData.location?.postalCode || '',
-          country: formData.location?.country || 'Israel',
-          latitude: formData.location?.latitude || null,
-          longitude: formData.location?.longitude || null,
-          formattedAddress: formData.location?.formattedAddress || ''
-        },
-        location: {
-          latitude: formData.location?.latitude || null,
-          longitude: formData.location?.longitude || null,
-          address: formData.location?.formattedAddress || '',
-          city: formData.location?.city || '',
-          country: formData.location?.country || 'Israel'
-        },
-        registrationDate: new Date().toISOString(),
-        lastUpdated: new Date().toISOString(),
-        status: 'active',
-        verificationStatus: 'pending',
-        businessHours: [], // Can be set later
-        paymentMethods: ['cash', 'pickup'],
-        socialMedia: {},
-        settings: {
-          notifications: true,
-          messages: true,
-          lowStockThreshold: 5,
-        },
-        stats: {
-          productsCount: 0,
-          salesCount: 0,
-          rating: 0,
-          reviewCount: 0
-        },
-        rating: 0,
-        reviewCount: 0,
-        isVerified: false
-      };
-      
-      console.log('Creating business with data:', businessData);
-      
-      // First, create a normal user account
-      await saveUserToBackend(userData);
-      
-      // Then create a business account (without logo first)
-      const businessResult = await saveBusinessToBackend(businessData);
-      
-      // Set up notifications if permission is granted
-      if (hasPermission && token) {
-        try {
-          console.log('🔔 Setting up business notifications...');
-          await registerForWateringNotifications('07:00');
-          console.log('✅ Business notifications configured');
-        } catch (notificationError) {
-          console.warn('⚠️ Failed to setup notifications, but continuing with signup:', notificationError);
-          // Don't fail the entire signup if notifications fail
-        }
-      }
-      
-      // If we have a logo, upload it and update the business profile
-      let logoUrl = null;
-      if (formData.logo) {
-        try {
-          logoUrl = await uploadLogo(formData.logo, formData.email);
-          
-          // Update business profile with logo
-          if (logoUrl) {
-            const updatedBusinessData = { ...businessData, logo: logoUrl };
-            await updateBusinessProfile(updatedBusinessData);
-          }
-        } catch (logoError) {
-          console.warn('Logo upload failed, but continuing with signup:', logoError);
-          // Don't fail the entire signup if logo upload fails
-        }
-      }
-      
-      // Update form context for global state
-      updateFormData('email', formData.email);
-      updateFormData('businessId', formData.email);
-      
-      // Save email for marketplace
-      await AsyncStorage.setItem('userEmail', formData.email);
-      await AsyncStorage.setItem('userType', 'business');
-      await AsyncStorage.setItem('businessId', formData.email);
-      
-      setIsLoading(false);
-      
-      console.log('Business signup completed successfully');
-      
-      // Navigate to inventory screen
-      navigation.navigate('BusinessInventoryScreen');
-      
-    } catch (error) {
-      console.error('Error during signup:', error);
-      setIsLoading(false);
-      Alert.alert('Sign Up Failed', `Could not create your business account: ${error.message}`);
-    }
-  };
-  
-  // ACTUAL API IMPLEMENTATION - Replace placeholder functions
-  const saveUserToBackend = async (userData) => {
-    try {
-      console.log('Creating user account:', userData);
+      console.log('📅 Business hours being sent to saveUser:', JSON.stringify(userData.businessHours));
+      console.log('📱 Social media being sent to saveUser:', JSON.stringify(userData.socialMedia));
       
       const response = await fetch(`${API_BASE_URL}/saveUser`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-User-Email': formData.email,
+          'X-User-Type': 'business',
         },
         body: JSON.stringify(userData)
       });
@@ -561,165 +644,180 @@ export default function BusinessSignUpScreen({ navigation }) {
       }
 
       const result = await response.json();
-      console.log('User created successfully:', result);
+      console.log('✅ Basic user account created with business data');
       return result;
     } catch (error) {
-      console.error('Error creating user:', error);
+      console.error('❌ Error creating user account:', error);
       throw error;
     }
+  };
+
+  // FIXED: Complete business data preparation with all required fields
+  const prepareBusinessData = () => {
+    // FIXED: Convert user's business hours input to proper format
+    const formatBusinessHours = () => {
+      return Object.entries(formData.businessHours).map(([day, hours]) => ({
+        day: day,
+        hours: hours.isOpen ? `${hours.openTime}-${hours.closeTime}` : 'Closed',
+        isOpen: hours.isOpen
+      }));
+    };
+
+    // FIXED: Clean up social media URLs and format properly
+    const formatSocialMedia = () => {
+      const social = {};
+      if (formData.socialMedia.website && formData.socialMedia.website.trim()) {
+        social.website = formData.socialMedia.website.trim();
+      }
+      if (formData.socialMedia.facebook && formData.socialMedia.facebook.trim()) {
+        social.facebook = formData.socialMedia.facebook.trim();
+      }
+      if (formData.socialMedia.instagram && formData.socialMedia.instagram.trim()) {
+        social.instagram = formData.socialMedia.instagram.trim();
+      }
+      if (formData.socialMedia.twitter && formData.socialMedia.twitter.trim()) {
+        social.twitter = formData.socialMedia.twitter.trim();
+      }
+      if (formData.socialMedia.whatsapp && formData.socialMedia.whatsapp.trim()) {
+        social.whatsapp = formData.socialMedia.whatsapp.trim();
+      }
+      return social;
+    };
+
+    return {
+      // Basic identification
+      email: formData.email,
+      businessId: formData.email,
+      name: formData.contactName,
+      
+      // Business details
+      businessName: formData.businessName,
+      businessType: formData.businessType,
+      category: formData.businessType,
+      description: formData.description || '',
+      contactName: formData.contactName,
+      contactPhone: formData.phone,
+      phone: formData.phone,
+      
+      // Location data - properly structured
+      location: formData.location ? {
+        city: formData.location.city,
+        street: formData.location.street || '',
+        houseNumber: formData.location.houseNumber || '',
+        latitude: formData.location.latitude,
+        longitude: formData.location.longitude,
+        formattedAddress: formData.location.formattedAddress || '',
+        country: formData.location.country || 'Israel',
+        postalCode: formData.location.postalCode || ''
+      } : null,
+      
+      // FIXED: Use user's actual business hours input
+      businessHours: formatBusinessHours(),
+      
+      // FIXED: Use user's actual social media input (can be empty)
+      socialMedia: formatSocialMedia(),
+      website: formData.socialMedia.website?.trim() || '',
+      
+      // Status and verification
+      status: 'active',
+      type: 'business',
+      platform: Platform.OS,
+      isVerified: false,
+      
+      // Ratings and reviews
+      rating: 0,
+      reviewCount: 0,
+      
+      // Logo/avatar - ensure proper format for blob storage
+      logo: formData.logo || '',
+      
+      // Notification settings - complete structure
+      notificationSettings: {
+        enabled: true,
+        wateringReminders: true,
+        orderUpdates: true,
+        marketplaceUpdates: true,
+        reviewNotifications: true,
+        promotionalEmails: false,
+        platform: Platform.OS
+      },
+      
+      // Token fields for notifications
+      fcmToken: token || null,
+      webPushSubscription: null,
+      expoPushToken: null,
+      
+      // Timestamps
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+  };
+
+  // FIXED: Improved inventory choice dialog with better navigation
+  const showInventoryChoiceDialog = () => {
+    console.log('✅ Business signup completed, navigating to choice screen');
+    showToast('🎉 Business account created successfully! Welcome to Greener!', 'success');
+    
+    // Navigate to the dedicated choice screen
+    setTimeout(() => {
+      navigation.replace('BusinessInventoryChoiceScreen', {
+        businessId: formData.email,
+        businessName: formData.businessName,
+        isNewUser: true
+      });
+    }, 1500);
   };
   
-  const saveBusinessToBackend = async (businessData) => {
-    try {
-      console.log('Creating business profile:', businessData);
-      
-      // FIXED: Use the correct endpoint that matches the backend route
-      const response = await fetch(`${API_BASE_URL}/business-profile`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Email': businessData.email
-        },
-        body: JSON.stringify(businessData)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Business creation failed: ${response.status} - ${errorText}`);
-      }
-
-      const result = await response.json();
-      console.log('Business profile created successfully:', result);
-      return result;
-    } catch (error) {
-      console.error('Error creating business profile:', error);
-      throw error;
+  // ADD: Helper functions for business hours and social media
+  const handleBusinessHourChange = (day, field, value) => {
+    let formattedValue = value;
+    
+    if (field === 'openTime' || field === 'closeTime') {
+      formattedValue = formatTimeInput(value);
     }
-  };
 
-  const updateBusinessProfile = async (businessData) => {
-    try {
-      console.log('Updating business profile with logo:', businessData.logo);
-      
-      // FIXED: Use the correct endpoint that matches the backend route
-      const response = await fetch(`${API_BASE_URL}/business-profile`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Email': businessData.email
-        },
-        body: JSON.stringify({ logo: businessData.logo })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.warn(`Business profile update failed: ${response.status} - ${errorText}`);
-        return null;
-      }
-
-      const result = await response.json();
-      console.log('Business profile updated with logo successfully');
-      return result;
-    } catch (error) {
-      console.error('Error updating business profile:', error);
-      throw error;
-    }
-  };
-  
-  const uploadLogo = async (logoUri, businessId) => {
-    try {
-      console.log('Uploading logo:', logoUri.substring(0, 50) + '...');
-      
-      let imageData;
-      let contentType = 'image/jpeg';
-      
-      if (Platform.OS === 'web') {
-        // For web, convert blob URL to base64
-        if (logoUri.startsWith('blob:')) {
-          const response = await fetch(logoUri);
-          const blob = await response.blob();
-          
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async () => {
-              try {
-                const base64 = reader.result;
-                
-                const uploadResponse = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'X-User-Email': businessId
-                  },
-                  body: JSON.stringify({
-                    image: base64,
-                    type: 'user',
-                    filename: `business_logo_${businessId.replace('@', '_').replace('.', '_')}_${Date.now()}.jpg`
-                  })
-                });
-
-                if (!uploadResponse.ok) {
-                  const errorText = await uploadResponse.text();
-                  throw new Error(`Upload failed: ${uploadResponse.status} - ${errorText}`);
-                }
-
-                const result = await uploadResponse.json();
-                console.log('Logo uploaded successfully:', result.url);
-                resolve(result.url);
-              } catch (error) {
-                reject(error);
-              }
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
+    setFormData({
+      ...formData,
+      businessHours: {
+        ...formData.businessHours,
+        [day]: {
+          ...formData.businessHours[day],
+          [field]: formattedValue
         }
-      } else {
-        // For mobile, convert file URI to base64
-        const response = await fetch(logoUri);
-        const blob = await response.blob();
-        
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = async () => {
-            try {
-              const base64 = reader.result;
-              
-              const uploadResponse = await fetch(`${API_BASE_URL}/marketplace/uploadImage`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-User-Email': businessId
-                },
-                body: JSON.stringify({
-                  image: base64,
-                  type: 'user',
-                  filename: `business_logo_${businessId.replace('@', '_').replace('.', '_')}_${Date.now()}.jpg`
-                })
-              });
-
-              if (!uploadResponse.ok) {
-                const errorText = await uploadResponse.text();
-                throw new Error(`Upload failed: ${uploadResponse.status} - ${errorText}`);
-              }
-
-              const result = await uploadResponse.json();
-              console.log('Logo uploaded successfully:', result.url);
-              resolve(result.url);
-            } catch (error) {
-              reject(error);
-            }
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
       }
-    } catch (error) {
-      console.error('Error uploading logo:', error);
-      throw error;
-    }
+    });
   };
-  
+
+  const handleSocialMediaChange = (platform, value) => {
+    setFormData({
+      ...formData,
+      socialMedia: {
+        ...formData.socialMedia,
+        [platform]: value
+      }
+    });
+  };
+
+  // ENHANCED: Improved time input validation and formatting
+  const formatTimeInput = (time) => {
+    // Remove any non-numeric characters except colon
+    const cleaned = time.replace(/[^\d:]/g, '');
+    
+    // Auto-format as HH:MM
+    if (cleaned.length === 2 && !cleaned.includes(':')) {
+      return cleaned + ':';
+    }
+    if (cleaned.length > 5) {
+      return cleaned.substring(0, 5);
+    }
+    return cleaned;
+  };
+
+  const validateTime = (time) => {
+    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    return timeRegex.test(time);
+  };
+
   const renderStep1 = () => (
     <View style={styles.stepContainer}>
       <Text style={styles.stepTitle}>Account Information</Text>
@@ -851,7 +949,6 @@ export default function BusinessSignUpScreen({ navigation }) {
       
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Business Logo</Text>
-        {/* Hidden file input for web */}
         {Platform.OS === 'web' && (
           <input
             ref={webFileInputRef}
@@ -884,6 +981,162 @@ export default function BusinessSignUpScreen({ navigation }) {
         />
         {errors.location && <Text style={styles.errorText}>{errors.location}</Text>}
       </View>
+
+      {/* IMPROVED: Business Hours Section with better vertical layout */}
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>Business Hours</Text>
+        <Text style={styles.subLabel}>Choose which days you're open and set your hours</Text>
+        <View style={styles.businessHoursContainer}>
+          {Object.entries(formData.businessHours).map(([day, hours]) => (
+            <View key={day} style={styles.dayCard}>
+              {/* Day name at the top */}
+              <Text style={[styles.dayTitle, !hours.isOpen && styles.dayTitleClosed]}>
+                {day.charAt(0).toUpperCase() + day.slice(1)}
+              </Text>
+              
+              {/* Toggle buttons below the day name */}
+              <View style={styles.toggleContainer}>
+                <TouchableOpacity 
+                  style={[
+                    styles.toggleButton,
+                    hours.isOpen && styles.toggleButtonActive
+                  ]}
+                  onPress={() => {
+                    if (!hours.isOpen) {
+                      handleBusinessHourChange(day, 'isOpen', true);
+                      // Set default times if not already set
+                      if (!hours.openTime || !hours.closeTime) {
+                        handleBusinessHourChange(day, 'openTime', '09:00');
+                        handleBusinessHourChange(day, 'closeTime', '18:00');
+                      }
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.toggleButtonText,
+                    hours.isOpen && styles.toggleButtonTextActive
+                  ]}>
+                    Open
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[
+                    styles.toggleButton,
+                    !hours.isOpen && styles.toggleButtonActive
+                  ]}
+                  onPress={() => {
+                    handleBusinessHourChange(day, 'isOpen', false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.toggleButtonText,
+                    !hours.isOpen && styles.toggleButtonTextActive
+                  ]}>
+                    Closed
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Time Inputs - only show when open */}
+              {hours.isOpen && (
+                <View style={styles.timeRow}>
+                  <View style={styles.timeInputContainer}>
+                    <Text style={styles.timeLabel}>From</Text>
+                    <TextInput
+                      style={styles.timeInput}
+                      value={hours.openTime}
+                      onChangeText={(time) => handleBusinessHourChange(day, 'openTime', time)}
+                      placeholder="09:00"
+                      placeholderTextColor="#999"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <MaterialIcons name="arrow-forward" size={16} color="#666" style={styles.timeArrow} />
+                  <View style={styles.timeInputContainer}>
+                    <Text style={styles.timeLabel}>To</Text>
+                    <TextInput
+                      style={styles.timeInput}
+                      value={hours.closeTime}
+                      onChangeText={(time) => handleBusinessHourChange(day, 'closeTime', time)}
+                      placeholder="18:00"
+                      placeholderTextColor="#999"
+                      keyboardType="numeric"
+                    />
+                  </View>
+                </View>
+              )}
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* ADD: Social Media Section */}
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>Online Presence</Text>
+        <Text style={styles.subLabel}>Add your website and social media (optional)</Text>
+        
+        <View style={styles.socialMediaContainer}>
+          <View style={styles.socialMediaRow}>
+            <MaterialCommunityIcons name="web" size={20} color="#666" />
+            <TextInput
+              style={styles.socialMediaInput}
+              value={formData.socialMedia.website}
+              onChangeText={(text) => handleSocialMediaChange('website', text)}
+              placeholder="https://yourwebsite.com"
+              keyboardType="url"
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.socialMediaRow}>
+            <MaterialCommunityIcons name="facebook" size={20} color="#1877F2" />
+            <TextInput
+              style={styles.socialMediaInput}
+              value={formData.socialMedia.facebook}
+              onChangeText={(text) => handleSocialMediaChange('facebook', text)}
+              placeholder="Facebook page URL"
+              keyboardType="url"
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.socialMediaRow}>
+            <MaterialCommunityIcons name="instagram" size={20} color="#E4405F" />
+            <TextInput
+              style={styles.socialMediaInput}
+              value={formData.socialMedia.instagram}
+              onChangeText={(text) => handleSocialMediaChange('instagram', text)}
+              placeholder="Instagram account"
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.socialMediaRow}>
+            <MaterialCommunityIcons name="twitter" size={20} color="#1DA1F2" />
+            <TextInput
+              style={styles.socialMediaInput}
+              value={formData.socialMedia.twitter}
+              onChangeText={(text) => handleSocialMediaChange('twitter', text)}
+              placeholder="Twitter account"
+              autoCapitalize="none"
+            />
+          </View>
+
+          <View style={styles.socialMediaRow}>
+            <MaterialCommunityIcons name="whatsapp" size={20} color="#25D366" />
+            <TextInput
+              style={styles.socialMediaInput}
+              value={formData.socialMedia.whatsapp}
+              onChangeText={(text) => handleSocialMediaChange('whatsapp', text)}
+              placeholder="WhatsApp number"
+              keyboardType="phone-pad"
+            />
+          </View>
+        </View>
+      </View>
       
       <View style={styles.buttonRow}>
         <TouchableOpacity style={styles.backStepButton} onPress={handleBack}>
@@ -908,7 +1161,7 @@ export default function BusinessSignUpScreen({ navigation }) {
       </View>
     </View>
   );
-  
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -927,6 +1180,14 @@ export default function BusinessSignUpScreen({ navigation }) {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {currentStep === 1 ? renderStep1() : renderStep2()}
         </ScrollView>
+        
+        <ToastMessage 
+          visible={toast.visible} 
+          onHide={hideToast}
+          type={toast.type}
+          message={toast.message}
+          duration={3000}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1122,5 +1383,132 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginRight: 8,
+  },
+  // ADD: New styles for business hours and social media sections
+  businessHoursContainer: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  dayCard: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  dayTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  dayTitleClosed: {
+    color: '#999',
+    textDecorationLine: 'line-through',
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    justifyContent: 'center',
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+    borderRadius: 25,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginHorizontal: 4,
+    backgroundColor: '#fff',
+    minWidth: 90,
+    justifyContent: 'center',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+  },
+  toggleButtonText: {
+    color: '#4CAF50',
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 4,
+  },
+  toggleButtonTextActive: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  timeInputContainer: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  timeLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+    fontWeight: '500',
+  },
+  timeInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 16,
+    width: 70,
+    backgroundColor: '#fff',
+    textAlign: 'center',
+    color: '#333',
+  },
+  timeArrow: {
+    marginHorizontal: 12,
+    opacity: 0.6,
+  },
+  closedText: {
+    color: '#e53935',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  socialMediaContainer: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  socialMediaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  socialMediaInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 8,
+    fontSize: 16,
+    flex: 1,
+    marginLeft: 8,
+    backgroundColor: '#fff',
+  },
+  subLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
   },
 });

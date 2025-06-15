@@ -2,6 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import config from './config';
+import syncBridge, { addBusinessProfileSync, addInventorySync, invalidateMarketplaceCache } from './BusinessMarketplaceSyncBridge';
 
 // Base URL for API requests
 const API_BASE_URL = config.API_BASE_URL || 'https://usersfunctions.azurewebsites.net/api';
@@ -137,6 +138,251 @@ const apiRequest = async (endpoint, options = {}, retries = 3) => {
     console.error(`❌ API request failed (${endpoint}):`, error);
     throw error;
   }
+};
+
+// ==========================================
+// ENHANCED PRODUCT CONVERSION FUNCTIONS
+// ==========================================
+
+/**
+ * Calculate distance between two coordinates using Haversine formula
+ */
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Radius of the Earth in kilometers
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+/**
+ * FIXED: Main function to get all marketplace products with enhanced filtering
+ */
+export const getAll = async (category = 'All', search = '', location = null) => {
+  const cacheKey = `marketplace_${category}_${search}_${location?.city || 'all'}`;
+  
+  try {
+    // Check cache first
+    const cached = businessCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < cacheTimeout) {
+      console.log('📱 Using cached marketplace data');
+      return cached.data;
+    }
+
+    console.log('🔄 Fetching marketplace products...');
+    
+    // Get all businesses and their inventories
+    const businesses = await getAllBusinesses();
+    let allProducts = [];
+    
+    // Process business products
+    for (const business of businesses) {
+      try {
+        if (!business.id && !business.email) continue;
+        
+        const inventoryResponse = await fetchBusinessInventory(business.id || business.email);
+        const inventory = inventoryResponse.inventory || [];
+        
+        const businessProducts = convertInventoryToProducts(inventory, business, category, search);
+        allProducts = allProducts.concat(businessProducts);
+      } catch (businessError) {
+        console.warn(`⚠️ Failed to fetch inventory for business ${business.name}:`, businessError);
+        continue;
+      }
+    }
+    
+    // Fetch individual listings
+    try {
+      const individualResponse = await apiRequest('marketplace/individual-listings');
+      const individualProducts = processIndividualProducts(individualResponse.products || []);
+      allProducts = allProducts.concat(individualProducts);
+    } catch (individualError) {
+      console.warn('⚠️ Failed to fetch individual listings:', individualError);
+    }
+    
+    // Apply location filter if provided
+    if (location && location.latitude && location.longitude) {
+      allProducts = allProducts.filter(product => {
+        if (!product.location?.latitude || !product.location?.longitude) return true;
+        
+        const distance = calculateDistance(
+          location.latitude, location.longitude,
+          product.location.latitude, product.location.longitude
+        );
+        
+        return distance <= (location.radius || 50); // Default 50km radius
+      });
+    }
+    
+    // Sort by relevance and date
+    allProducts.sort((a, b) => {
+      // Prioritize products with images
+      if (a.hasImages && !b.hasImages) return -1;
+      if (!a.hasImages && b.hasImages) return 1;
+      
+      // Then by date (newest first)
+      const dateA = new Date(a.addedAt || a.updatedAt);
+      const dateB = new Date(b.addedAt || b.updatedAt);
+      return dateB - dateA;
+    });
+    
+    // Cache the results
+    businessCache.set(cacheKey, {
+      data: allProducts,
+      timestamp: Date.now()
+    });
+    
+    console.log(`✅ Loaded ${allProducts.length} marketplace products`);
+    return allProducts;
+    
+  } catch (error) {
+    console.error('❌ Failed to fetch marketplace products:', error);
+    
+    // Return cached data if available, even if stale
+    const cached = businessCache.get(cacheKey);
+    if (cached) {
+      console.log('📱 Using stale cached data due to error');
+      return cached.data;
+    }
+    
+    return [];
+  }
+};
+
+/**
+ * FIXED: Get specific product by ID
+ */
+export const getSpecific = async (productId) => {
+  if (!productId) {
+    throw new Error('Product ID is required');
+  }
+  
+  try {
+    // Try business inventory first
+    const businesses = await getAllBusinesses();
+    
+    for (const business of businesses) {
+      try {
+        const inventoryResponse = await fetchBusinessInventory(business.id || business.email);
+        const inventory = inventoryResponse.inventory || [];
+        
+        const product = inventory.find(item => item.id === productId);
+        if (product) {
+          const businessProducts = convertInventoryToProducts([product], business);
+          return businessProducts[0];
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    // Try individual listings
+    const endpoint = `marketplace/products/${productId}`;
+    const response = await apiRequest(endpoint);
+    
+    if (response.product) {
+      const processedProducts = processIndividualProducts([response.product]);
+      return processedProducts[0];
+    }
+    
+    throw new Error('Product not found');
+    
+  } catch (error) {
+    console.error('❌ Failed to fetch specific product:', error);
+    throw error;
+  }
+};
+
+/**
+ * FIXED: Add product to wishlist
+ */
+export const wishProduct = async (productId, userId) => {
+  if (!productId || !userId) {
+    throw new Error('Product ID and User ID are required');
+  }
+  
+  const endpoint = 'marketplace/wishlist/add';
+  return apiRequest(endpoint, {
+    method: 'POST',
+    body: JSON.stringify({ productId, userId }),
+  });
+};
+
+/**
+ * FIXED: Create new product listing
+ */
+export const createProduct = async (productData) => {
+  if (!productData) {
+    throw new Error('Product data is required');
+  }
+  
+  const endpoint = 'marketplace/products';
+  return apiRequest(endpoint, {
+    method: 'POST',
+    body: JSON.stringify(productData),
+  });
+};
+
+/**
+ * FIXED: Create new plant listing (alias for createProduct)
+ */
+export const createPlant = async (plantData) => {
+  return createProduct(plantData);
+};
+
+/**
+ * FIXED: Update existing product
+ */
+export const updateProduct = async (productId, productData) => {
+  if (!productId || !productData) {
+    throw new Error('Product ID and data are required');
+  }
+  
+  const endpoint = `marketplace/products/${productId}`;
+  return apiRequest(endpoint, {
+    method: 'PUT',
+    body: JSON.stringify(productData),
+  });
+};
+
+/**
+ * FIXED: Delete product
+ */
+export const deleteProduct = async (productId) => {
+  if (!productId) {
+    throw new Error('Product ID is required');
+  }
+  
+  const endpoint = `marketplace/products/${productId}`;
+  return apiRequest(endpoint, {
+    method: 'DELETE',
+  });
+};
+
+/**
+ * FIXED: Mark product as sold
+ */
+export const markAsSold = async (productId) => {
+  if (!productId) {
+    throw new Error('Product ID is required');
+  }
+  
+  const endpoint = `marketplace/products/${productId}/sold`;
+  return apiRequest(endpoint, {
+    method: 'PATCH',
+  });
+};
+
+/**
+ * FIXED: Clear marketplace cache
+ */
+export const clearMarketplaceCache = () => {
+  businessCache.clear();
+  console.log('🧹 Marketplace cache cleared');
 };
 
 // ==========================================
@@ -514,7 +760,7 @@ const processIndividualProducts = (products) => {
 };
 
 /**
- * FIXED: Get all businesses with enhanced caching and error handling
+ * FIXED: Get all businesses with correct endpoint
  */
 const getAllBusinesses = async () => {
   const cacheKey = 'all_businesses';
@@ -526,8 +772,9 @@ const getAllBusinesses = async () => {
   }
   
   try {
-    const response = await apiRequest('marketplace/businesses');
-    const businesses = response.businesses || [];
+    // FIXED: Use the correct endpoint that matches backend function name
+    const response = await apiRequest('get-all-businesses');
+    const businesses = response.businesses || response.data || [];
     
     businessCache.set(cacheKey, {
       data: businesses,
@@ -550,319 +797,120 @@ const getAllBusinesses = async () => {
 };
 
 /**
- * FIXED: Get business profile using the corrected endpoint
+ * FIXED: Marketplace API with standardized business product integration
  */
 export const fetchBusinessProfile = async (businessId) => {
   if (!businessId) {
     throw new Error('Business ID is required');
   }
   
+  // Check unified cache first
+  try {
+    const unifiedCache = await AsyncStorage.getItem('unified_business_profile');
+    if (unifiedCache) {
+      const cached = JSON.parse(unifiedCache);
+      if (Date.now() - cached.timestamp < 300000) { // 5 minutes
+        console.log('📱 Using unified cached business profile');
+        return { success: true, business: cached.data };
+      }
+    }
+  } catch (cacheError) {
+    console.warn('Cache read error:', cacheError);
+  }
+  
   // FIXED: Use the correct endpoint that matches the backend route
   const endpoint = `business-profile`;
-  return apiRequest(endpoint);
+  
+  try {
+    const result = await apiRequest(endpoint);
+    
+    // Update unified cache
+    await AsyncStorage.setItem('unified_business_profile', JSON.stringify({
+      data: result.business || result.profile,
+      timestamp: Date.now(),
+      source: 'marketplace'
+    }));
+
+    return result;
+  } catch (error) {
+    console.error('Fetch business profile failed:', error);
+    throw error;
+  }
 };
 
 /**
- * FIXED: Get business inventory using the corrected endpoint
+ * FIXED: Get business inventory with correct endpoint
  */
 export const fetchBusinessInventory = async (businessId) => {
   if (!businessId) {
     throw new Error('Business ID is required');
   }
   
-  // FIXED: Use the correct endpoint that matches the backend route
-  const endpoint = `business-inventory`;
-  return apiRequest(endpoint);
-};
-
-/**
- * FIXED: Get business products with proper endpoint calls and error handling
- */
-const getBusinessProducts = async (category, search) => {
-  const cacheKey = `business_products_${category || 'all'}_${search || 'none'}`;
-  const cached = businessCache.get(cacheKey);
-  
-  if (cached && Date.now() - cached.timestamp < cacheTimeout) {
-    return cached.data;
-  }
-  
+  // Check unified cache first
   try {
-    const businesses = await getAllBusinesses();
-    if (businesses.length === 0) return [];
-    
-    console.log(`🏢 Processing ${businesses.length} businesses for products...`);
-    
-    const businessPromises = businesses.map(async business => {
-      try {
-        // FIXED: Use correct backend endpoints that actually exist
-        const businessId = business.id || business.email;
-        
-        // Get business profile with inventory using the fixed endpoint
-        let businessProfile = business;
-        let inventory = [];
-        
-        try {
-          const profileResponse = await fetchBusinessProfile(businessId);
-          if (profileResponse && profileResponse.success && profileResponse.business) {
-            businessProfile = { ...business, ...profileResponse.business };
-            // If the profile response includes inventory, use it
-            if (profileResponse.inventory && Array.isArray(profileResponse.inventory)) {
-              inventory = profileResponse.inventory;
-            }
-          }
-        } catch (profileError) {
-          console.warn(`⚠️ Profile endpoint failed for ${businessId}:`, profileError.message);
-        }
-        
-        // If we don't have inventory from profile, try the separate inventory endpoint
-        if (inventory.length === 0) {
-          try {
-            const inventoryResponse = await fetchBusinessInventory(businessId);
-            if (inventoryResponse && inventoryResponse.success && inventoryResponse.inventory) {
-              inventory = inventoryResponse.inventory;
-            } else if (Array.isArray(inventoryResponse)) {
-              inventory = inventoryResponse;
-            }
-          } catch (invError) {
-            console.warn(`⚠️ Could not fetch inventory for ${businessId}:`, invError.message);
-            // Try fallback from profile if it has inventory
-            if (businessProfile.inventory && Array.isArray(businessProfile.inventory)) {
-              inventory = businessProfile.inventory;
-            }
-          }
-        }
-        
-        console.log(`📦 Business ${businessProfile.businessName || businessProfile.name}: ${inventory.length} items`);
-        
-        return convertInventoryToProducts(inventory, businessProfile, category, search);
-      } catch (error) {
-        console.warn(`⚠️ Business ${business.id || business.email} failed:`, error.message);
-        return [];
+    const unifiedCache = await AsyncStorage.getItem('unified_business_inventory');
+    if (unifiedCache) {
+      const cached = JSON.parse(unifiedCache);
+      if (Date.now() - cached.timestamp < 180000 && cached.businessId === businessId) { // 3 minutes
+        console.log('📱 Using unified cached business inventory');
+        return { success: true, inventory: cached.data };
       }
-    });
-    
-    const businessProductArrays = await Promise.all(businessPromises);
-    const allBusinessProducts = businessProductArrays.flat();
-    
-    console.log(`✅ Total business products: ${allBusinessProducts.length}`);
-    
-    // Cache the result
-    businessCache.set(cacheKey, {
-      data: allBusinessProducts,
-      timestamp: Date.now()
-    });
-    
-    return allBusinessProducts;
-    
-  } catch (error) {
-    console.error('❌ Business products failed:', error);
-    return [];
+    }
+  } catch (cacheError) {
+    console.warn('Cache read error:', cacheError);
   }
-};
-
-/**
- * Get individual products from regular marketplace
- */
-const getIndividualProducts = async (page, category, search, options) => {
-  const queryParams = new URLSearchParams();
   
-  queryParams.append('page', page);
-  if (category && category !== 'All' && category !== 'all') queryParams.append('category', category);
-  if (search) queryParams.append('search', search);
-  if (options.minPrice !== undefined) queryParams.append('minPrice', options.minPrice);
-  if (options.maxPrice !== undefined) queryParams.append('maxPrice', options.maxPrice);
-  if (options.sortBy) queryParams.append('sortBy', options.sortBy);
-  
-  const endpoint = `marketplace/products?${queryParams.toString()}`;
-  return apiRequest(endpoint);
-};
-
-/**
- * FIXED: Main marketplace loading function
- */
-export const getAll = async (page = 1, category = null, search = null, options = {}) => {
-  console.log('🛒 Loading marketplace...', { page, category, search, sellerType: options.sellerType });
+  // FIXED: Use the correct endpoint that matches the backend route: marketplace/business/{businessId}/inventory
+  const endpoint = `marketplace/business/${encodeURIComponent(businessId)}/inventory`;
   
   try {
-    let products = [];
-    let paginationInfo = { page: 1, pages: 1, count: 0 };
+    const result = await apiRequest(endpoint);
     
-    if (options.sellerType === 'individual') {
-      // Individual products only
-      const data = await getIndividualProducts(page, category, search, options);
-      products = (data.products || []).map(product => ({
-        ...product,
-        sellerType: 'individual',
-        isBusinessListing: false,
-        seller: { ...product.seller, isBusiness: false }
-      }));
-      paginationInfo = {
-        page: data.page || page,
-        pages: data.pages || 1,
-        count: data.count || products.length
-      };
-      
-    } else if (options.sellerType === 'business') {
-      // Business products only
-      const businessProducts = await getBusinessProducts(category, search);
-      const pageSize = 20;
-      const totalItems = businessProducts.length;
-      const startIndex = (page - 1) * pageSize;
-      products = businessProducts.slice(startIndex, startIndex + pageSize);
-      
-      paginationInfo = {
-        page: page,
-        pages: Math.ceil(totalItems / pageSize),
-        count: totalItems
-      };
-      
-    } else {
-      // All products - load both types
-      const [individualData, businessProducts] = await Promise.all([
-        getIndividualProducts(page, category, search, options),
-        getBusinessProducts(category, search)
-      ]);
-      
-      const individualProducts = (individualData.products || []).map(product => ({
-        ...product,
-        sellerType: 'individual',
-        isBusinessListing: false,
-        seller: { ...product.seller, isBusiness: false }
-      }));
-      
-      products = [...individualProducts, ...businessProducts];
-      paginationInfo = {
-        page: individualData.page || page,
-        pages: Math.max(individualData.pages || 1, Math.ceil(products.length / 20)),
-        count: products.length
-      };
-    }
-    
-    // Apply price filters
-    if (options.minPrice !== undefined || options.maxPrice !== undefined) {
-      products = products.filter(product => {
-        const price = parseFloat(product.price || 0);
-        if (options.minPrice !== undefined && price < options.minPrice) return false;
-        if (options.maxPrice !== undefined && price > options.maxPrice) return false;
-        return true;
-      });
-    }
-    
-    // Apply sorting
-    if (options.sortBy) {
-      products = sortProducts(products, options.sortBy);
-    } else {
-      products.sort((a, b) => 
-        new Date(b.addedAt || b.listedDate || 0) - new Date(a.addedAt || a.listedDate || 0)
-      );
-    }
-    
-    console.log(`✅ Returning ${products.length} products`);
-    
-    return {
-      products: products,
-      page: paginationInfo.page,
-      pages: paginationInfo.pages,
-      count: paginationInfo.count,
-      currentPage: page,
-      filters: { category, search, ...options }
-    };
-    
+    // Update unified cache
+    await AsyncStorage.setItem('unified_business_inventory', JSON.stringify({
+      data: result.inventory || result.items,
+      businessId,
+      timestamp: Date.now(),
+      source: 'marketplace'
+    }));
+
+    return result;
   } catch (error) {
-    console.error('❌ Marketplace error:', error);
-    return {
-      products: [],
-      page: 1,
-      pages: 1,
-      count: 0,
-      currentPage: 1,
-      filters: { error: true }
-    };
+    console.error('Fetch business inventory failed:', error);
+    throw error;
   }
 };
 
 /**
- * Sort products helper
+ * FIXED: Update user profile with sync bridge integration
  */
-const sortProducts = (products, sortBy) => {
-  switch (sortBy) {
-    case 'recent':
-      return products.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
-    case 'priceAsc':
-      return products.sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
-    case 'priceDesc':
-      return products.sort((a, b) => parseFloat(b.price) - parseFloat(a.price));
-    default:
-      return products;
-  }
-};
-
-/**
- * Clear cache when needed
- */
-export const clearMarketplaceCache = () => {
-  businessCache.clear();
-  console.log('🧹 Marketplace cache cleared');
-};
-
-// ==========================================
-// PRODUCT MANAGEMENT FUNCTIONS
-// ==========================================
-
-export const getSpecific = async (id) => {
-  if (!id) {
-    throw new Error('Product ID is required');
-  }
+export const updateUserProfile = async (userId, userData) => {
+  const endpoint = `user-profile/${userId}`;
   
-  const endpoint = `marketplace/products/specific/${id}`;
-  return apiRequest(endpoint);
-};
+  try {
+    const result = await apiRequest(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(userData),
+    });
 
-export const wishProduct = async (productId) => {
-  if (!productId) {
-    throw new Error('Product ID is required');
+    // FIXED: Trigger sync bridge for profile updates
+    if (userData.isBusiness || userData.userType === 'business') {
+      await addBusinessProfileSync(userData, 'marketplace');
+    }
+
+    // Clear related caches
+    await invalidateMarketplaceCache([
+      `user_profile_${userId}`,
+      `seller_profile_${userId}`,
+      'marketplace_plants'
+    ]);
+
+    return result;
+  } catch (error) {
+    console.error('Update user profile failed:', error);
+    throw error;
   }
-  
-  const endpoint = `marketplace/products/wish/${productId}`;
-  return apiRequest(endpoint, { method: 'POST' });
 };
-
-export const createProduct = async (productData) => {
-  const endpoint = 'marketplace/products/create';
-  return apiRequest(endpoint, {
-    method: 'POST',
-    body: JSON.stringify(productData),
-  });
-};
-
-export const createPlant = async (plantData) => {
-  return createProduct(plantData);
-};
-
-export const updateProduct = async (productId, productData) => {
-  const endpoint = `marketplace/products/${productId}`;
-  return apiRequest(endpoint, {
-    method: 'PATCH',
-    body: JSON.stringify(productData),
-  });
-};
-
-export const deleteProduct = async (productId) => {
-  const endpoint = `marketplace/products/${productId}`;
-  return apiRequest(endpoint, { method: 'DELETE' });
-};
-
-export const markAsSold = async (productId, data = {}) => {
-  const endpoint = `marketplace/products/${productId}/sold`;
-  return apiRequest(endpoint, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-};
-
-// ==========================================
-// USER PROFILE FUNCTIONS
-// ==========================================
 
 export const fetchUserProfile = async (userId) => {
   if (!userId) {
@@ -871,14 +919,6 @@ export const fetchUserProfile = async (userId) => {
   
   const endpoint = `marketplace/users/${userId}`;
   return apiRequest(endpoint);
-};
-
-export const updateUserProfile = async (userId, profileData) => {
-  const endpoint = `marketplace/users/${userId}`;
-  return apiRequest(endpoint, {
-    method: 'PATCH',
-    body: JSON.stringify(profileData),
-  });
 };
 
 export const getUserListings = async (userId, status = 'all') => {
@@ -925,7 +965,8 @@ export const uploadImage = async (imageData, type = 'plant') => {
 // ==========================================
 
 export const purchaseBusinessProduct = async (productId, businessId, quantity = 1, customerInfo) => {
-  const endpoint = 'business/orders/create';
+  // CRITICAL FIX: Use correct backend function name
+  const endpoint = 'business-order-create';
   
   return apiRequest(endpoint, {
     method: 'POST',
@@ -976,13 +1017,24 @@ export const getNearbyBusinesses = async (latitude, longitude, radius = 10, busi
   return apiRequest(endpoint);
 };
 
+// ==========================================
+// AZURE MAPS INTEGRATION (FIXED ENDPOINTS)
+// ==========================================
+
+export const getAzureMapsKey = async () => {
+  // FIXED: Use the enhanced Azure Maps service
+  const { getAzureMapsKey } = await import('./azureMapsService');
+  return getAzureMapsKey();
+};
+
 export const geocodeAddress = async (address) => {
-  if (!address) {
-    throw new Error('Address is required');
+  if (!address || typeof address !== 'string') {
+    throw new Error('Valid address required');
   }
   
-  const endpoint = `marketplace/geocode?address=${encodeURIComponent(address)}`;
-  return apiRequest(endpoint);
+  // FIXED: Use the enhanced Azure Maps service
+  const { geocodeAddress } = await import('./azureMapsService');
+  return geocodeAddress(address);
 };
 
 export const reverseGeocode = async (latitude, longitude) => {
@@ -990,8 +1042,9 @@ export const reverseGeocode = async (latitude, longitude) => {
     throw new Error('Valid coordinates required');
   }
   
-  const endpoint = `marketplace/reverseGeocode?lat=${latitude}&lon=${longitude}`;
-  return apiRequest(endpoint);
+  // FIXED: Use the enhanced Azure Maps service
+  const { reverseGeocode } = await import('./azureMapsService');
+  return reverseGeocode(latitude, longitude);
 };
 
 // ==========================================
@@ -1011,17 +1064,6 @@ export const speechToText = async (audioUrl, language = 'en-US') => {
 
   const text = response.text || '';
   return text.replace(/[.,!?;:'"()\[\]{}]/g, '').replace(/\s+/g, ' ').trim();
-};
-
-export const getAzureMapsKey = async () => {
-  const endpoint = 'marketplace/maps-config';
-  const data = await apiRequest(endpoint);
-  
-  if (!data.azureMapsKey) {
-    throw new Error('No Azure Maps key returned from server');
-  }
-  
-  return data.azureMapsKey;
 };
 
 // ==========================================

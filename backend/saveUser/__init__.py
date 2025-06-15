@@ -1,4 +1,4 @@
-# /api/saveUser function (Azure Functions - Python) - FIXED for dual database support
+# /api/saveUser function (Azure Functions - Python) - FIXED for business users
 import logging
 import azure.functions as func
 import json
@@ -81,6 +81,104 @@ def get_containers_for_user_type(user_type):
         logging.error(f"Failed to initialize containers for user type {user_type}: {e}")
         return None, None, None
 
+# FIXED: Create proper user document based on type
+def create_user_document(user_info, is_update=False):
+    """Create user document with appropriate fields based on user type"""
+    user_type = user_info.get('type', 'consumer')
+    current_time = datetime.utcnow().isoformat()
+    
+    # Base user document
+    user_doc = {
+        "id": user_info["email"],
+        "email": user_info["email"],
+        "name": user_info.get("name"),
+        "type": user_type,
+        "platform": user_info.get("platform"),
+        "notificationSettings": user_info.get("notificationSettings", {}),
+    }
+    
+    # Add timestamps
+    if is_update:
+        user_doc["updatedAt"] = current_time
+    else:
+        user_doc["createdAt"] = current_time
+        user_doc["updatedAt"] = current_time
+    
+    # FIXED: Handle location data consistently for both user types
+    location_data = user_info.get("location") or user_info.get("address")
+    if location_data:
+        # Ensure location is properly structured with all required fields
+        structured_location = {
+            "city": location_data.get('city', '') if isinstance(location_data, dict) else '',
+            "street": location_data.get('street', '') if isinstance(location_data, dict) else '',
+            "houseNumber": location_data.get('houseNumber', '') if isinstance(location_data, dict) else '',
+            "latitude": location_data.get('latitude') if isinstance(location_data, dict) else None,
+            "longitude": location_data.get('longitude') if isinstance(location_data, dict) else None,
+            "formattedAddress": location_data.get('formattedAddress', '') if isinstance(location_data, dict) else '',
+            "country": location_data.get('country', 'Israel') if isinstance(location_data, dict) else 'Israel',
+            "postalCode": location_data.get('postalCode', '') if isinstance(location_data, dict) else ''
+        }
+        
+        # Only include location if it has coordinates or city
+        if structured_location.get('latitude') or structured_location.get('longitude') or structured_location.get('city'):
+            user_doc["location"] = structured_location
+            if user_type == 'business':
+                user_doc["address"] = structured_location  # Business users also get address field
+    
+    # FIXED: Add fields based on user type
+    if user_type == 'business':
+        # Business-specific fields only
+        business_fields = {
+            "businessName": user_info.get("businessName"),
+            "businessType": user_info.get("businessType", "business"),
+            "description": user_info.get("description", ""),
+            "contactPhone": user_info.get("contactPhone") or user_info.get("phone"),
+            "phone": user_info.get("phone") or user_info.get("contactPhone"),
+            # FIXED: Properly handle business hours from frontend
+            "businessHours": user_info.get("businessHours", []),
+            # FIXED: Properly handle social media from frontend
+            "socialMedia": user_info.get("socialMedia", {}),
+            "status": "active",
+            "businessId": user_info["email"],
+            "rating": 0,
+            "reviewCount": 0,
+            "isVerified": False,
+            # FCM and notification tokens
+            "fcmToken": user_info.get("fcmToken"),
+            "webPushSubscription": user_info.get("webPushSubscription"),
+            "expoPushToken": user_info.get("expoPushToken"),
+        }
+        user_doc.update(business_fields)
+        
+        # FIXED: Log business hours and social media data being saved
+        logging.info(f"📅 Saving business hours to database: {json.dumps(user_info.get('businessHours', []))}")
+        logging.info(f"📱 Saving social media to database: {json.dumps(user_info.get('socialMedia', {}))}")
+        
+        # FIXED: Set up proper notification settings for business users
+        if "notificationSettings" in user_info:
+            user_doc["notificationSettings"] = {
+                "enabled": user_info["notificationSettings"].get("enabled", True),
+                "wateringReminders": user_info["notificationSettings"].get("wateringReminders", True),
+                "lowStockAlerts": user_info["notificationSettings"].get("lowStockAlerts", True),
+                "orderNotifications": user_info["notificationSettings"].get("orderNotifications", True),
+                "platform": user_info.get("platform", "web")
+            }
+    else:
+        # Consumer-specific fields only
+        consumer_fields = {
+            "animals": user_info.get("animals"),
+            "kids": user_info.get("kids"),
+            "intersted": user_info.get("intersted"),
+            "googleId": user_info.get("googleId"),
+            "fcmToken": user_info.get("fcmToken"),
+            "webPushSubscription": user_info.get("webPushSubscription"),
+            "expoPushToken": user_info.get("expoPushToken"),
+            "plantLocations": user_info.get("plantLocations", []),
+        }
+        user_doc.update(consumer_fields)
+    
+    return user_doc
+
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('🌱 saveUser function triggered with dual database support.')
 
@@ -97,6 +195,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             user_type = user_info.get('type', 'consumer')
             logging.info(f"🔍 User type: {user_type}")
             logging.info(f"🔍 User email: {user_info.get('email')}")
+            
+            # FIXED: Log business-specific fields for debugging
+            if user_type == 'business':
+                logging.info(f"🏢 Business name: {user_info.get('businessName')}")
+                logging.info(f"🏢 Business description: {user_info.get('description')}")
+                logging.info(f"🏢 Business address: {user_info.get('address')}")
+                logging.info(f"🏢 Business location: {user_info.get('location')}")
+                logging.info(f"🔔 FCM token: {'Present' if user_info.get('fcmToken') else 'Missing'}")
+                
     except ValueError as json_error:
         logging.error(f"❌ JSON parsing error: {str(json_error)}")
         response = func.HttpResponse(
@@ -137,63 +244,33 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 logging.info(f"🔁 Updating existing {user_type} user: {user_info['email']}")
                 existing_user = existing_users[0]
 
-                # Update these fields if present
-                fields = [
-                    "name", "type", "animals", "kids", "intersted", "businessName", "businessType",
-                    "expoPushToken", "webPushSubscription", "fcmToken", "location", "googleId",
-                    "contactPhone", "address", "businessHours", "socialMedia", "description",
-                    "platform", "notificationSettings"
-                ]
-                for field in fields:
-                    if field in user_info:
-                        existing_user[field] = user_info[field]
+                # FIXED: Create proper update document
+                updated_user = create_user_document(user_info, is_update=True)
+                
+                # Preserve creation timestamp
+                updated_user['createdAt'] = existing_user.get('createdAt', updated_user.get('createdAt'))
+                
+                # Preserve document metadata
+                updated_user['_rid'] = existing_user.get('_rid')
+                updated_user['_self'] = existing_user.get('_self')
+                updated_user['_etag'] = existing_user.get('_etag')
+                updated_user['_attachments'] = existing_user.get('_attachments')
+                updated_user['_ts'] = existing_user.get('_ts')
 
-                # Add timestamp
-                existing_user['updatedAt'] = datetime.utcnow().isoformat()
-
-                user_container.replace_item(item=existing_user['id'], body=existing_user)
+                user_container.replace_item(item=existing_user['id'], body=updated_user)
                 logging.info(f"✅ Successfully updated {user_type} user: {user_info['email']}")
+                
+                return_user = updated_user
             else:
                 logging.info(f"➕ Creating new {user_type} user: {user_info['email']}")
-                new_user = {
-                    "id": user_info["email"],
-                    "email": user_info["email"],
-                    "name": user_info.get("name"),
-                    "type": user_info.get("type", "consumer"),
-                    "animals": user_info.get("animals"),
-                    "kids": user_info.get("kids"),
-                    "intersted": user_info.get("intersted"),
-                    "webPushSubscription": user_info.get("webPushSubscription"),
-                    "fcmToken": user_info.get("fcmToken"),
-                    "location": user_info.get("location"),
-                    "googleId": user_info.get("googleId"),
-                    "expoPushToken": user_info.get("expoPushToken"),
-                    "platform": user_info.get("platform"),
-                    "notificationSettings": user_info.get("notificationSettings", {}),
-                    "createdAt": datetime.utcnow().isoformat(),
-                    "updatedAt": datetime.utcnow().isoformat()
-                }
                 
-                # Add business-specific fields if user type is business
-                if user_info.get('type') == 'business':
-                    business_fields = {
-                        "businessName": user_info.get("businessName"),
-                        "businessType": user_info.get("businessType"),
-                        "contactPhone": user_info.get("contactPhone"),
-                        "address": user_info.get("address", {}),
-                        "businessHours": user_info.get("businessHours", []),
-                        "socialMedia": user_info.get("socialMedia", {}),
-                        "description": user_info.get("description", ""),
-                        "status": "active",
-                        "businessId": user_info["email"],
-                        "rating": 0,
-                        "reviewCount": 0,
-                        "isVerified": False
-                    }
-                    new_user.update(business_fields)
+                # FIXED: Create proper new user document
+                new_user = create_user_document(user_info, is_update=False)
                 
-                user_container.create_item(body=new_user)
+                result = user_container.create_item(body=new_user)
                 logging.info(f"✅ Successfully created {user_type} user: {user_info['email']}")
+                
+                return_user = result
 
             # Handle plant locations (optional) - only if plant container is available
             if "plantLocations" in user_info and plant_container:
@@ -214,7 +291,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     "user": {
                         "email": user_info['email'], 
                         "type": user_info.get('type', 'consumer'),
-                        "database": database_type
+                        "database": database_type,
+                        "businessName": return_user.get('businessName') if user_type == 'business' else None,
+                        "hasLocation": bool(return_user.get('location') or return_user.get('address')),
+                        "hasFcmToken": bool(return_user.get('fcmToken')),
                     }
                 }),
                 status_code=200,
